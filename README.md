@@ -1,29 +1,4 @@
-# Stock Inventory Management System - Next.js, Prisma, PostgreSQL FullStack Project (including Business-Insights Dashboard)
 
-![Screenshot 2025-09-01 at 16 22 30](https://github.com/user-attachments/assets/98e1bde0-f655-4d51-865e-a53bf79b227d)
-![Screenshot 2025-09-01 at 16 22 53](https://github.com/user-attachments/assets/d3ce05ba-8b69-4cf2-a43c-c83440145168)
-![Screenshot 2025-09-01 at 16 26 05](https://github.com/user-attachments/assets/648495c3-5c84-45fa-acc7-3b6d81c6d1e8)
-![Screenshot 2025-09-01 at 16 26 33](https://github.com/user-attachments/assets/8e3843cf-b7f2-4616-a5b0-e4863a3713db)
-![Screenshot 2025-09-01 at 16 26 54](https://github.com/user-attachments/assets/c0119f93-e830-45ba-b6d7-6677fe8ec9d6)
-![Screenshot 2025-09-01 at 16 27 07](https://github.com/user-attachments/assets/74478903-6be5-48f5-b163-dda28957ba1d)
-![Screenshot 2025-09-01 at 16 27 22](https://github.com/user-attachments/assets/0aa8e751-5672-4486-bca1-fe240f0531d3)
-![Screenshot 2025-09-01 at 16 27 32](https://github.com/user-attachments/assets/28932e68-6e8d-4b0c-8706-a5ac3f050e1b)
-![Screenshot 2025-09-01 at 16 27 41](https://github.com/user-attachments/assets/0b4d86f9-39e0-435d-b14e-8385d377c262)
-![Screenshot 2025-09-01 at 16 27 56](https://github.com/user-attachments/assets/3ee2c580-e478-4c72-9d04-b180e78964d0)
-![Screenshot 2025-09-01 at 16 29 59](https://github.com/user-attachments/assets/3b94e1f9-3bba-4fe8-a736-c3d69e508bf3)
-![Screenshot 2025-09-01 at 16 30 16](https://github.com/user-attachments/assets/a071a03c-a095-48d9-8c02-b8a07fb64cf1)
-![Screenshot 2025-09-01 at 16 30 28](https://github.com/user-attachments/assets/0ede9db7-f390-4a4d-a7a5-6d681bd532b4)
-![Screenshot 2025-09-01 at 16 31 17](https://github.com/user-attachments/assets/8996a920-d398-4618-989c-71ebe42e059d)
-![Screenshot 2025-09-01 at 16 31 39](https://github.com/user-attachments/assets/24017eaf-4054-4334-b002-6c40103974ad)
-![Screenshot 2025-09-01 at 16 31 58](https://github.com/user-attachments/assets/7c476153-27b1-47c1-8601-ec027dadcb9c)
-
----
-
-Efficiently manage your product inventory with Stockly—a modern, secure, and responsive inventory management web application built with Next.js, React, Prisma, and PostgreSQL.
-
-- **Live-Demo:** [https://stockly-inventory.vercel.app/](https://stockly-inventory.vercel.app/)
-
----
 
 ## Project Overview
 
