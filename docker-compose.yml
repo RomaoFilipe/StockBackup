@@ -1,13 +1,21 @@
 services:
-  mongo:
-    image: mongo:7
-    container_name: stock-mongo
+  postgres:
+    image: postgres:16
+    container_name: stock-postgres
     restart: unless-stopped
-    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    environment:
+      POSTGRES_USER: stockly
+      POSTGRES_PASSWORD: stockly_password
+      POSTGRES_DB: stockly
     ports:
-      - "27017:27017"
+      - "5432:5432"
     volumes:
-      - mongo_data:/data/db
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stockly -d stockly"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
 volumes:
-  mongo_data:
+  postgres_data:

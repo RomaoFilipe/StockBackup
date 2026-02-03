@@ -84,7 +84,6 @@ const AppTable = React.memo(() => {
           setSelectedStatuses={setSelectedStatuses}
           selectedSuppliers={selectedSuppliers}
           setSelectedSuppliers={setSelectedSuppliers}
-          userId={user.id}
         />
 
         {/* Product Table */}

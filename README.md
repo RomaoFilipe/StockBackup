@@ -183,17 +183,116 @@ stockly/
 
 Este projeto é um Next.js full‑stack (App Router + API Routes) usando Prisma + PostgreSQL.
 
+## ▶️ Como executar numa EC2 (Ubuntu) (PT)
+
+Setup típico: **PostgreSQL em Docker** + **Next.js a correr na máquina (Node)**.
+
+### 0) Pré‑requisitos (EC2)
+
+- Security Group: abrir pelo menos **porta 3000** (ou 80/443 se tiveres Nginx)
+- Instalar Docker + Compose:
+
+```bash
+sudo apt update
+sudo apt install -y ca-certificates curl gnupg
+
+sudo install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+sudo chmod a+r /etc/apt/keyrings/docker.gpg
+
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+  $(. /etc/os-release && echo \"$VERSION_CODENAME\") stable" | \
+  sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+sudo apt update
+sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+sudo usermod -aG docker $USER
+newgrp docker
+```
+
+- Instalar Node.js 20 (recomendado):
+
+```bash
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt install -y nodejs
+node -v
+npm -v
+```
+
+### 1) Clonar e instalar deps (EC2)
+
+```bash
+git clone <URL_DO_REPO>
+cd StockBackup
+npm install
+```
+
+### 2) Configurar `.env` (EC2)
+
+```bash
+cp .env.example .env
+```
+
+Editar `.env` e garantir pelo menos:
+
+```env
+DATABASE_URL="postgresql://stockly:stockly_password@localhost:5432/stockly?schema=public"
+JWT_SECRET="<um-segredo-bom>"
+ALLOW_REGISTRATION="true"
+```
+
+### 3) Subir Postgres (EC2)
+
+```bash
+docker compose up -d
+docker compose ps
+```
+
+### 4) Aplicar migrations (EC2)
+
+```bash
+npx prisma migrate deploy
+```
+
+### 5) Correr a app (EC2)
+
+Dev (mais simples):
+
+```bash
+npm run dev
+```
+
+Ou em background (Linux):
+
+```bash
+nohup npm run dev -- --port 3000 > .next-dev.log 2>&1 &
+echo $! > .next-dev.pid
+tail -f .next-dev.log
+```
+
+Parar:
+
+```bash
+kill $(cat .next-dev.pid)
+```
+
+Notas:
+- O storage é **local em disco** na pasta `storage/` (já existe `storage/.gitkeep`).
+- Em EC2, garante que a pasta `storage/` tem permissões de escrita para o user que corre o Node.
+
 ### 1) Pré‑requisitos
 
 - Node.js `18.17+` (ou `20+` recomendado)
 - `npm`
 - PostgreSQL a correr localmente (ou via Docker)
+- Docker + Docker Compose (recomendado para subir o Postgres)
 
 ### 2) Clonar e instalar dependências
 
 ```bash
 git clone <URL_DO_REPO>
-cd Stock-Inventory-Management-System--NextJS-FullStack
+cd StockBackup
 npm install
 ```
 
@@ -215,8 +314,11 @@ Nota: para permitir registo via UI, define `ALLOW_REGISTRATION=true`.
 ### 4) Preparar a base de dados (Prisma)
 
 ```bash
-# Cria/aplica migrações e gera o Prisma Client
-npm run prisma:migrate
+# Se estiveres a usar Docker para o Postgres:
+docker compose up -d
+
+# Aplica migrações existentes ao Postgres
+npx prisma migrate deploy
 ```
 
 Opcional (ver dados):
@@ -267,7 +369,7 @@ npx prisma migrate deploy
 
    ```bash
    git clone https://github.com/your-username/stockly.git
-   cd stockly
+  cd StockBackup
    ```
 
 2. **Install dependencies**
@@ -494,13 +596,12 @@ Get current user session information.
 ```typescript
 // Response
 {
-  "user": {
-    "id": "507f1f77bcf86cd799439011",
-    "name": "John Doe",
-    "email": "john@example.com",
-    "createdAt": "2024-01-01T00:00:00.000Z",
-    "updatedAt": "2024-01-01T00:00:00.000Z"
-  }
+  "id": "63488876-a7ff-4095-999c-2cc05cfefa7a",
+  "name": "John Doe",
+  "email": "john@example.com",
+  "role": "USER",
+  "createdAt": "2026-02-03T19:57:18.345Z",
+  "updatedAt": "2026-02-03T19:57:18.347Z"
 }
 ```
 
@@ -514,7 +615,7 @@ Get all products for the authenticated user.
 // Response
 [
   {
-    id: "507f1f77bcf86cd799439011",
+    id: "<uuid>",
     name: "Laptop",
     sku: "LAP001",
     price: 999.99,
@@ -900,7 +1001,7 @@ const analyticsData = useMemo(() => {
 ### Environment Variables for Production
 
 ```env
-DATABASE_URL="your-production-mongodb-url"
+DATABASE_URL="postgresql://USER:PASSWORD@HOST:5432/DB?schema=public"
 JWT_SECRET="your-production-jwt-secret"
 ```
 

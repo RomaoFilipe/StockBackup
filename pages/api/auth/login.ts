@@ -95,8 +95,9 @@ export default async function login(req: NextApiRequest, res: NextApiResponse) {
     const cookies = new Cookies(req, res, { secure: isSecure });
     cookies.set("session_id", token, {
       httpOnly: true,
-      secure: isSecure, // Dynamically set secure flag
-      sameSite: "none", // Allow cross-origin cookies
+      secure: isSecure, // Browsers require Secure when SameSite=None
+      sameSite: isSecure ? "none" : "lax",
+      path: "/",
       maxAge: 60 * 60 * 1000, // 1 hour
     });
 
