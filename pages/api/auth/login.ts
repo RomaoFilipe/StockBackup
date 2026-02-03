@@ -1,35 +1,31 @@
 import { NextApiRequest, NextApiResponse } from "next";
+import { prisma } from "@/prisma/client";
 import bcrypt from "bcryptjs";
 import { generateToken } from "../../../utils/auth";
 import Cookies from "cookies";
-import { applyRateLimit } from "../../../utils/rateLimit";
-import { prisma } from "@/prisma/client";
 
 export default async function login(req: NextApiRequest, res: NextApiResponse) {
+  const allowedOrigins = [
+    "https://stockly-inventory.vercel.app",
+    "https://stockly-inventory-managment-nextjs-ovlrz6kdv.vercel.app",
+    "https://stockly-inventory-managment-nextjs-arnob-mahmuds-projects.vercel.app",
+    "https://stockly-inventory-managment-n-git-cc3097-arnob-mahmuds-projects.vercel.app",
+    req.headers.origin,
+  ];
   const origin = req.headers.origin;
-  const configuredOrigins = (process.env.ALLOWED_ORIGINS || "")
-    .split(",")
-    .map((o) => o.trim())
-    .filter(Boolean);
 
-  const forwardedProto = req.headers["x-forwarded-proto"] as string | undefined;
-  const forwardedHost = req.headers["x-forwarded-host"] as string | undefined;
-  const host = forwardedHost || req.headers.host;
-  const proto = forwardedProto || (process.env.NODE_ENV === "development" ? "http" : "https");
-  const sameOrigin = Boolean(origin && host && origin === `${proto}://${host}`);
-
-  if (origin && !sameOrigin) {
-    if (configuredOrigins.includes(origin)) {
-      res.setHeader("Access-Control-Allow-Origin", origin);
-      res.setHeader("Access-Control-Allow-Credentials", "true");
-      res.setHeader("Vary", "Origin");
-    } else {
-      return res.status(403).json({ error: "Origin not allowed" });
-    }
+  if (origin && allowedOrigins.includes(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+  } else {
+    res.setHeader(
+      "Access-Control-Allow-Origin",
+      "https://stockly-inventory.vercel.app"
+    );
   }
 
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.setHeader("Access-Control-Allow-Credentials", "true");
 
   if (req.method === "OPTIONS") {
     return res.status(200).end(); // Handle preflight requests
@@ -37,15 +33,6 @@ export default async function login(req: NextApiRequest, res: NextApiResponse) {
 
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
-  }
-
-  const rate = applyRateLimit(req, res, {
-    windowMs: 10 * 60 * 1000,
-    max: 20,
-    keyPrefix: "login",
-  });
-  if (!rate.ok) {
-    return res.status(429).json({ error: "Too many requests" });
   }
 
   // Defensive: Ensure req.body is an object
@@ -109,16 +96,16 @@ export default async function login(req: NextApiRequest, res: NextApiResponse) {
     cookies.set("session_id", token, {
       httpOnly: true,
       secure: isSecure, // Dynamically set secure flag
-      sameSite: "lax",
-      path: "/",
+      sameSite: "none", // Allow cross-origin cookies
       maxAge: 60 * 60 * 1000, // 1 hour
     });
 
+    console.log("Login successful, session ID set:", token);
     res.status(200).json({
       userId: user.id,
       userName: user.name,
       userEmail: user.email,
-      userRole: user.role,
+      sessionId: token,
     });
   } catch (error) {
     console.error("Login error:", error);

@@ -1,6 +1,6 @@
 import { NextApiRequest, NextApiResponse } from "next";
-import { getSessionServer } from "@/utils/auth";
 import { prisma } from "@/prisma/client";
+import { getSessionServer } from "@/utils/auth";
 
 export default async function handler(
   req: NextApiRequest,
@@ -12,9 +12,7 @@ export default async function handler(
   }
 
   const { method } = req;
-  const isAdmin = session.role === "ADMIN";
-  const asUserIdFromQuery = typeof req.query.asUserId === "string" ? req.query.asUserId : undefined;
-  const userId = isAdmin && asUserIdFromQuery ? asUserIdFromQuery : session.id;
+  const userId = session.id;
 
   switch (method) {
     case "POST":
@@ -44,12 +42,16 @@ export default async function handler(
             supplierId,
             createdAt: new Date(),
           },
-          include: {
-            category: true,
-            supplier: true,
-          },
         });
-
+        
+        // Fetch category and supplier data for the response
+        const category = await prisma.category.findUnique({
+          where: { id: categoryId },
+        });
+        const supplier = await prisma.supplier.findUnique({
+          where: { id: supplierId },
+        });
+        
         // Return the created product data with category and supplier names
         res.status(201).json({
           id: product.id,
@@ -62,8 +64,8 @@ export default async function handler(
           categoryId: product.categoryId,
           supplierId: product.supplierId,
           createdAt: product.createdAt.toISOString(),
-          category: product.category?.name || "Unknown",
-          supplier: product.supplier?.name || "Unknown",
+          category: category?.name || "Unknown",
+          supplier: supplier?.name || "Unknown",
         });
       } catch (error) {
         res.status(500).json({ error: "Failed to create product" });
@@ -74,21 +76,32 @@ export default async function handler(
       try {
         const products = await prisma.product.findMany({
           where: { userId },
-          include: {
-            category: true,
-            supplier: true,
-          },
         });
 
-        const transformedProducts = products.map((product) => {
-          return {
-            ...product,
-            quantity: Number(product.quantity),
-            createdAt: product.createdAt.toISOString(),
-            category: product.category?.name || "Desconhecida",
-            supplier: product.supplier?.name || "Desconhecido",
-          };
-        });
+        // Debug log - only log in development
+        if (process.env.NODE_ENV === 'development') {
+          console.log("Raw products from database:", products);
+        }
+
+        // Fetch category and supplier data separately
+        const transformedProducts = await Promise.all(
+          products.map(async (product) => {
+            const category = await prisma.category.findUnique({
+              where: { id: product.categoryId },
+            });
+            const supplier = await prisma.supplier.findUnique({
+              where: { id: product.supplierId },
+            });
+
+            return {
+              ...product,
+              quantity: Number(product.quantity), // Convert BigInt to Number
+              createdAt: product.createdAt.toISOString(), // Convert `createdAt` to ISO string
+              category: category?.name || "Unknown", // Transform category to string
+              supplier: supplier?.name || "Unknown", // Transform supplier to string
+            };
+          })
+        );
 
         res.status(200).json(transformedProducts);
       } catch (error) {
@@ -109,8 +122,8 @@ export default async function handler(
           supplierId,
         } = req.body;
 
-        const updateResult = await prisma.product.updateMany({
-          where: { id, userId },
+        const updatedProduct = await prisma.product.update({
+          where: { id },
           data: {
             name,
             sku,
@@ -122,21 +135,13 @@ export default async function handler(
           },
         });
 
-        if (updateResult.count === 0) {
-          return res.status(404).json({ error: "Product not found" });
-        }
-
-        const updatedProduct = await prisma.product.findFirst({
-          where: { id, userId },
-          include: {
-            category: true,
-            supplier: true,
-          },
+        // Fetch category and supplier data for the response
+        const category = await prisma.category.findUnique({
+          where: { id: categoryId },
         });
-
-        if (!updatedProduct) {
-          return res.status(404).json({ error: "Product not found" });
-        }
+        const supplier = await prisma.supplier.findUnique({
+          where: { id: supplierId },
+        });
 
         // Return the updated product data with category and supplier names
         res.status(200).json({
@@ -150,8 +155,8 @@ export default async function handler(
           categoryId: updatedProduct.categoryId,
           supplierId: updatedProduct.supplierId,
           createdAt: updatedProduct.createdAt.toISOString(),
-          category: updatedProduct.category?.name || "Unknown",
-          supplier: updatedProduct.supplier?.name || "Unknown",
+          category: category?.name || "Unknown",
+          supplier: supplier?.name || "Unknown",
         });
       } catch (error) {
         res.status(500).json({ error: "Failed to update product" });
@@ -162,13 +167,9 @@ export default async function handler(
       try {
         const { id } = req.body;
 
-        const deleteResult = await prisma.product.deleteMany({
-          where: { id, userId },
+        await prisma.product.delete({
+          where: { id },
         });
-
-        if (deleteResult.count === 0) {
-          return res.status(404).json({ error: "Product not found" });
-        }
 
         res.status(204).end();
       } catch (error) {

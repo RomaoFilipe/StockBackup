@@ -1,7 +1,6 @@
 import { NextApiRequest, NextApiResponse } from "next";
-import { getSessionServer } from "@/utils/auth";
 import { prisma } from "@/prisma/client";
-import { Prisma } from "@prisma/client";
+import { getSessionServer } from "@/utils/auth";
 
 export default async function handler(
   req: NextApiRequest,
@@ -13,8 +12,7 @@ export default async function handler(
   }
 
   const { method } = req;
-  const asUserId = typeof req.query.asUserId === "string" ? req.query.asUserId : undefined;
-  const userId = session.role === "ADMIN" && asUserId ? asUserId : session.id;
+  const userId = session.id;
 
   switch (method) {
     case "POST":
@@ -28,13 +26,6 @@ export default async function handler(
         });
         res.status(201).json(supplier);
       } catch (error) {
-        if (error instanceof Prisma.PrismaClientKnownRequestError) {
-          if (error.code === "P2002") {
-            return res.status(400).json({
-              error: "Supplier name must be unique per user",
-            });
-          }
-        }
         console.error("Error creating supplier:", error);
         res.status(500).json({ error: "Failed to create supplier" });
       }
@@ -58,17 +49,9 @@ export default async function handler(
           return res.status(400).json({ error: "ID and name are required" });
         }
 
-        const updateResult = await prisma.supplier.updateMany({
-          where: { id, userId },
+        const updatedSupplier = await prisma.supplier.update({
+          where: { id },
           data: { name },
-        });
-
-        if (updateResult.count === 0) {
-          return res.status(404).json({ error: "Supplier not found" });
-        }
-
-        const updatedSupplier = await prisma.supplier.findFirst({
-          where: { id, userId },
         });
 
         res.status(200).json(updatedSupplier);
@@ -81,13 +64,17 @@ export default async function handler(
       try {
         const { id } = req.body;
 
-        const deleteResult = await prisma.supplier.deleteMany({
-          where: { id, userId },
+        const supplier = await prisma.supplier.findUnique({
+          where: { id },
         });
 
-        if (deleteResult.count === 0) {
+        if (!supplier) {
           return res.status(404).json({ error: "Supplier not found" });
         }
+
+        await prisma.supplier.delete({
+          where: { id },
+        });
 
         res.status(204).end();
       } catch (error) {
