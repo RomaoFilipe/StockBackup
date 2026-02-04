@@ -8,6 +8,7 @@ const createInvoiceSchema = z.object({
   asUserId: z.string().uuid().optional(),
   productId: z.string().uuid(),
   requestId: z.string().uuid().optional(),
+  reqNumber: z.string().max(64).optional(),
   invoiceNumber: z.string().min(1).max(64),
   issuedAt: z.string().datetime().optional(),
   quantity: z.number().int().nonnegative(),
@@ -84,7 +85,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(400).json({ error: "Invalid request body" });
     }
 
-    const { asUserId, productId, requestId, invoiceNumber, issuedAt, quantity, unitPrice, notes } = parsed.data;
+    const { asUserId, productId, requestId, reqNumber, invoiceNumber, issuedAt, quantity, unitPrice, notes } = parsed.data;
     const actingUserId = isAdmin && asUserId ? asUserId : session.id;
 
     try {
@@ -117,6 +118,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           userId: actingUserId,
           productId,
           requestId,
+          reqNumber: reqNumber ?? null,
           invoiceNumber,
           issuedAt: issuedAt ? new Date(issuedAt) : new Date(),
           quantity: BigInt(quantity) as any,

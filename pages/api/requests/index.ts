@@ -3,20 +3,146 @@ import { z } from "zod";
 import { prisma } from "@/prisma/client";
 import { getSessionServer } from "@/utils/auth";
 
+const goodsTypeSchema = z.enum(["MATERIALS_SERVICES", "WAREHOUSE_MATERIALS", "OTHER_PRODUCTS"]);
+
+const dateLikeString = z
+  .string()
+  .min(1)
+  .refine((v) => !Number.isNaN(new Date(v).getTime()), "Invalid date")
+  .transform((v) => new Date(v));
+
 const createRequestSchema = z.object({
   asUserId: z.string().uuid().optional(),
   title: z.string().min(1).max(120).optional(),
   notes: z.string().max(1000).optional(),
+  requestedAt: dateLikeString.optional(),
+
+  requestingService: z.string().max(120).optional(),
+  requesterName: z.string().max(120).optional(),
+  requesterEmployeeNo: z.string().max(60).optional(),
+  deliveryLocation: z.string().max(200).optional(),
+  expectedDeliveryFrom: dateLikeString.optional(),
+  expectedDeliveryTo: dateLikeString.optional(),
+  goodsTypes: z.array(goodsTypeSchema).optional(),
+
+  supplierOption1: z.string().max(200).optional(),
+  supplierOption2: z.string().max(200).optional(),
+  supplierOption3: z.string().max(200).optional(),
   items: z
     .array(
       z.object({
         productId: z.string().uuid(),
         quantity: z.number().int().positive(),
         notes: z.string().max(500).optional(),
+        unit: z.string().max(60).optional(),
+        reference: z.string().max(120).optional(),
+        destination: z.string().max(120).optional(),
       })
     )
     .min(1),
 });
+
+function formatGtmiNumber(gtmiYear: number, gtmiSeq: number) {
+  return `GTMI-${gtmiYear}-${String(gtmiSeq).padStart(6, "0")}`;
+}
+
+async function createRequestWithGtmiSeq(args: {
+  userId: string;
+  createdByUserId: string;
+  title?: string;
+  notes?: string;
+  requestedAt: Date;
+  requestingService?: string;
+  requesterName?: string;
+  requesterEmployeeNo?: string;
+  deliveryLocation?: string;
+  expectedDeliveryFrom?: Date;
+  expectedDeliveryTo?: Date;
+  goodsTypes: Array<z.infer<typeof goodsTypeSchema>>;
+  supplierOption1?: string;
+  supplierOption2?: string;
+  supplierOption3?: string;
+  items: Array<{
+    productId: string;
+    quantity: number;
+    notes?: string;
+    unit?: string;
+    reference?: string;
+    destination?: string;
+  }>;
+}) {
+  const gtmiYear = args.requestedAt.getFullYear();
+
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      return await prisma.$transaction(async (tx) => {
+        const maxSeq = await tx.request.aggregate({
+          where: { userId: args.userId, gtmiYear },
+          _max: { gtmiSeq: true },
+        });
+
+        const nextSeq = (maxSeq._max.gtmiSeq ?? 0) + 1;
+        const gtmiNumber = formatGtmiNumber(gtmiYear, nextSeq);
+
+        const created = await tx.request.create({
+          data: {
+            userId: args.userId,
+            createdByUserId: args.createdByUserId,
+            status: "SUBMITTED",
+
+            title: args.title,
+            notes: args.notes,
+
+            gtmiYear,
+            gtmiSeq: nextSeq,
+            gtmiNumber,
+            requestedAt: args.requestedAt,
+
+            requestingService: args.requestingService,
+            requesterName: args.requesterName,
+            requesterEmployeeNo: args.requesterEmployeeNo,
+            deliveryLocation: args.deliveryLocation,
+            expectedDeliveryFrom: args.expectedDeliveryFrom,
+            expectedDeliveryTo: args.expectedDeliveryTo,
+            goodsTypes: args.goodsTypes,
+            supplierOption1: args.supplierOption1,
+            supplierOption2: args.supplierOption2,
+            supplierOption3: args.supplierOption3,
+
+            items: {
+              create: args.items.map((i) => ({
+                productId: i.productId,
+                quantity: BigInt(i.quantity) as any,
+                notes: i.notes,
+                unit: i.unit,
+                reference: i.reference,
+                destination: i.destination,
+              })),
+            },
+          },
+          include: {
+            user: { select: { id: true, name: true, email: true } },
+            createdBy: { select: { id: true, name: true, email: true } },
+            items: {
+              include: { product: { select: { id: true, name: true, sku: true } } },
+              orderBy: { createdAt: "asc" },
+            },
+          },
+        });
+
+        return created;
+      });
+    } catch (error: any) {
+      // P2002 = Unique constraint violation (race on gtmiSeq or gtmiNumber)
+      if (error?.code === "P2002" && attempt < 4) {
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  throw new Error("Failed to allocate GTMI sequence");
+}
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const session = await getSessionServer(req, res);
@@ -32,10 +158,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     try {
       const requests = await prisma.request.findMany({
         where: { userId },
-        orderBy: { createdAt: "desc" },
+        orderBy: { requestedAt: "desc" },
         include: {
           user: { select: { id: true, name: true, email: true } },
           createdBy: { select: { id: true, name: true, email: true } },
+          signedBy: { select: { id: true, name: true, email: true } },
           invoices: {
             select: {
               id: true,
@@ -59,6 +186,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           ...r,
           createdAt: r.createdAt.toISOString(),
           updatedAt: r.updatedAt.toISOString(),
+          requestedAt: r.requestedAt.toISOString(),
+          expectedDeliveryFrom: r.expectedDeliveryFrom ? r.expectedDeliveryFrom.toISOString() : null,
+          expectedDeliveryTo: r.expectedDeliveryTo ? r.expectedDeliveryTo.toISOString() : null,
+          signedAt: r.signedAt ? r.signedAt.toISOString() : null,
           invoices: r.invoices.map((inv) => ({
             ...inv,
             issuedAt: inv.issuedAt.toISOString(),
@@ -83,7 +214,23 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(400).json({ error: "Invalid request body" });
     }
 
-    const { asUserId, title, notes, items } = parsed.data;
+    const {
+      asUserId,
+      title,
+      notes,
+      requestedAt,
+      requestingService,
+      requesterName,
+      requesterEmployeeNo,
+      deliveryLocation,
+      expectedDeliveryFrom,
+      expectedDeliveryTo,
+      goodsTypes,
+      supplierOption1,
+      supplierOption2,
+      supplierOption3,
+      items,
+    } = parsed.data;
     const createForUserId = isAdmin && asUserId ? asUserId : session.id;
 
     try {
@@ -100,35 +247,33 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         return res.status(404).json({ error: "One or more products were not found" });
       }
 
-      const created = await prisma.request.create({
-        data: {
-          userId: createForUserId,
-          createdByUserId: session.id,
-          title,
-          notes,
-          status: "SUBMITTED",
-          items: {
-            create: items.map((i) => ({
-              productId: i.productId,
-              quantity: BigInt(i.quantity) as any,
-              notes: i.notes,
-            })),
-          },
-        },
-        include: {
-          user: { select: { id: true, name: true, email: true } },
-          createdBy: { select: { id: true, name: true, email: true } },
-          items: {
-            include: { product: { select: { id: true, name: true, sku: true } } },
-            orderBy: { createdAt: "asc" },
-          },
-        },
+      const effectiveRequestedAt = requestedAt ?? new Date();
+      const created = await createRequestWithGtmiSeq({
+        userId: createForUserId,
+        createdByUserId: session.id,
+        title,
+        notes,
+        requestedAt: effectiveRequestedAt,
+        requestingService,
+        requesterName,
+        requesterEmployeeNo,
+        deliveryLocation,
+        expectedDeliveryFrom,
+        expectedDeliveryTo,
+        goodsTypes: goodsTypes ?? [],
+        supplierOption1,
+        supplierOption2,
+        supplierOption3,
+        items,
       });
 
       return res.status(201).json({
         ...created,
         createdAt: created.createdAt.toISOString(),
         updatedAt: created.updatedAt.toISOString(),
+        requestedAt: created.requestedAt.toISOString(),
+        expectedDeliveryFrom: created.expectedDeliveryFrom ? created.expectedDeliveryFrom.toISOString() : null,
+        expectedDeliveryTo: created.expectedDeliveryTo ? created.expectedDeliveryTo.toISOString() : null,
         items: created.items.map((it) => ({
           ...it,
           quantity: Number(it.quantity),

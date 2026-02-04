@@ -4,6 +4,7 @@
 export interface Product {
   id: string;
   name: string;
+  description?: string | null;
   sku: string;
   price: number;
   quantity: number;
@@ -23,12 +24,26 @@ export interface ProductInvoice {
   productId: string;
   requestId?: string | null;
   invoiceNumber: string;
+  reqNumber?: string | null;
   issuedAt: Date | string;
   quantity: number;
   unitPrice: number;
   notes?: string | null;
   createdAt?: Date | string;
   updatedAt?: Date | string;
+}
+
+export type ProductUnitStatus = "IN_STOCK" | "ACQUIRED";
+
+export interface ProductUnit {
+  id: string;
+  code: string;
+  status: ProductUnitStatus;
+  productId: string;
+  invoiceId?: string | null;
+  acquiredByUserId?: string | null;
+  createdAt: Date | string;
+  acquiredAt?: Date | string | null;
 }
 
 // Define the Supplier interface

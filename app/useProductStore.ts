@@ -25,8 +25,8 @@ interface ProductState {
   editCategory: (categoryId: string, newCategoryName: string) => void;
   deleteCategory: (categoryId: string) => void;
   addSupplier: (supplier: Supplier) => void;
-  editSupplier: (oldName: string, newName: string) => void;
-  deleteSupplier: (name: string) => void;
+  editSupplier: (supplierId: string, newSupplierName: string) => void;
+  deleteSupplier: (supplierId: string) => void;
 }
 
 export const useProductStore = create<ProductState>((set) => ({

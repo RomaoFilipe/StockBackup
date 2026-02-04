@@ -11,17 +11,22 @@ import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import Papa from "papaparse";
 import * as ExcelJS from "exceljs";
-import { Search, SlidersHorizontal, MoreHorizontal, Download, X } from "lucide-react";
+import { Plus, Search, SlidersHorizontal, MoreHorizontal, Download, X } from "lucide-react";
 import { CategoryDropDown } from "./AppTable/dropdowns/CategoryDropDown";
 import { StatusDropDown } from "./AppTable/dropdowns/StatusDropDown";
 import { SuppliersDropDown } from "./AppTable/dropdowns/SupplierDropDown";
+import AddProductDialog from "./AppTable/ProductDialog/AddProductDialog";
+import AddCategoryDialog from "./AppTable/ProductDialog/AddCategoryDialog";
+import AddSupplierDialog from "./AppTable/ProductDialog/AddSupplierDialog";
 import PaginationSelection, {
   PaginationType,
 } from "./Products/PaginationSelection";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -33,6 +38,7 @@ import {
 } from "@/components/ui/dialog";
 
 type FiltersAndActionsProps = {
+  userId: string;
   allProducts: Product[];
   selectedCategory: string[];
   setSelectedCategory: Dispatch<SetStateAction<string[]>>;
@@ -62,6 +68,7 @@ function formatProductStatus(status: string) {
 }
 
 export default function FiltersAndActions({
+  userId,
   allProducts,
   selectedCategory,
   setSelectedCategory,
@@ -226,39 +233,61 @@ export default function FiltersAndActions({
             />
             {searchTerm && (
               <Button
+                type="button"
                 variant="ghost"
                 size="icon"
-                onClick={() => setSearchTerm("")}
                 className="absolute right-2 top-1/2 h-8 w-8 -translate-y-1/2 rounded-full"
+                onClick={() => setSearchTerm("")}
+                aria-label="Limpar pesquisa"
               >
                 <X className="h-4 w-4" />
               </Button>
             )}
           </div>
-          <div className="hidden items-center gap-2 lg:flex">
-            <CategoryDropDown
-              selectedCategory={selectedCategory}
-              setSelectedCategory={setSelectedCategory}
-              buttonVariant="outline"
-              buttonClassName="h-11 rounded-full px-4"
-              label="Categoria"
-            />
-            <StatusDropDown
-              selectedStatuses={selectedStatuses}
-              setSelectedStatuses={setSelectedStatuses}
-              buttonVariant="outline"
-              buttonClassName="h-11 rounded-full px-4"
-              label="Estado"
-            />
-            <SuppliersDropDown
-              selectedSuppliers={selectedSuppliers}
-              setSelectedSuppliers={setSelectedSuppliers}
-              buttonVariant="outline"
-              buttonClassName="h-11 rounded-full px-4"
-              label="Fornecedor"
-            />
-          </div>
+
+          <CategoryDropDown
+            selectedCategory={selectedCategory}
+            setSelectedCategory={setSelectedCategory}
+            buttonVariant="outline"
+            buttonClassName="h-11 rounded-full px-4"
+            label="Categoria"
+          />
+          <StatusDropDown
+            selectedStatuses={selectedStatuses}
+            setSelectedStatuses={setSelectedStatuses}
+            buttonVariant="outline"
+            buttonClassName="h-11 rounded-full px-4"
+            label="Estado"
+          />
+          <SuppliersDropDown
+            selectedSuppliers={selectedSuppliers}
+            setSelectedSuppliers={setSelectedSuppliers}
+            buttonVariant="outline"
+            buttonClassName="h-11 rounded-full px-4"
+            label="Fornecedor"
+          />
           <div className="flex items-center gap-2 lg:hidden">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button size="sm" className="h-10 gap-2 rounded-full">
+                  <Plus className="h-4 w-4" />
+                  Criar
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-56">
+                <DropdownMenuLabel>Criar</DropdownMenuLabel>
+                <DropdownMenuGroup>
+                  <AddProductDialog
+                    allProducts={allProducts}
+                    userId={userId}
+                    trigger={<DropdownMenuItem>Produto</DropdownMenuItem>}
+                  />
+                  <AddCategoryDialog trigger={<DropdownMenuItem>Categoria</DropdownMenuItem>} />
+                  <AddSupplierDialog trigger={<DropdownMenuItem>Fornecedor</DropdownMenuItem>} />
+                </DropdownMenuGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
             <Dialog open={isFilterOpen} onOpenChange={setIsFilterOpen}>
               <DialogTrigger asChild>
                 <Button variant="outline" size="sm" className="h-10 gap-2 rounded-full">
@@ -319,6 +348,7 @@ export default function FiltersAndActions({
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-52">
+                <DropdownMenuLabel>Exportar</DropdownMenuLabel>
                 <DropdownMenuItem onClick={exportToCSV}>
                   <Download className="h-4 w-4" />
                   Exportar CSV
@@ -333,6 +363,27 @@ export default function FiltersAndActions({
         </div>
 
         <div className="hidden items-center gap-3 lg:flex">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button className="h-11 gap-2 rounded-full px-5 font-semibold">
+                <Plus className="h-4 w-4" />
+                Criar
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-56">
+              <DropdownMenuLabel>Criar</DropdownMenuLabel>
+              <DropdownMenuGroup>
+                <AddProductDialog
+                  allProducts={allProducts}
+                  userId={userId}
+                  trigger={<DropdownMenuItem>Produto</DropdownMenuItem>}
+                />
+                <AddCategoryDialog trigger={<DropdownMenuItem>Categoria</DropdownMenuItem>} />
+                <AddSupplierDialog trigger={<DropdownMenuItem>Fornecedor</DropdownMenuItem>} />
+              </DropdownMenuGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
           <PaginationSelection
             pagination={pagination}
             setPagination={setPagination}
@@ -370,7 +421,6 @@ export default function FiltersAndActions({
     </div>
   );
 }
-
 // Add the FilterArea component here
 function FilterArea({
   selectedStatuses,
@@ -406,7 +456,6 @@ function FilterArea({
           </Badge>
         </div>
       )}
-
       {selectedCategories.length > 0 && (
         <div className="flex items-center gap-2 rounded-full border border-border/60 bg-muted/40 px-3 py-1 text-xs text-muted-foreground">
           <span>Categoria</span>

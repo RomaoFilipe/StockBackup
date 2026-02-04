@@ -242,6 +242,43 @@ JWT_SECRET="<um-segredo-bom>"
 ALLOW_REGISTRATION="true"
 ```
 
+### ✅ Comandos rápidos (EC2) (copy/paste)
+
+Assumindo que já tens **Docker/Compose** e **Node.js** instalados e que o `.env` está configurado:
+
+```bash
+# 1) Ir para o projeto
+cd ~/StockBackup
+
+# 2) Subir a base de dados (Postgres)
+docker compose up -d postgres
+
+# 3) Instalar deps
+npm install
+
+# 4) Aplicar migrations
+npm run prisma:deploy
+
+# 5) Rodar a app (Next.js)
+npm run dev
+```
+
+Prisma Studio (opcional):
+
+```bash
+npm run prisma:studio -- --port 5555 --hostname 0.0.0.0
+```
+
+Se não conseguires abrir no browser (sem mexer no Security Group), usa túnel SSH:
+
+```bash
+# App
+ssh -L 3000:localhost:3000 ubuntu@<IP_DA_EC2>
+
+# Prisma Studio
+ssh -L 5555:localhost:5555 ubuntu@<IP_DA_EC2>
+```
+
 ### 3) Subir Postgres (EC2)
 
 ```bash

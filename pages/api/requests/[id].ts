@@ -7,6 +7,12 @@ const updateSchema = z.object({
   status: z.enum(["DRAFT", "SUBMITTED", "APPROVED", "REJECTED", "FULFILLED"]).optional(),
   title: z.string().min(1).max(120).optional(),
   notes: z.string().max(1000).optional(),
+  sign: z
+    .object({
+      name: z.string().min(1).max(120),
+      title: z.string().max(120).optional(),
+    })
+    .optional(),
 });
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -20,13 +26,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(400).json({ error: "Invalid request id" });
   }
 
-  const userId = session.id;
+  const isAdmin = session.role === "ADMIN";
+  const asUserIdFromQuery = typeof req.query.asUserId === "string" ? req.query.asUserId : undefined;
+  const userId = isAdmin && asUserIdFromQuery ? asUserIdFromQuery : session.id;
 
   if (req.method === "GET") {
     try {
       const request = await prisma.request.findFirst({
         where: { id, userId },
         include: {
+          user: { select: { id: true, name: true, email: true } },
+          createdBy: { select: { id: true, name: true, email: true } },
+          signedBy: { select: { id: true, name: true, email: true } },
           items: {
             include: { product: { select: { id: true, name: true, sku: true } } },
             orderBy: { createdAt: "asc" },
@@ -42,6 +53,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         ...request,
         createdAt: request.createdAt.toISOString(),
         updatedAt: request.updatedAt.toISOString(),
+        requestedAt: request.requestedAt.toISOString(),
+        expectedDeliveryFrom: request.expectedDeliveryFrom
+          ? request.expectedDeliveryFrom.toISOString()
+          : null,
+        expectedDeliveryTo: request.expectedDeliveryTo ? request.expectedDeliveryTo.toISOString() : null,
+        signedAt: request.signedAt ? request.signedAt.toISOString() : null,
         items: request.items.map((it) => ({
           ...it,
           quantity: Number(it.quantity),
@@ -62,9 +79,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     try {
+      const { sign, ...rest } = parsed.data;
+      const updateData: any = { ...rest };
+      if (sign) {
+        updateData.signedAt = new Date();
+        updateData.signedByName = sign.name;
+        updateData.signedByTitle = sign.title ?? null;
+        updateData.signedByUserId = session.id;
+      }
+
       const updated = await prisma.request.updateMany({
         where: { id, userId },
-        data: parsed.data,
+        data: updateData,
       });
 
       if (updated.count === 0) {
@@ -74,6 +100,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const request = await prisma.request.findFirst({
         where: { id, userId },
         include: {
+          user: { select: { id: true, name: true, email: true } },
+          createdBy: { select: { id: true, name: true, email: true } },
+          signedBy: { select: { id: true, name: true, email: true } },
           items: {
             include: { product: { select: { id: true, name: true, sku: true } } },
             orderBy: { createdAt: "asc" },
@@ -89,6 +118,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         ...request,
         createdAt: request.createdAt.toISOString(),
         updatedAt: request.updatedAt.toISOString(),
+        requestedAt: request.requestedAt.toISOString(),
+        expectedDeliveryFrom: request.expectedDeliveryFrom
+          ? request.expectedDeliveryFrom.toISOString()
+          : null,
+        expectedDeliveryTo: request.expectedDeliveryTo ? request.expectedDeliveryTo.toISOString() : null,
+        signedAt: request.signedAt ? request.signedAt.toISOString() : null,
         items: request.items.map((it) => ({
           ...it,
           quantity: Number(it.quantity),

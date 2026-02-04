@@ -25,7 +25,7 @@ export default function AddSupplierDialog({ trigger }: { trigger?: React.ReactNo
   const [newSupplierName, setNewSupplierName] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false); // Button loading state
   const [isEditing, setIsEditing] = useState(false); // Loading state for edit
-  const [isDeleting, setIsDeleting] = useState(false); // Loading state for delete
+  const [deletingSupplierId, setDeletingSupplierId] = useState<string | null>(null);
   const {
     suppliers,
     addSupplier,
@@ -45,8 +45,8 @@ export default function AddSupplierDialog({ trigger }: { trigger?: React.ReactNo
   const handleAddSupplier = async () => {
     if (supplierName.trim() === "") {
       toast({
-        title: "Error",
-        description: "Supplier name cannot be empty",
+        title: "Erro",
+        description: "O nome do fornecedor não pode estar vazio.",
         variant: "destructive",
       });
       return;
@@ -67,14 +67,15 @@ export default function AddSupplierDialog({ trigger }: { trigger?: React.ReactNo
       addSupplier(newSupplier);
       setSupplierName("");
       toast({
-        title: "Supplier Created Successfully!",
-        description: `"${supplierName}" has been added to your suppliers.`,
+        title: "Fornecedor criado",
+        description: `"${supplierName}" foi adicionado.`,
       });
+      loadSuppliers();
     } catch (error) {
       console.error("Error adding supplier:", error);
       toast({
-        title: "Creation Failed",
-        description: "Failed to create the supplier. Please try again.",
+        title: "Falha ao criar",
+        description: "Não foi possível criar o fornecedor. Tenta novamente.",
         variant: "destructive",
       });
     } finally {
@@ -85,8 +86,8 @@ export default function AddSupplierDialog({ trigger }: { trigger?: React.ReactNo
   const handleEditSupplier = async (supplierId: string) => {
     if (newSupplierName.trim() === "") {
       toast({
-        title: "Error",
-        description: "Supplier name cannot be empty",
+        title: "Erro",
+        description: "O nome do fornecedor não pode estar vazio.",
         variant: "destructive",
       });
       return;
@@ -108,14 +109,15 @@ export default function AddSupplierDialog({ trigger }: { trigger?: React.ReactNo
       setEditingSupplier(null);
       setNewSupplierName("");
       toast({
-        title: "Supplier Updated Successfully!",
-        description: `"${newSupplierName}" has been updated in your suppliers.`,
+        title: "Fornecedor atualizado",
+        description: `"${updatedSupplier.name}" foi atualizado.`,
       });
+      loadSuppliers();
     } catch (error) {
       console.error("Error editing supplier:", error);
       toast({
-        title: "Update Failed",
-        description: "Failed to update the supplier. Please try again.",
+        title: "Falha ao atualizar",
+        description: "Não foi possível atualizar o fornecedor. Tenta novamente.",
         variant: "destructive",
       });
     } finally {
@@ -124,7 +126,7 @@ export default function AddSupplierDialog({ trigger }: { trigger?: React.ReactNo
   };
 
   const handleDeleteSupplier = async (supplierId: string) => {
-    setIsDeleting(true); // Start loading
+    setDeletingSupplierId(supplierId);
 
     // Find the supplier name before deleting for the toast message
     const supplierToDelete = suppliers.find(sup => sup.id === supplierId);
@@ -141,18 +143,19 @@ export default function AddSupplierDialog({ trigger }: { trigger?: React.ReactNo
 
       deleteSupplier(supplierId);
       toast({
-        title: "Supplier Deleted Successfully!",
-        description: `"${supplierName}" has been permanently deleted.`,
+        title: "Fornecedor removido",
+        description: `"${supplierName}" foi removido.`,
       });
+      loadSuppliers();
     } catch (error) {
       console.error("Error deleting supplier:", error);
       toast({
-        title: "Delete Failed",
-        description: "Failed to delete the supplier. Please try again.",
+        title: "Falha ao remover",
+        description: "Não foi possível remover o fornecedor. Tenta novamente.",
         variant: "destructive",
       });
     } finally {
-      setIsDeleting(false); // Stop loading
+      setDeletingSupplierId(null);
     }
   };
 
@@ -193,15 +196,17 @@ export default function AddSupplierDialog({ trigger }: { trigger?: React.ReactNo
           <Button
             onClick={handleAddSupplier}
             className="h-11 w-full sm:w-auto px-11"
-            disabled={isSubmitting} // Button loading effect
+            isLoading={isSubmitting}
           >
-            {isSubmitting ? "A criar..." : "Adicionar fornecedor"}
+            Adicionar fornecedor
           </Button>
         </DialogFooter>
         <div className="mt-4">
           <h3 className="text-lg font-semibold">Fornecedores</h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mt-4">
-            {suppliers.map((supplier) => (
+            {suppliers
+              .filter((supplier) => supplier.userId === user?.id)
+              .map((supplier) => (
               <div
                 key={supplier.id}
                 className="p-4 border rounded-lg shadow-sm flex flex-col justify-between"
@@ -218,15 +223,16 @@ export default function AddSupplierDialog({ trigger }: { trigger?: React.ReactNo
                       <Button
                         onClick={() => handleEditSupplier(supplier.id)}
                         className="h-8 w-full"
-                        disabled={isEditing}
+                        isLoading={isEditing}
                       >
-                        {isEditing ? "Saving..." : "Save"}
+                        Guardar
                       </Button>
                       <Button
                         onClick={() => setEditingSupplier(null)}
+                        variant="outline"
                         className="h-8 w-full"
                       >
-                        Cancel
+                        Cancelar
                       </Button>
                     </div>
                   </div>
@@ -239,16 +245,18 @@ export default function AddSupplierDialog({ trigger }: { trigger?: React.ReactNo
                           setEditingSupplier(supplier.id);
                           setNewSupplierName(supplier.name);
                         }}
+                        variant="outline"
                         className="h-8 w-full"
                       >
                         <FaEdit />
                       </Button>
                       <Button
                         onClick={() => handleDeleteSupplier(supplier.id)}
+                        variant="destructive"
                         className="h-8 w-full"
-                        disabled={isDeleting}
+                        isLoading={deletingSupplierId === supplier.id}
                       >
-                        {isDeleting ? "Deleting..." : <FaTrash />}
+                        <FaTrash />
                       </Button>
                     </div>
                   </div>

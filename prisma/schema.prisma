@@ -25,16 +25,28 @@ model User {
 
   role UserRole @default(USER)
 
-  products   Product[]
-  categories Category[]
-  suppliers  Supplier[]
+  products        Product[]
+  categories      Category[]
+  suppliers       Supplier[]
   productInvoices ProductInvoice[]
+
+  units ProductUnit[]
+
+  acquiredUnits ProductUnit[] @relation("ProductUnitAcquiredBy")
+
+  assignedUnits ProductUnit[] @relation("ProductUnitAssignedTo")
 
   requests Request[]
 
   createdRequests Request[] @relation("RequestCreatedBy")
 
+  signedRequests Request[] @relation("RequestSignedBy")
+
   storedFiles StoredFile[]
+
+  stockMovements           StockMovement[] @relation("StockMovementTenant")
+  stockMovementsPerformed  StockMovement[] @relation("StockMovementPerformedBy")
+  stockMovementsAssignedTo StockMovement[] @relation("StockMovementAssignedTo")
 }
 
 model Category {
@@ -70,14 +82,15 @@ model Supplier {
 }
 
 model Product {
-  id        String   @id @default(uuid()) @db.Uuid
-  name      String
-  sku       String   @unique
-  price     Float
-  quantity  BigInt
-  status    String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @default(now()) @updatedAt
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String
+  description String?
+  sku         String   @unique
+  price       Float
+  quantity    BigInt
+  status      String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now()) @updatedAt
 
   userId     String @db.Uuid
   categoryId String @db.Uuid
@@ -89,7 +102,11 @@ model Product {
 
   invoices ProductInvoice[]
 
+  units ProductUnit[]
+
   requestItems RequestItem[]
+
+  stockMovements StockMovement[]
 
   @@index([userId])
   @@index([categoryId])
@@ -104,13 +121,44 @@ enum RequestStatus {
   FULFILLED
 }
 
+enum RequestGoodsType {
+  MATERIALS_SERVICES
+  WAREHOUSE_MATERIALS
+  OTHER_PRODUCTS
+}
+
 model Request {
-  id        String        @id @default(uuid()) @db.Uuid
-  status    RequestStatus @default(DRAFT)
-  title     String?
-  notes     String?
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @default(now()) @updatedAt
+  id         String        @id @default(uuid()) @db.Uuid
+  status     RequestStatus @default(DRAFT)
+  title      String?
+  notes      String?
+  gtmiYear   Int
+  gtmiSeq    Int
+  gtmiNumber String
+
+  requestedAt DateTime @default(now())
+
+  requestingService    String?
+  requesterName        String?
+  requesterEmployeeNo  String?
+  deliveryLocation     String?
+  expectedDeliveryFrom DateTime?
+  expectedDeliveryTo   DateTime?
+
+  goodsTypes RequestGoodsType[] @default([])
+
+  supplierOption1 String?
+  supplierOption2 String?
+  supplierOption3 String?
+
+  signedAt       DateTime?
+  signedByName   String?
+  signedByTitle  String?
+  signedByUserId String? @db.Uuid
+  signedBy       User?   @relation("RequestSignedBy", fields: [signedByUserId], references: [id], onDelete: SetNull)
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @default(now()) @updatedAt
 
   // Who the request is for (requester/owner)
   userId String @db.Uuid
@@ -126,22 +174,32 @@ model Request {
 
   files StoredFile[]
 
+  stockMovements StockMovement[]
+
+  @@unique([userId, gtmiNumber])
+  @@unique([userId, gtmiYear, gtmiSeq])
   @@index([userId])
   @@index([createdByUserId])
   @@index([status])
+  @@index([requestedAt])
+  @@index([signedAt])
+  @@index([signedByUserId])
 }
 
 model RequestItem {
-  id        String   @id @default(uuid()) @db.Uuid
-  quantity  BigInt
-  notes     String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @default(now()) @updatedAt
+  id          String   @id @default(uuid()) @db.Uuid
+  quantity    BigInt
+  notes       String?
+  unit        String?
+  reference   String?
+  destination String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now()) @updatedAt
 
-  requestId String @db.Uuid
+  requestId String  @db.Uuid
   request   Request @relation(fields: [requestId], references: [id], onDelete: Cascade)
 
-  productId String @db.Uuid
+  productId String  @db.Uuid
   product   Product @relation(fields: [productId], references: [id], onDelete: Restrict)
 
   @@index([requestId])
@@ -151,6 +209,7 @@ model RequestItem {
 model ProductInvoice {
   id            String   @id @default(uuid()) @db.Uuid
   invoiceNumber String
+  reqNumber     String?
   issuedAt      DateTime @default(now())
   quantity      BigInt
   unitPrice     Float
@@ -171,10 +230,113 @@ model ProductInvoice {
 
   files StoredFile[]
 
+  units ProductUnit[]
+
+  stockMovements StockMovement[]
+
   @@unique([userId, invoiceNumber])
   @@index([userId])
   @@index([productId])
   @@index([requestId])
+}
+
+enum ProductUnitStatus {
+  IN_STOCK
+  ACQUIRED
+}
+
+model ProductUnit {
+  id     String            @id @default(uuid()) @db.Uuid
+  code   String            @unique
+  status ProductUnitStatus @default(IN_STOCK)
+
+  // Optional identification fields per unit
+  serialNumber String?
+  partNumber   String?
+  assetTag     String?
+  notes        String?
+
+  createdAt  DateTime  @default(now())
+  acquiredAt DateTime?
+
+  userId String @db.Uuid
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  productId String  @db.Uuid
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  invoiceId String?         @db.Uuid
+  invoice   ProductInvoice? @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+
+  acquiredByUserId String? @db.Uuid
+  acquiredBy       User?   @relation("ProductUnitAcquiredBy", fields: [acquiredByUserId], references: [id], onDelete: SetNull)
+
+  // Optional assignment metadata for OUT movements
+  assignedToUserId String? @db.Uuid
+  assignedTo       User?   @relation("ProductUnitAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+
+  acquiredReason String?
+  costCenter     String?
+  acquiredNotes  String?
+
+  stockMovements StockMovement[]
+
+  @@unique([userId, serialNumber])
+  @@unique([userId, partNumber])
+  @@unique([userId, assetTag])
+  @@index([userId])
+  @@index([productId])
+  @@index([invoiceId])
+  @@index([acquiredByUserId])
+  @@index([assignedToUserId])
+}
+
+enum StockMovementType {
+  IN
+  OUT
+}
+
+model StockMovement {
+  id       String            @id @default(uuid()) @db.Uuid
+  type     StockMovementType
+  quantity BigInt
+
+  reason     String?
+  costCenter String?
+  notes      String?
+
+  createdAt DateTime @default(now())
+
+  // Tenant/owner inventory
+  userId String @db.Uuid
+  user   User   @relation("StockMovementTenant", fields: [userId], references: [id], onDelete: Cascade)
+
+  productId String  @db.Uuid
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  unitId String?      @db.Uuid
+  unit   ProductUnit? @relation(fields: [unitId], references: [id], onDelete: SetNull)
+
+  invoiceId String?         @db.Uuid
+  invoice   ProductInvoice? @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+
+  requestId String?  @db.Uuid
+  request   Request? @relation(fields: [requestId], references: [id], onDelete: SetNull)
+
+  performedByUserId String? @db.Uuid
+  performedBy       User?   @relation("StockMovementPerformedBy", fields: [performedByUserId], references: [id], onDelete: SetNull)
+
+  assignedToUserId String? @db.Uuid
+  assignedTo       User?   @relation("StockMovementAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([productId])
+  @@index([unitId])
+  @@index([invoiceId])
+  @@index([requestId])
+  @@index([performedByUserId])
+  @@index([assignedToUserId])
+  @@index([createdAt])
 }
 
 enum StorageKind {

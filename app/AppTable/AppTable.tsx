@@ -28,6 +28,12 @@ const AppTable = React.memo(() => {
   const [selectedStatuses, setSelectedStatuses] = useState<string[]>([]);
   const [selectedSuppliers, setSelectedSuppliers] = useState<string[]>([]);
 
+  useEffect(() => {
+    setPagination((prev) =>
+      prev.pageIndex === 0 ? prev : { ...prev, pageIndex: 0 }
+    );
+  }, [searchTerm, selectedCategory, selectedStatuses, selectedSuppliers]);
+
   // Memoize the loadProducts callback to prevent unnecessary re-renders
   const handleLoadProducts = useCallback(() => {
     if (isLoggedIn) {
@@ -63,16 +69,15 @@ const AppTable = React.memo(() => {
       {/* Centered Header */}
       <CardHeader className="flex flex-col justify-center items-center space-y-2 sm:space-y-0 sm:flex-row sm:justify-between sm:space-x-4">
         <div className="flex flex-col items-center sm:items-start">
-          <CardTitle className="font-bold text-[23px]">Products</CardTitle>
-          <p className="text-sm text-slate-600">
-            {productCount} products
-          </p>
+          <CardTitle className="font-bold text-[23px]">Produtos</CardTitle>
+          <p className="text-sm text-slate-600">{productCount} produtos</p>
         </div>
       </CardHeader>
 
       <CardContent>
         {/* Filters and Actions */}
         <FiltersAndActions
+          userId={user.id}
           searchTerm={searchTerm}
           setSearchTerm={setSearchTerm}
           pagination={pagination}

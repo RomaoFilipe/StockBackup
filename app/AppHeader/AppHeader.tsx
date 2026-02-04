@@ -111,6 +111,15 @@ export default function AppHeader() {
             </Button>
 
             <Button
+              variant={isActive("/movements") ? "secondary" : "ghost"}
+              size="sm"
+              onClick={() => handleNavigation("/movements")}
+            >
+              <FiActivity className="mr-2 h-4 w-4" />
+              Movimentos
+            </Button>
+
+            <Button
               variant={isActive("/storage") ? "secondary" : "ghost"}
               size="sm"
               onClick={() => handleNavigation("/storage")}

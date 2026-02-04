@@ -17,7 +17,7 @@ export default async function handler(
   switch (method) {
     case "POST":
       try {
-        const { name, sku, price, quantity, status, categoryId, supplierId } =
+        const { name, description, sku, price, quantity, status, categoryId, supplierId } =
           req.body;
 
         // Check if SKU already exists
@@ -33,6 +33,7 @@ export default async function handler(
         const product = await prisma.product.create({
           data: {
             name,
+            description: description ?? null,
             sku,
             price,
             quantity: BigInt(quantity) as any,
@@ -56,6 +57,7 @@ export default async function handler(
         res.status(201).json({
           id: product.id,
           name: product.name,
+          description: product.description,
           sku: product.sku,
           price: product.price,
           quantity: Number(product.quantity),
@@ -97,6 +99,7 @@ export default async function handler(
               ...product,
               quantity: Number(product.quantity), // Convert BigInt to Number
               createdAt: product.createdAt.toISOString(), // Convert `createdAt` to ISO string
+              description: (product as any).description ?? null,
               category: category?.name || "Unknown", // Transform category to string
               supplier: supplier?.name || "Unknown", // Transform supplier to string
             };
@@ -114,6 +117,7 @@ export default async function handler(
         const {
           id,
           name,
+          description,
           sku,
           price,
           quantity,
@@ -126,6 +130,7 @@ export default async function handler(
           where: { id },
           data: {
             name,
+            description: description ?? null,
             sku,
             price,
             quantity: BigInt(quantity) as any, // Convert to BigInt for database
@@ -147,6 +152,7 @@ export default async function handler(
         res.status(200).json({
           id: updatedProduct.id,
           name: updatedProduct.name,
+          description: updatedProduct.description,
           sku: updatedProduct.sku,
           price: updatedProduct.price,
           quantity: Number(updatedProduct.quantity), // Convert BigInt to Number
