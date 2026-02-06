@@ -33,6 +33,7 @@ import { useToast } from "@/hooks/use-toast";
 import AttachmentsDialog from "@/app/components/AttachmentsDialog";
 import { Paperclip, Plus, Printer, QrCode, RefreshCcw, Trash2 } from "lucide-react";
 import type { Product } from "@/app/types";
+type AvailableUnitDto = { id: string; code: string };
 
 type RequestItemDto = {
   id: string;
@@ -201,10 +202,66 @@ export default function RequestsPage() {
 
   const [invoiceByProductId, setInvoiceByProductId] = useState<Record<string, InvoiceMeta>>({});
   const [invoiceLoadingByProductId, setInvoiceLoadingByProductId] = useState<Record<string, boolean>>({});
+  const [unitLoadingByRow, setUnitLoadingByRow] = useState<Record<number, boolean>>({});
+  const [unitHintByProductId, setUnitHintByProductId] = useState<Record<string, { availableCount: number }>>({});
+  const [itemQrOpen, setItemQrOpen] = useState(false);
+  const [itemQrCode, setItemQrCode] = useState<string>("");
 
   const [items, setItems] = useState<NewRequestItem[]>([
     { productId: "", quantity: 1, unit: "", reference: "", destination: "", notes: "" },
   ]);
+  async function fetchAvailableUnits(args: { productId: string; take?: number; exclude?: string[] }) {
+    const res = await axiosInstance.get("/units/available", {
+      params: {
+        productId: args.productId,
+        take: args.take ?? 1,
+        ...(args.exclude?.length ? { exclude: args.exclude } : {}),
+      },
+    });
+
+    const availableCount = Number(res.data?.availableCount ?? 0);
+    const units = (Array.isArray(res.data?.items) ? res.data.items : []) as AvailableUnitDto[];
+    return { availableCount, units };
+  }
+
+  async function autoPickUnitForRow(
+    rowIndex: number,
+    opts?: { force?: boolean; productId?: string; excludeCode?: string }
+  ) {
+    const row = items[rowIndex];
+    const productId = opts?.productId ?? row?.productId;
+    if (!productId) return;
+
+    const currentCode = (opts?.excludeCode ?? row?.destination ?? "").trim();
+    if (!opts?.force && currentCode) return;
+
+    setUnitLoadingByRow((prev) => ({ ...prev, [rowIndex]: true }));
+    try {
+      const { availableCount, units } = await fetchAvailableUnits({
+        productId,
+        take: 1,
+        exclude: currentCode ? [currentCode] : [],
+      });
+      setUnitHintByProductId((prev) => ({ ...prev, [productId]: { availableCount } }));
+
+      const nextCode = units[0]?.code ? String(units[0].code) : "";
+      if (!nextCode) {
+        return;
+      }
+
+      setItems((prev) =>
+        prev.map((p, idx) => {
+          if (idx !== rowIndex) return p;
+          // For products tracked by unit (QR), enforce quantity=1.
+          return { ...p, destination: nextCode, quantity: 1 };
+        })
+      );
+    } catch {
+      // silent (avoid noisy toasts on every select)
+    } finally {
+      setUnitLoadingByRow((prev) => ({ ...prev, [rowIndex]: false }));
+    }
+  }
 
   const productById = useMemo(() => {
     const map = new Map<string, Product>();
@@ -213,6 +270,45 @@ export default function RequestsPage() {
     }
     return map;
   }, [allProducts]);
+
+  // Keep a lightweight hint of unit availability per selected product (used for UI hinting).
+  useEffect(() => {
+    const uniqueProductIds = Array.from(
+      new Set(items.map((it) => it.productId).filter((id) => Boolean(id)))
+    ) as string[];
+
+    const missing = uniqueProductIds.filter((id) => unitHintByProductId[id] === undefined);
+    if (missing.length === 0) return;
+
+    let alive = true;
+    (async () => {
+      try {
+        const results = await Promise.all(
+          missing.map(async (productId) => {
+            try {
+              const { availableCount } = await fetchAvailableUnits({ productId, take: 1 });
+              return [productId, { availableCount }] as const;
+            } catch {
+              return [productId, { availableCount: 0 }] as const;
+            }
+          })
+        );
+
+        if (!alive) return;
+        setUnitHintByProductId((prev) => {
+          const next = { ...prev };
+          for (const [productId, hint] of results) next[productId] = hint;
+          return next;
+        });
+      } catch {
+        // ignore
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, [items, unitHintByProductId]);
 
   useEffect(() => {
     const uniqueProductIds = Array.from(
@@ -879,11 +975,16 @@ export default function RequestsPage() {
                         <div className="text-xs text-muted-foreground">Produto</div>
                         <Select
                           value={it.productId}
-                          onValueChange={(v) =>
+                          onValueChange={(v) => {
                             setItems((prev) =>
-                              prev.map((p, pIdx) => (pIdx === idx ? { ...p, productId: v } : p))
-                            )
-                          }
+                              prev.map((p, pIdx) =>
+                                pIdx === idx
+                                  ? { ...p, productId: v, destination: "" }
+                                  : p
+                              )
+                            );
+                            void autoPickUnitForRow(idx, { force: false, productId: v });
+                          }}
                         >
                           <SelectTrigger>
                             <SelectValue placeholder="Produto" />
@@ -908,13 +1009,30 @@ export default function RequestsPage() {
                             type="number"
                             min={1}
                             value={it.quantity}
-                            onChange={(e) =>
+                            onChange={(e) => {
+                              const nextQty = Number(e.target.value);
+                              const hasQr = Boolean((it.destination || "").trim());
+                              const avail = it.productId ? unitHintByProductId[it.productId]?.availableCount : 0;
+                              const isUnitTracked = hasQr || (avail ?? 0) > 0;
+
+                              if (isUnitTracked && nextQty > 1) {
+                                toast({
+                                  title: "Qtd inválida",
+                                  description: "Para produtos com QR (unidades), use linhas separadas (Qtd=1 por unidade).",
+                                  variant: "destructive",
+                                });
+                                setItems((prev) =>
+                                  prev.map((p, pIdx) => (pIdx === idx ? { ...p, quantity: 1 } : p))
+                                );
+                                return;
+                              }
+
                               setItems((prev) =>
                                 prev.map((p, pIdx) =>
-                                  pIdx === idx ? { ...p, quantity: Number(e.target.value) } : p
+                                  pIdx === idx ? { ...p, quantity: nextQty } : p
                                 )
-                              )
-                            }
+                              );
+                            }}
                           />
                         </div>
                         <div className="space-y-1">
@@ -947,18 +1065,50 @@ export default function RequestsPage() {
                           />
                         </div>
                         <div className="space-y-1">
-                          <div className="text-xs text-muted-foreground">Destino</div>
-                          <Input
-                            placeholder="Destino"
-                            value={it.destination || ""}
-                            onChange={(e) =>
-                              setItems((prev) =>
-                                prev.map((p, pIdx) =>
-                                  pIdx === idx ? { ...p, destination: e.target.value } : p
+                          <div className="text-xs text-muted-foreground">QR</div>
+                          <div className="flex items-center gap-2">
+                            <Input
+                              placeholder="QR / Código da unidade"
+                              value={it.destination || ""}
+                              onChange={(e) =>
+                                setItems((prev) =>
+                                  prev.map((p, pIdx) =>
+                                    pIdx === idx ? { ...p, destination: e.target.value } : p
+                                  )
                                 )
-                              )
-                            }
-                          />
+                              }
+                            />
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="icon"
+                              disabled={!it.productId || Boolean(unitLoadingByRow[idx])}
+                              title="Escolher automaticamente um QR disponível"
+                              onClick={() => void autoPickUnitForRow(idx, { force: true, productId: it.productId, excludeCode: (it.destination || "").trim() })}
+                            >
+                              <RefreshCcw className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="icon"
+                              disabled={!origin || !it.destination?.trim()}
+                              title="Ver imagem do QR"
+                              onClick={() => {
+                                const code = (it.destination || "").trim();
+                                if (!code) return;
+                                setItemQrCode(code);
+                                setItemQrOpen(true);
+                              }}
+                            >
+                              <QrCode className="h-4 w-4" />
+                            </Button>
+                          </div>
+                          {it.productId && unitHintByProductId[it.productId] ? (
+                            <div className="text-[11px] text-muted-foreground">
+                              Unidades em stock: {unitHintByProductId[it.productId].availableCount}
+                            </div>
+                          ) : null}
                         </div>
                       </div>
 
@@ -1000,7 +1150,7 @@ export default function RequestsPage() {
                         <TableHead className="w-[110px]">Qtd</TableHead>
                         <TableHead className="w-[150px]">Unid.</TableHead>
                         <TableHead className="w-[160px]">Referência</TableHead>
-                        <TableHead className="w-[180px]">Destino</TableHead>
+                        <TableHead className="w-[180px]">QR</TableHead>
                         <TableHead>Descrição / Observações</TableHead>
                         <TableHead className="w-[60px]"></TableHead>
                       </TableRow>
@@ -1011,11 +1161,16 @@ export default function RequestsPage() {
                           <TableCell>
                             <Select
                               value={it.productId}
-                              onValueChange={(v) =>
+                              onValueChange={(v) => {
                                 setItems((prev) =>
-                                  prev.map((p, pIdx) => (pIdx === idx ? { ...p, productId: v } : p))
-                                )
-                              }
+                                  prev.map((p, pIdx) =>
+                                    pIdx === idx
+                                      ? { ...p, productId: v, destination: "" }
+                                      : p
+                                  )
+                                );
+                                void autoPickUnitForRow(idx, { force: false, productId: v });
+                              }}
                             >
                               <SelectTrigger>
                                 <SelectValue placeholder="Produto" />
@@ -1037,13 +1192,30 @@ export default function RequestsPage() {
                               type="number"
                               min={1}
                               value={it.quantity}
-                              onChange={(e) =>
+                              onChange={(e) => {
+                                const nextQty = Number(e.target.value);
+                                const hasQr = Boolean((it.destination || "").trim());
+                                const avail = it.productId ? unitHintByProductId[it.productId]?.availableCount : 0;
+                                const isUnitTracked = hasQr || (avail ?? 0) > 0;
+
+                                if (isUnitTracked && nextQty > 1) {
+                                  toast({
+                                    title: "Qtd inválida",
+                                    description: "Para produtos com QR (unidades), use linhas separadas (Qtd=1 por unidade).",
+                                    variant: "destructive",
+                                  });
+                                  setItems((prev) =>
+                                    prev.map((p, pIdx) => (pIdx === idx ? { ...p, quantity: 1 } : p))
+                                  );
+                                  return;
+                                }
+
                                 setItems((prev) =>
                                   prev.map((p, pIdx) =>
-                                    pIdx === idx ? { ...p, quantity: Number(e.target.value) } : p
+                                    pIdx === idx ? { ...p, quantity: nextQty } : p
                                   )
-                                )
-                              }
+                                );
+                              }}
                             />
                           </TableCell>
                           <TableCell>
@@ -1073,17 +1245,49 @@ export default function RequestsPage() {
                             />
                           </TableCell>
                           <TableCell>
-                            <Input
-                              placeholder="Destino"
-                              value={it.destination || ""}
-                              onChange={(e) =>
-                                setItems((prev) =>
-                                  prev.map((p, pIdx) =>
-                                    pIdx === idx ? { ...p, destination: e.target.value } : p
+                            <div className="flex items-center gap-2">
+                              <Input
+                                placeholder="QR / Código da unidade"
+                                value={it.destination || ""}
+                                onChange={(e) =>
+                                  setItems((prev) =>
+                                    prev.map((p, pIdx) =>
+                                      pIdx === idx ? { ...p, destination: e.target.value } : p
+                                    )
                                   )
-                                )
-                              }
-                            />
+                                }
+                              />
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="icon"
+                                disabled={!it.productId || Boolean(unitLoadingByRow[idx])}
+                                title="Escolher automaticamente um QR disponível"
+                                onClick={() => void autoPickUnitForRow(idx, { force: true, productId: it.productId, excludeCode: (it.destination || "").trim() })}
+                              >
+                                <RefreshCcw className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="icon"
+                                disabled={!origin || !it.destination?.trim()}
+                                title="Ver imagem do QR"
+                                onClick={() => {
+                                  const code = (it.destination || "").trim();
+                                  if (!code) return;
+                                  setItemQrCode(code);
+                                  setItemQrOpen(true);
+                                }}
+                              >
+                                <QrCode className="h-4 w-4" />
+                              </Button>
+                            </div>
+                            {it.productId && unitHintByProductId[it.productId] ? (
+                              <div className="mt-1 text-[11px] text-muted-foreground">
+                                Unidades em stock: {unitHintByProductId[it.productId].availableCount}
+                              </div>
+                            ) : null}
                           </TableCell>
                           <TableCell>
                             <Input
@@ -1324,6 +1528,33 @@ export default function RequestsPage() {
                 <QRCodeComponent
                   data={`${origin}/requests/${qrRequest.id}`}
                   title={`QR • ${qrRequest.gtmiNumber}`}
+                  size={260}
+                  showDownload
+                />
+              </div>
+            ) : (
+              <div className="text-sm text-muted-foreground">Sem dados.</div>
+            )}
+          </DialogContent>
+        </Dialog>
+
+        <Dialog
+          open={itemQrOpen}
+          onOpenChange={(o) => {
+            setItemQrOpen(o);
+            if (!o) setItemQrCode("");
+          }}
+        >
+          <DialogContent className="sm:max-w-[520px]">
+            <DialogHeader>
+              <DialogTitle>QR • Item</DialogTitle>
+              <DialogDescription>{itemQrCode || ""}</DialogDescription>
+            </DialogHeader>
+            {origin && itemQrCode ? (
+              <div className="flex justify-center">
+                <QRCodeComponent
+                  data={`${origin}/scan/${encodeURIComponent(itemQrCode)}`}
+                  title={`QR • ${itemQrCode}`}
                   size={260}
                   showDownload
                 />

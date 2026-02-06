@@ -287,9 +287,31 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           signedVoidedBy: { select: { id: true, name: true, email: true } },
           pickupRecordedBy: { select: { id: true, name: true, email: true } },
           pickupVoidedBy: { select: { id: true, name: true, email: true } },
+          requestingServiceRef: { select: { id: true, codigo: true, designacao: true, ativo: true } },
           items: {
-            include: { product: { select: { id: true, name: true, sku: true } } },
+            include: {
+              product: {
+                select: {
+                  id: true,
+                  name: true,
+                  sku: true,
+                  supplier: { select: { id: true, name: true } },
+                },
+              },
+            },
             orderBy: { createdAt: "asc" },
+          },
+          invoices: {
+            select: {
+              id: true,
+              invoiceNumber: true,
+              issuedAt: true,
+              productId: true,
+              reqNumber: true,
+              reqDate: true,
+              requestId: true,
+            },
+            orderBy: { issuedAt: "desc" },
           },
         },
       });
@@ -297,6 +319,42 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (!request) {
         return res.status(404).json({ error: "Request not found" });
       }
+
+      const uniqueProductIds = Array.from(
+        new Set((request.items || []).map((it) => it.productId).filter((pid) => typeof pid === "string" && pid))
+      ) as string[];
+
+      // Same behavior as the create form: pick the latest invoice per product.
+      // We do it server-side to avoid N requests from the details/print pages.
+      const invoicesForProducts = uniqueProductIds.length
+        ? await prisma.productInvoice.findMany({
+            where: { tenantId, productId: { in: uniqueProductIds } },
+            orderBy: { issuedAt: "desc" },
+            select: {
+              id: true,
+              invoiceNumber: true,
+              issuedAt: true,
+              productId: true,
+              reqNumber: true,
+              reqDate: true,
+              requestId: true,
+            },
+          })
+        : [];
+
+      const latestInvoiceByProductId = new Map<string, (typeof invoicesForProducts)[number]>();
+      for (const inv of invoicesForProducts) {
+        if (!latestInvoiceByProductId.has(inv.productId)) latestInvoiceByProductId.set(inv.productId, inv);
+      }
+
+      const latestInvoices = uniqueProductIds
+        .map((productId) => latestInvoiceByProductId.get(productId))
+        .filter(Boolean)
+        .map((inv) => ({
+          ...inv!,
+          issuedAt: inv!.issuedAt.toISOString(),
+          reqDate: inv!.reqDate ? inv!.reqDate.toISOString() : null,
+        }));
 
       return res.status(200).json({
         ...request,
@@ -317,6 +375,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           createdAt: it.createdAt.toISOString(),
           updatedAt: it.updatedAt.toISOString(),
         })),
+        invoices: request.invoices.map((inv) => ({
+          ...inv,
+          issuedAt: inv.issuedAt.toISOString(),
+          reqDate: inv.reqDate ? inv.reqDate.toISOString() : null,
+        })),
+        latestInvoices,
       });
     } catch (error) {
       console.error("GET /api/requests/[id] error:", error);

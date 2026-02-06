@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -33,7 +33,7 @@ type UserOption = {
 type UnitLookup = {
   id: string;
   code: string;
-  status: "IN_STOCK" | "ACQUIRED";
+  status: "IN_STOCK" | "ACQUIRED" | "IN_REPAIR" | "SCRAPPED" | "LOST";
   createdAt: string;
   acquiredAt: string | null;
   acquiredByUserId: string | null;
@@ -63,7 +63,7 @@ type UnitLookup = {
 
 type StockMovement = {
   id: string;
-  type: "IN" | "OUT";
+  type: "IN" | "OUT" | "RETURN" | "REPAIR_OUT" | "REPAIR_IN" | "SCRAP" | "LOST";
   quantity: number;
   reason?: string | null;
   costCenter?: string | null;
@@ -77,6 +77,7 @@ type StockMovement = {
 
 export default function ScanUnitPage() {
   const params = useParams<{ code: string }>();
+  const router = useRouter();
   const code = useMemo(() => (typeof params?.code === "string" ? params.code : ""), [params]);
 
   const { toast } = useToast();
@@ -84,6 +85,11 @@ export default function ScanUnitPage() {
   const [users, setUsers] = useState<UserOption[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isAcquiring, setIsAcquiring] = useState(false);
+  const [isReturning, setIsReturning] = useState(false);
+  const [isRepairOut, setIsRepairOut] = useState(false);
+  const [isRepairIn, setIsRepairIn] = useState(false);
+  const [isScrapping, setIsScrapping] = useState(false);
+  const [isMarkingLost, setIsMarkingLost] = useState(false);
   const [unit, setUnit] = useState<UnitLookup | null>(null);
   const [movements, setMovements] = useState<StockMovement[]>([]);
   const [movementsLoading, setMovementsLoading] = useState(false);
@@ -246,11 +252,211 @@ export default function ScanUnitPage() {
     }
   };
 
+  const refreshUnitAndMovements = async (unitId: string, unitCode: string) => {
+    const lookupRes = await fetch(`/api/units/lookup?code=${encodeURIComponent(unitCode)}`);
+    if (lookupRes.ok) {
+      const refreshed = (await lookupRes.json()) as UnitLookup;
+      setUnit(refreshed);
+    }
+
+    const movementsRes = await fetch(`/api/stock-movements?unitId=${encodeURIComponent(unitId)}&limit=10`);
+    if (movementsRes.ok) {
+      const data = (await movementsRes.json()) as { items?: StockMovement[] };
+      setMovements(data.items ?? []);
+    }
+  };
+
+  const handleScrap = async () => {
+    if (!unit) return;
+    const confirmed = window.confirm("Confirmar abate desta unidade?");
+    if (!confirmed) return;
+
+    setIsScrapping(true);
+    try {
+      const res = await fetch("/api/units/scrap", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          code: unit.code,
+          reason: reason ? reason : null,
+          costCenter: costCenter ? costCenter : null,
+          notes: notes ? notes : null,
+        }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || "Falha ao abater");
+
+      toast({
+        title: "Abate registado",
+        description: `Unidade abatida: ${unit.product.name}`,
+      });
+
+      await refreshUnitAndMovements(unit.id, unit.code);
+    } catch (error: any) {
+      toast({
+        title: "Erro",
+        description: error?.message || "Não foi possível abater a unidade.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsScrapping(false);
+    }
+  };
+
+  const handleLost = async () => {
+    if (!unit) return;
+    const confirmed = window.confirm("Confirmar marcar como perdido?");
+    if (!confirmed) return;
+
+    setIsMarkingLost(true);
+    try {
+      const res = await fetch("/api/units/lost", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          code: unit.code,
+          reason: reason ? reason : null,
+          costCenter: costCenter ? costCenter : null,
+          notes: notes ? notes : null,
+        }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || "Falha ao marcar como perdido");
+
+      toast({
+        title: "Marcado como perdido",
+        description: `Unidade marcada como perdida: ${unit.product.name}`,
+      });
+
+      await refreshUnitAndMovements(unit.id, unit.code);
+    } catch (error: any) {
+      toast({
+        title: "Erro",
+        description: error?.message || "Não foi possível marcar como perdido.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsMarkingLost(false);
+    }
+  };
+
+  const handleReturn = async () => {
+    if (!unit) return;
+    setIsReturning(true);
+    try {
+      const res = await fetch("/api/units/return", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          code: unit.code,
+          reason: reason ? reason : null,
+          costCenter: costCenter ? costCenter : null,
+          notes: notes ? notes : null,
+        }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || "Falha ao devolver");
+
+      toast({
+        title: "Devolução registada",
+        description: `Unidade devolvida ao stock: ${unit.product.name}`,
+      });
+
+      await refreshUnitAndMovements(unit.id, unit.code);
+    } catch (error: any) {
+      toast({
+        title: "Erro",
+        description: error?.message || "Não foi possível devolver a unidade.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsReturning(false);
+    }
+  };
+
+  const handleRepairOut = async () => {
+    if (!unit) return;
+    setIsRepairOut(true);
+    try {
+      const res = await fetch("/api/units/repair-out", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          code: unit.code,
+          reason: reason ? reason : null,
+          costCenter: costCenter ? costCenter : null,
+          notes: notes ? notes : null,
+        }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || "Falha ao enviar para reparação");
+
+      toast({
+        title: "Enviado para reparação",
+        description: `Unidade marcada como em reparação: ${unit.product.name}`,
+      });
+
+      await refreshUnitAndMovements(unit.id, unit.code);
+    } catch (error: any) {
+      toast({
+        title: "Erro",
+        description: error?.message || "Não foi possível enviar para reparação.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsRepairOut(false);
+    }
+  };
+
+  const handleRepairIn = async () => {
+    if (!unit) return;
+    setIsRepairIn(true);
+    try {
+      const res = await fetch("/api/units/repair-in", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          code: unit.code,
+          reason: reason ? reason : null,
+          costCenter: costCenter ? costCenter : null,
+          notes: notes ? notes : null,
+        }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || "Falha ao receber de reparação");
+
+      toast({
+        title: "Reparação concluída",
+        description: `Unidade recebida de reparação e voltou ao stock: ${unit.product.name}`,
+      });
+
+      await refreshUnitAndMovements(unit.id, unit.code);
+    } catch (error: any) {
+      toast({
+        title: "Erro",
+        description: error?.message || "Não foi possível receber de reparação.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsRepairIn(false);
+    }
+  };
+
   return (
     <div className="mx-auto w-full max-w-3xl space-y-4 p-4">
       <Card>
         <CardHeader>
-          <CardTitle>Scan • Unidade</CardTitle>
+          <div className="flex items-center justify-between gap-2">
+            <CardTitle>Scan • Unidade</CardTitle>
+            <Button variant="outline" size="sm" onClick={() => router.push("/scan")}>
+              Abrir câmara
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
           {isLoading ? (
@@ -282,17 +488,122 @@ export default function ScanUnitPage() {
                 <div>
                   <p className="text-sm font-medium">Estado</p>
                   <p className="text-sm text-muted-foreground">
-                    {unit.status === "IN_STOCK" ? "Em stock" : "Adquirida"}
+                    {unit.status === "IN_STOCK"
+                      ? "Em stock"
+                      : unit.status === "ACQUIRED"
+                        ? "Adquirida"
+                        : unit.status === "IN_REPAIR"
+                          ? "Em reparação"
+                          : unit.status === "SCRAPPED"
+                            ? "Abatida"
+                            : "Perdida"}
                   </p>
                 </div>
 
-                <Button
-                  onClick={handleAcquire}
-                  disabled={isAcquiring || unit.status !== "IN_STOCK"}
-                  isLoading={isAcquiring}
-                >
-                  Registar aquisição
-                </Button>
+                <div className="flex flex-wrap justify-end gap-2">
+                  <Button
+                    onClick={handleAcquire}
+                    disabled={
+                      isAcquiring ||
+                      isReturning ||
+                      isRepairOut ||
+                      isRepairIn ||
+                      isScrapping ||
+                      isMarkingLost ||
+                      unit.status !== "IN_STOCK"
+                    }
+                    isLoading={isAcquiring}
+                  >
+                    Aquisição
+                  </Button>
+
+                  <Button
+                    variant="outline"
+                    onClick={handleReturn}
+                    disabled={
+                      isAcquiring ||
+                      isReturning ||
+                      isRepairOut ||
+                      isRepairIn ||
+                      isScrapping ||
+                      isMarkingLost ||
+                      unit.status !== "ACQUIRED"
+                    }
+                    isLoading={isReturning}
+                  >
+                    Devolver
+                  </Button>
+
+                  <Button
+                    variant="outline"
+                    onClick={handleRepairOut}
+                    disabled={
+                      isAcquiring ||
+                      isReturning ||
+                      isRepairOut ||
+                      isRepairIn ||
+                      isScrapping ||
+                      isMarkingLost ||
+                      (unit.status !== "IN_STOCK" && unit.status !== "ACQUIRED")
+                    }
+                    isLoading={isRepairOut}
+                  >
+                    Reparação (envio)
+                  </Button>
+
+                  <Button
+                    variant="outline"
+                    onClick={handleRepairIn}
+                    disabled={
+                      isAcquiring ||
+                      isReturning ||
+                      isRepairOut ||
+                      isRepairIn ||
+                      isScrapping ||
+                      isMarkingLost ||
+                      unit.status !== "IN_REPAIR"
+                    }
+                    isLoading={isRepairIn}
+                  >
+                    Reparação (receção)
+                  </Button>
+
+                  <Button
+                    variant="destructive"
+                    onClick={handleScrap}
+                    disabled={
+                      isAcquiring ||
+                      isReturning ||
+                      isRepairOut ||
+                      isRepairIn ||
+                      isScrapping ||
+                      isMarkingLost ||
+                      unit.status === "SCRAPPED" ||
+                      unit.status === "LOST"
+                    }
+                    isLoading={isScrapping}
+                  >
+                    Abate
+                  </Button>
+
+                  <Button
+                    variant="destructive"
+                    onClick={handleLost}
+                    disabled={
+                      isAcquiring ||
+                      isReturning ||
+                      isRepairOut ||
+                      isRepairIn ||
+                      isScrapping ||
+                      isMarkingLost ||
+                      unit.status === "SCRAPPED" ||
+                      unit.status === "LOST"
+                    }
+                    isLoading={isMarkingLost}
+                  >
+                    Perdido
+                  </Button>
+                </div>
               </div>
 
               <div className="rounded-lg border border-border/60 p-3">
@@ -333,7 +644,14 @@ export default function ScanUnitPage() {
                       value={reason}
                       onChange={(e) => setReason(e.target.value)}
                       placeholder="Ex: Entrega, substituição, etc."
-                      disabled={unit.status !== "IN_STOCK"}
+                      disabled={
+                        isAcquiring ||
+                        isReturning ||
+                        isRepairOut ||
+                        isRepairIn ||
+                        isScrapping ||
+                        isMarkingLost
+                      }
                     />
                   </div>
 
@@ -343,7 +661,14 @@ export default function ScanUnitPage() {
                       value={costCenter}
                       onChange={(e) => setCostCenter(e.target.value)}
                       placeholder="Ex: TI / 2026 / Projeto X"
-                      disabled={unit.status !== "IN_STOCK"}
+                      disabled={
+                        isAcquiring ||
+                        isReturning ||
+                        isRepairOut ||
+                        isRepairIn ||
+                        isScrapping ||
+                        isMarkingLost
+                      }
                     />
                   </div>
 
@@ -353,7 +678,14 @@ export default function ScanUnitPage() {
                       value={notes}
                       onChange={(e) => setNotes(e.target.value)}
                       placeholder="(Opcional)"
-                      disabled={unit.status !== "IN_STOCK"}
+                      disabled={
+                        isAcquiring ||
+                        isReturning ||
+                        isRepairOut ||
+                        isRepairIn ||
+                        isScrapping ||
+                        isMarkingLost
+                      }
                       className="min-h-[90px]"
                     />
                   </div>
@@ -383,7 +715,21 @@ export default function ScanUnitPage() {
                     {movements.map((m) => (
                       <div key={m.id} className="text-sm">
                         <div className="flex items-center justify-between">
-                          <span className={m.type === "IN" ? "text-emerald-600" : "text-rose-600"}>
+                          <span
+                            className={
+                              m.type === "IN"
+                                ? "text-emerald-600"
+                                : m.type === "OUT"
+                                  ? "text-rose-600"
+                                  : m.type === "RETURN"
+                                    ? "text-sky-600"
+                                    : m.type === "REPAIR_OUT"
+                                      ? "text-amber-600"
+                                      : m.type === "REPAIR_IN"
+                                        ? "text-emerald-700"
+                                        : "text-zinc-600"
+                            }
+                          >
                             {m.type} • {m.quantity}
                           </span>
                           <span className="text-xs text-muted-foreground">

@@ -45,7 +45,7 @@ type ProductDto = {
 
 type StockMovement = {
   id: string;
-  type: "IN" | "OUT";
+  type: "IN" | "OUT" | "RETURN" | "REPAIR_OUT" | "REPAIR_IN" | "SCRAP" | "LOST";
   quantity: number;
   reason?: string | null;
   costCenter?: string | null;
@@ -101,7 +101,9 @@ export default function MovementsPage() {
 
   // Filters
   const [q, setQ] = useState<string>("");
-  const [type, setType] = useState<"" | "IN" | "OUT">("");
+  const [type, setType] = useState<
+    "" | "IN" | "OUT" | "RETURN" | "REPAIR_OUT" | "REPAIR_IN" | "SCRAP" | "LOST"
+  >("");
   const [productId, setProductId] = useState<string>("");
   const [performedByUserId, setPerformedByUserId] = useState<string>("");
   const [assignedToUserId, setAssignedToUserId] = useState<string>("");
@@ -395,8 +397,13 @@ export default function MovementsPage() {
                 onChange={(e) => setType(e.target.value as any)}
               >
                 <option value="">Todos</option>
-                <option value="IN">IN</option>
-                <option value="OUT">OUT</option>
+                <option value="IN">IN • Entrada</option>
+                <option value="OUT">OUT • Saída</option>
+                <option value="RETURN">RETURN • Devolução</option>
+                <option value="REPAIR_OUT">REPAIR_OUT • Reparação (envio)</option>
+                <option value="REPAIR_IN">REPAIR_IN • Reparação (receção)</option>
+                <option value="SCRAP">SCRAP • Abate</option>
+                <option value="LOST">LOST • Perdido</option>
               </select>
             </div>
 
@@ -497,7 +504,20 @@ export default function MovementsPage() {
               </TableHeader>
               <TableBody>
                 {movements.map((m) => {
-                  const typeClass = m.type === "IN" ? "text-emerald-600" : "text-rose-600";
+                  const typeMeta: Record<
+                    StockMovement["type"],
+                    { label: string; className: string }
+                  > = {
+                    IN: { label: "Entrada", className: "text-emerald-600" },
+                    OUT: { label: "Saída", className: "text-rose-600" },
+                    RETURN: { label: "Devolução", className: "text-sky-600" },
+                    REPAIR_OUT: { label: "Reparação (envio)", className: "text-amber-600" },
+                    REPAIR_IN: { label: "Reparação (receção)", className: "text-emerald-700" },
+                    SCRAP: { label: "Abate", className: "text-zinc-600" },
+                    LOST: { label: "Perdido", className: "text-zinc-600" },
+                  };
+
+                  const meta = typeMeta[m.type];
                   const docParts = [
                     m.invoice?.invoiceNumber ? `FT: ${m.invoice.invoiceNumber}` : null,
                     m.invoice?.reqNumber ? `REQ: ${m.invoice.reqNumber}` : null,
@@ -518,7 +538,7 @@ export default function MovementsPage() {
                         <div className="font-medium">{m.product?.name ?? "—"}</div>
                         <div className="text-xs text-muted-foreground">{m.product?.sku ?? ""}</div>
                       </TableCell>
-                      <TableCell className={`font-medium ${typeClass}`}>{m.type}</TableCell>
+                      <TableCell className={`font-medium ${meta.className}`}>{meta.label}</TableCell>
                       <TableCell>{m.quantity}</TableCell>
                       <TableCell>
                         <div className="text-sm">{docParts.length ? docParts.join(" • ") : "—"}</div>

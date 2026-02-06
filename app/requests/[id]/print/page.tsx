@@ -16,9 +16,19 @@ type RequestItemDto = {
   unit?: string | null;
   reference?: string | null;
   destination?: string | null;
-  product?: { id: string; name: string; sku: string };
+  product?: { id: string; name: string; sku: string; supplier?: { id: string; name: string } | null };
   createdAt: string;
   updatedAt: string;
+};
+
+type RequestInvoiceDto = {
+  id: string;
+  invoiceNumber: string;
+  issuedAt: string;
+  productId: string;
+  reqNumber?: string | null;
+  reqDate?: string | null;
+  requestId?: string | null;
 };
 
 type RequestDto = {
@@ -68,6 +78,9 @@ type RequestDto = {
   updatedAt: string;
   items: RequestItemDto[];
 
+  invoices?: RequestInvoiceDto[];
+  latestInvoices?: RequestInvoiceDto[];
+
   user?: { id: string; name: string; email: string };
   createdBy?: { id: string; name: string; email: string };
 };
@@ -91,11 +104,20 @@ function safeDateLabel(iso?: string | null) {
   return iso.length >= 10 ? iso.slice(0, 10) : iso;
 }
 
+function formatDatePt(iso?: string | null) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("pt-PT");
+}
+
 export default function PrintRequestPage() {
   const routeParams = useParams<{ id: string }>();
   const requestId = routeParams?.id;
   const searchParams = useSearchParams();
-  const asUserId = useMemo(() => searchParams?.get("asUserId") ?? undefined, [searchParams]);
+  const queryAsUserId = useMemo(() => searchParams?.get("asUserId") ?? undefined, [searchParams]);
+  const [asUserId] = useState<string | undefined>(() => queryAsUserId);
+  const [logoOk, setLogoOk] = useState(true);
 
   const [request, setRequest] = useState<RequestDto | null>(null);
   const [loading, setLoading] = useState(true);
@@ -103,6 +125,7 @@ export default function PrintRequestPage() {
   const [origin, setOrigin] = useState("");
   const [verifyQrDataUrl, setVerifyQrDataUrl] = useState<string>("");
   const [checksum, setChecksum] = useState<string>("");
+  const [itemQrByCode, setItemQrByCode] = useState<Record<string, string>>({});
 
   useEffect(() => {
     const envBase = String(process.env.NEXT_PUBLIC_APP_URL ?? "")
@@ -110,6 +133,70 @@ export default function PrintRequestPage() {
       .replace(/\/+$/, "");
     setOrigin(envBase || window.location.origin);
   }, []);
+
+  useEffect(() => {
+    // Prevent `asUserId=...` from showing in browser print headers/footers.
+    if (!queryAsUserId) return;
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("asUserId");
+      window.history.replaceState({}, "", url.toString());
+    } catch {
+      // ignore
+    }
+  }, [queryAsUserId]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const run = async () => {
+      if (!origin || !request?.items?.length) {
+        if (!cancelled) setItemQrByCode({});
+        return;
+      }
+
+      const codes = Array.from(
+        new Set(
+          request.items
+            .map((it) => (it.destination || "").trim())
+            .filter((v) => Boolean(v))
+        )
+      );
+
+      if (codes.length === 0) {
+        if (!cancelled) setItemQrByCode({});
+        return;
+      }
+
+      const entries = await Promise.all(
+        codes.map(async (code) => {
+          try {
+            const url = `${origin}/scan/${encodeURIComponent(code)}`;
+            const dataUrl = await QRCode.toDataURL(url, {
+              width: 80,
+              margin: 1,
+              color: { dark: "#000000", light: "#FFFFFF" },
+            });
+            return [code, dataUrl] as const;
+          } catch {
+            return [code, ""] as const;
+          }
+        })
+      );
+
+      if (cancelled) return;
+      const next: Record<string, string> = {};
+      for (const [code, dataUrl] of entries) {
+        if (dataUrl) next[code] = dataUrl;
+      }
+      setItemQrByCode(next);
+    };
+
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [origin, request?.items]);
 
   useEffect(() => {
     let cancelled = false;
@@ -146,18 +233,30 @@ export default function PrintRequestPage() {
     ? request.goodsTypes.map((g) => goodsTypeLabels[g]).join(" • ")
     : "";
 
-  const signedText = request?.signedAt
-    ? `${request.signedByName || request.signedBy?.name || ""}${request.signedByTitle ? ` • ${request.signedByTitle}` : ""}\n${safeDateTimeLabel(request.signedAt)}`
-    : "";
+  const invoiceByProductId = useMemo(() => {
+    const map: Record<string, RequestInvoiceDto> = {};
+    const invoices = request?.latestInvoices?.length ? request.latestInvoices : request?.invoices || [];
+    for (const inv of invoices) {
+      if (!inv?.productId) continue;
+      // API orders by issuedAt desc; first wins.
+      if (!map[inv.productId]) map[inv.productId] = inv;
+    }
+    return map;
+  }, [request?.invoices, request?.latestInvoices]);
 
-  const pickupSignedText = request?.pickupSignedAt
-    ? `${request.pickupSignedByName || ""}${request.pickupSignedByTitle ? ` • ${request.pickupSignedByTitle}` : ""}\n${safeDateTimeLabel(request.pickupSignedAt)}`
+  const signedText = request?.signedAt
+    ? `${request.signedByName || request.signedBy?.name || ""}${request.signedByTitle ? ` • ${request.signedByTitle}` : ""}`
     : "";
 
   const verifyUrl = useMemo(() => {
     if (!origin || !requestId) return "";
     return `${origin}/requests/${requestId}`;
   }, [origin, requestId]);
+
+  const printLogoUrl = useMemo(() => {
+    const envLogo = String(process.env.NEXT_PUBLIC_PRINT_LOGO_URL ?? "").trim();
+    return envLogo || "/logo.png";
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -301,6 +400,14 @@ export default function PrintRequestPage() {
           margin-top: 6px;
         }
 
+        .print-logo {
+          display: block;
+          height: 68px;
+          width: auto;
+          max-width: 360px;
+          object-fit: contain;
+        }
+
         .qr-box {
           display: flex;
           flex-direction: column;
@@ -379,9 +486,19 @@ export default function PrintRequestPage() {
           ) : null}
 
           <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginBottom: 10 }}>
-            <div>
-              <div className="title">Pedido de material de consumo / serviço</div>
-              <div className="subtitle">Nº: {request.gtmiNumber}</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {logoOk ? (
+                <img
+                  src={printLogoUrl}
+                  alt="Logo do serviço"
+                  className="print-logo"
+                  onError={() => setLogoOk(false)}
+                />
+              ) : null}
+              <div>
+                <div className="title">Pedido de material de consumo / serviço</div>
+                <div className="subtitle">Nº: {request.gtmiNumber}</div>
+              </div>
             </div>
             <div className="qr-box">
               {verifyQrDataUrl ? <img src={verifyQrDataUrl} alt="QR de verificação" className="qr-img" /> : null}
@@ -439,7 +556,7 @@ export default function PrintRequestPage() {
                   <th style={{ width: 70 }}>Unid.</th>
                   <th style={{ width: 60 }}>Qtd</th>
                   <th style={{ width: 92 }}>Referência</th>
-                  <th style={{ width: 92 }}>Destino</th>
+                  <th style={{ width: 70 }}>QR</th>
                   <th>Observações</th>
                 </tr>
               </thead>
@@ -454,7 +571,21 @@ export default function PrintRequestPage() {
                     <td>{it.unit || ""}</td>
                     <td>{it.quantity}</td>
                     <td>{it.reference || ""}</td>
-                    <td>{it.destination || ""}</td>
+                    <td>
+                      {it.destination?.trim() ? (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                          {itemQrByCode[it.destination.trim()] ? (
+                            <img
+                              src={itemQrByCode[it.destination.trim()]}
+                              alt={`QR ${it.destination.trim()}`}
+                              style={{ width: 44, height: 44, imageRendering: "pixelated" }}
+                            />
+                          ) : null}
+                        </div>
+                      ) : (
+                        ""
+                      )}
+                    </td>
                     <td>{it.notes || ""}</td>
                   </tr>
                 ))}
@@ -462,38 +593,65 @@ export default function PrintRequestPage() {
             </table>
           </div>
 
-          <div className="row" style={{ marginBottom: 10 }}>
-            <div className="field">
-              <div className="label">Fornecedor (opção 1)</div>
-              <div className="value">{request.supplierOption1 || ""}</div>
+          <div style={{ marginBottom: 10 }}>
+            <div className="subtitle" style={{ marginBottom: 6 }}>
+              Fornecedores / Faturas
             </div>
-            <div className="field">
-              <div className="label">Fornecedor (opção 2)</div>
-              <div className="value">{request.supplierOption2 || ""}</div>
-            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th>Produto</th>
+                  <th style={{ width: 160 }}>Empresa</th>
+                  <th style={{ width: 92 }}>Fatura Nº</th>
+                  <th style={{ width: 80 }}>Data</th>
+                  <th style={{ width: 92 }}>REQ</th>
+                  <th style={{ width: 80 }}>Data REQ</th>
+                </tr>
+              </thead>
+              <tbody>
+                {request.items.map((it, idx) => {
+                  const supplierName = it.product?.supplier?.name || "";
+                  const meta = it.productId ? invoiceByProductId[it.productId] : undefined;
+                  const reqNumber = meta?.reqNumber || request.gtmiNumber;
+                  const reqDate = meta?.reqDate || request.requestedAt;
+
+                  return (
+                    <tr key={`sup-${it.id || idx}`}>
+                      <td>
+                        <div style={{ fontWeight: 700 }}>{it.product?.name || it.productId}</div>
+                        {it.product?.sku ? <div className="muted">SKU: {it.product.sku}</div> : null}
+                      </td>
+                      <td>{supplierName || "—"}</td>
+                      <td>{meta?.invoiceNumber || "—"}</td>
+                      <td>{meta?.issuedAt ? formatDatePt(meta.issuedAt) : "—"}</td>
+                      <td style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace", fontSize: 11 }}>
+                        {reqNumber || "—"}
+                      </td>
+                      <td>{reqDate ? formatDatePt(reqDate) : "—"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
 
-          <div className="row" style={{ marginBottom: 10 }}>
-            <div className="field">
-              <div className="label">Fornecedor (opção 3)</div>
-              <div className="value">{request.supplierOption3 || ""}</div>
-            </div>
-            <div className="field">
-              <div className="label">Notas gerais</div>
-              <div className="value">{request.notes || ""}</div>
-            </div>
-          </div>
-
-          <div className="row">
-            <div className="field sign">
-              <div className="label">Assinatura (Responsável do pedido)</div>
-              <div className="value">
-                {request.pickupSignedAt
-                  ? pickupSignedText || request.requesterName || ""
-                  : request.pickupVoidedAt
-                    ? `ANULADA${request.pickupVoidedReason ? ` • ${request.pickupVoidedReason}` : ""}\n${safeDateTimeLabel(request.pickupVoidedAt)}`
-                    : request.requesterName || ""}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 2fr 1fr",
+              gap: 10,
+            }}
+          >
+            <div />
+            <div className="field sign" style={{ textAlign: "center" }}>
+              <div className="label" style={{ textAlign: "center" }}>
+                Assinatura do Responsável Pedido
               </div>
+              {request.pickupVoidedAt && !request.pickupSignatureDataUrl ? (
+                <div className="value" style={{ textAlign: "center" }}>
+                  {`ANULADA${request.pickupVoidedReason ? ` • ${request.pickupVoidedReason}` : ""}`}
+                </div>
+              ) : null}
               {request.pickupSignatureDataUrl ? (
                 <img
                   src={request.pickupSignatureDataUrl}
@@ -502,13 +660,16 @@ export default function PrintRequestPage() {
                 />
               ) : null}
             </div>
-            <div className="field sign">
-              <div className="label">Assinatura (Técnico GTMI)</div>
-              <div className="value">
+
+            <div className="field sign" style={{ textAlign: "right", padding: 6 }}>
+              <div className="label" style={{ fontSize: 10, textAlign: "right" }}>
+                Assinatura (Técnico GTMI)
+              </div>
+              <div className="value" style={{ fontSize: 10, textAlign: "right", minHeight: 44 }}>
                 {request.signedAt
                   ? signedText
                   : request.signedVoidedAt
-                    ? `ANULADA${request.signedVoidedReason ? ` • ${request.signedVoidedReason}` : ""}\n${safeDateTimeLabel(request.signedVoidedAt)}`
+                    ? `ANULADA${request.signedVoidedReason ? ` • ${request.signedVoidedReason}` : ""}`
                     : ""}
               </div>
             </div>
@@ -517,7 +678,6 @@ export default function PrintRequestPage() {
           <div className="subtitle" style={{ marginTop: 10 }}>
             Criado por: {request.createdBy?.name || ""}{request.createdBy?.email ? ` (${request.createdBy.email})` : ""}
             {request.user && request.user.id !== request.createdBy?.id ? ` • Para: ${request.user.name}` : ""}
-            {verifyUrl ? ` • Verificar: ${verifyUrl}` : ""}
           </div>
         </div>
       )}

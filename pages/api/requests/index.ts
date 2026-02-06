@@ -42,6 +42,25 @@ const createRequestSchema = z.object({
     .min(1),
 });
 
+class StockAllocationError extends Error {
+  code: string;
+  details?: Record<string, any>;
+
+  constructor(code: string, message: string, details?: Record<string, any>) {
+    super(message);
+    this.code = code;
+    this.details = details;
+  }
+}
+
+function computeProductStatus(quantity: number) {
+  return quantity > 20 ? "Available" : quantity > 0 ? "Stock Low" : "Stock Out";
+}
+
+function isUuidLike(v: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
+}
+
 function formatGtmiNumber(gtmiYear: number, gtmiSeq: number) {
   return `GTMI-${gtmiYear}-${String(gtmiSeq).padStart(6, "0")}`;
 }
@@ -78,6 +97,8 @@ async function createRequestWithGtmiSeq(args: {
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
       return await prisma.$transaction(async (tx) => {
+        const txAny = tx as any;
+
         const maxSeq = await tx.request.aggregate({
           where: { tenantId: args.tenantId, gtmiYear },
           _max: { gtmiSeq: true },
@@ -134,7 +155,178 @@ async function createRequestWithGtmiSeq(args: {
           },
         });
 
-        return created;
+        // === Stock deduction / unit allocation ===
+        const performerUserId = args.createdByUserId;
+        const assignedToUserId = args.userId;
+        const stockReason = `Requisi\u00e7\u00e3o ${gtmiNumber}`;
+
+        const unitCountByProductId = new Map<string, number>();
+
+        for (const item of created.items as any[]) {
+          const qty = Number(item.quantity);
+          if (!Number.isFinite(qty) || qty <= 0) {
+            continue;
+          }
+
+          const productId: string = item.productId;
+
+          let unitCount: number | undefined = unitCountByProductId.get(productId);
+          if (unitCount === undefined) {
+            unitCount = Number(
+              await txAny.productUnit.count({
+              where: { tenantId: args.tenantId, productId },
+              })
+            );
+            unitCountByProductId.set(productId, unitCount);
+          }
+
+          const isUnitTracked = unitCount > 0;
+          const requestedCode = typeof item.destination === "string" ? item.destination.trim() : "";
+
+          if (isUnitTracked) {
+            if (qty !== 1) {
+              throw new StockAllocationError(
+                "UNIT_QTY_MUST_BE_1",
+                "Para produtos com QR (unidades), use linhas separadas (Qtd=1 por unidade).",
+                { productId, quantity: qty }
+              );
+            }
+
+            const unit = requestedCode && isUuidLike(requestedCode)
+              ? await txAny.productUnit.findFirst({
+                  where: {
+                    tenantId: args.tenantId,
+                    productId,
+                    code: requestedCode,
+                    status: "IN_STOCK",
+                  },
+                  select: { id: true, code: true, invoiceId: true },
+                })
+              : await txAny.productUnit.findFirst({
+                  where: {
+                    tenantId: args.tenantId,
+                    productId,
+                    status: "IN_STOCK",
+                  },
+                  orderBy: { createdAt: "asc" },
+                  select: { id: true, code: true, invoiceId: true },
+                });
+
+            if (!unit) {
+              throw new StockAllocationError(
+                "NO_UNIT_IN_STOCK",
+                "Sem unidades em stock para um dos produtos selecionados.",
+                { productId, requestedCode: requestedCode || null }
+              );
+            }
+
+            const updated = await txAny.productUnit.updateMany({
+              where: { id: unit.id, status: "IN_STOCK" },
+              data: {
+                status: "ACQUIRED",
+                acquiredAt: new Date(),
+                acquiredByUserId: performerUserId,
+                assignedToUserId,
+                acquiredReason: stockReason,
+              },
+            });
+
+            if (!updated?.count) {
+              throw new StockAllocationError(
+                "UNIT_RACE_CONDITION",
+                "A unidade foi alocada por outro utilizador. Tente novamente.",
+                { productId, code: unit.code }
+              );
+            }
+
+            if (!requestedCode || requestedCode !== unit.code) {
+              await tx.requestItem.update({
+                where: { id: item.id },
+                data: { destination: unit.code },
+              });
+            }
+
+            await txAny.stockMovement.create({
+              data: {
+                type: "OUT",
+                quantity: BigInt(1) as any,
+                tenantId: args.tenantId,
+                productId,
+                unitId: unit.id,
+                invoiceId: unit.invoiceId ?? null,
+                requestId: created.id,
+                performedByUserId: performerUserId,
+                assignedToUserId,
+                reason: stockReason,
+              },
+              select: { id: true },
+            });
+
+            const productAfter = await tx.product.update({
+              where: { id: productId },
+              data: { quantity: { decrement: BigInt(1) as any } },
+              select: { quantity: true },
+            });
+            const finalQuantity = Number(productAfter.quantity);
+            await tx.product.update({
+              where: { id: productId },
+              data: { status: computeProductStatus(finalQuantity) },
+            });
+          } else {
+            // Bulk stock item (no per-unit tracking)
+            const product = await tx.product.findUnique({
+              where: { id: productId },
+              select: { quantity: true },
+            });
+            const currentQty = Number(product?.quantity ?? BigInt(0));
+            if (currentQty < qty) {
+              throw new StockAllocationError(
+                "INSUFFICIENT_STOCK",
+                "Stock insuficiente para um dos produtos selecionados.",
+                { productId, requested: qty, available: currentQty }
+              );
+            }
+
+            await txAny.stockMovement.create({
+              data: {
+                type: "OUT",
+                quantity: BigInt(qty) as any,
+                tenantId: args.tenantId,
+                productId,
+                requestId: created.id,
+                performedByUserId: performerUserId,
+                assignedToUserId,
+                reason: stockReason,
+              },
+              select: { id: true },
+            });
+
+            const productAfter = await tx.product.update({
+              where: { id: productId },
+              data: { quantity: { decrement: BigInt(qty) as any } },
+              select: { quantity: true },
+            });
+            const finalQuantity = Number(productAfter.quantity);
+            await tx.product.update({
+              where: { id: productId },
+              data: { status: computeProductStatus(finalQuantity) },
+            });
+          }
+        }
+
+        const final = await tx.request.findUnique({
+          where: { id: created.id },
+          include: {
+            user: { select: { id: true, name: true, email: true } },
+            createdBy: { select: { id: true, name: true, email: true } },
+            items: {
+              include: { product: { select: { id: true, name: true, sku: true } } },
+              orderBy: { createdAt: "asc" },
+            },
+          },
+        });
+
+        return final ?? created;
       });
     } catch (error: any) {
       // P2002 = Unique constraint violation (race on gtmiSeq or gtmiNumber)
@@ -319,6 +511,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         })),
       });
     } catch (error) {
+      if (error instanceof StockAllocationError) {
+        return res.status(400).json({ error: error.message, code: error.code, details: error.details ?? null });
+      }
       console.error("POST /api/requests error:", error);
       return res.status(500).json({ error: "Failed to create request" });
     }

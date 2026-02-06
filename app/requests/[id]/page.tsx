@@ -18,6 +18,7 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { SignaturePad, type SignaturePadHandle } from "@/components/ui/signature-pad";
+import { QRCodeHover } from "@/components/ui/qr-code-hover";
 import { useToast } from "@/hooks/use-toast";
 import axiosInstance from "@/utils/axiosInstance";
 import Image from "next/image";
@@ -35,9 +36,19 @@ type RequestItemDto = {
   unit?: string | null;
   reference?: string | null;
   destination?: string | null;
-  product?: { id: string; name: string; sku: string };
+  product?: { id: string; name: string; sku: string; supplier?: { id: string; name: string } | null };
   createdAt: string;
   updatedAt: string;
+};
+
+type RequestInvoiceDto = {
+  id: string;
+  invoiceNumber: string;
+  issuedAt: string;
+  productId: string;
+  reqNumber?: string | null;
+  reqDate?: string | null;
+  requestId?: string | null;
 };
 
 type RequestDto = {
@@ -87,6 +98,9 @@ type RequestDto = {
   updatedAt: string;
   items: RequestItemDto[];
 
+  invoices?: RequestInvoiceDto[];
+  latestInvoices?: RequestInvoiceDto[];
+
   user?: { id: string; name: string; email: string } | null;
   createdBy?: { id: string; name: string; email: string } | null;
 };
@@ -96,6 +110,13 @@ const goodsTypeLabels: Record<GoodsType, string> = {
   WAREHOUSE_MATERIALS: "Material de armazém",
   OTHER_PRODUCTS: "Outros produtos",
 };
+
+function formatDatePt(iso?: string | null) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("pt-PT");
+}
 
 const formatStatus = (status: RequestDto["status"]) => {
   switch (status) {
@@ -119,12 +140,31 @@ export default function RequestDetailsPage() {
   const routeParams = useParams<{ id: string }>();
   const requestId = routeParams?.id;
 
+  const [origin, setOrigin] = useState("");
+  useEffect(() => {
+    const envBase = String(process.env.NEXT_PUBLIC_APP_URL ?? "")
+      .trim()
+      .replace(/\/+$/, "");
+    setOrigin(envBase || window.location.origin);
+  }, []);
+
   const { toast } = useToast();
   const { isLoggedIn, isAuthLoading, user } = useAuth();
   const isAdmin = user?.role === "ADMIN";
 
   const [request, setRequest] = useState<RequestDto | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const invoiceByProductId = useMemo(() => {
+    const map: Record<string, RequestInvoiceDto> = {};
+    const invoices = request?.latestInvoices?.length ? request.latestInvoices : request?.invoices || [];
+    for (const inv of invoices) {
+      if (!inv?.productId) continue;
+      // API orders by issuedAt desc; first wins.
+      if (!map[inv.productId]) map[inv.productId] = inv;
+    }
+    return map;
+  }, [request?.invoices, request?.latestInvoices]);
 
   const canMutate = useMemo(() => {
     if (!request) return false;
@@ -509,7 +549,7 @@ export default function RequestDetailsPage() {
                     <TableHead className="w-[110px]">Qtd</TableHead>
                     <TableHead className="w-[140px]">Unid.</TableHead>
                     <TableHead className="w-[160px]">Referência</TableHead>
-                    <TableHead className="w-[160px]">Destino</TableHead>
+                    <TableHead className="w-[180px]">QR</TableHead>
                     <TableHead>Notas</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -524,12 +564,174 @@ export default function RequestDetailsPage() {
                       <TableCell>{it.quantity}</TableCell>
                       <TableCell>{it.unit || ""}</TableCell>
                       <TableCell>{it.reference || ""}</TableCell>
-                      <TableCell>{it.destination || ""}</TableCell>
+                      <TableCell>
+                        {it.destination?.trim() ? (
+                          <div className="flex items-center gap-1">
+                            <Button
+                              type="button"
+                              variant="link"
+                              className="h-auto p-0 font-mono text-xs"
+                              onClick={() => router.push(`/scan/${encodeURIComponent(it.destination!.trim())}`)}
+                              title="Abrir detalhe do QR"
+                            >
+                              {it.destination.trim()}
+                            </Button>
+                            {origin ? (
+                              <QRCodeHover
+                                data={`${origin}/scan/${encodeURIComponent(it.destination.trim())}`}
+                                title={`QR: ${it.destination.trim()}`}
+                                size={220}
+                              />
+                            ) : null}
+                          </div>
+                        ) : (
+                          ""
+                        )}
+                      </TableCell>
                       <TableCell>{it.notes || ""}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
+            </div>
+
+            <div className="space-y-2">
+              <div>
+                <div className="text-sm font-medium">Fornecedores / Faturas</div>
+                <div className="text-xs text-muted-foreground">
+                  Informação por item (empresa do produto + fatura associada à requisição, quando existe).
+                </div>
+              </div>
+
+              {/* Mobile */}
+              <div className="space-y-3 md:hidden">
+                {request.items.map((it, idx) => {
+                  const supplierName = it.product?.supplier?.name || "";
+                  const meta = it.productId ? invoiceByProductId[it.productId] : undefined;
+
+                  const reqNumber = meta?.reqNumber || request.gtmiNumber;
+                  const reqDate = meta?.reqDate || request.requestedAt;
+
+                  return (
+                    <div key={`sup-m-${it.id || idx}`} className="rounded-md border border-border/60 p-3 space-y-2">
+                      <div className="text-sm font-medium truncate">
+                        {it.product?.name ? `${it.product.name}${it.product.sku ? ` (${it.product.sku})` : ""}` : it.productId}
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-2 text-sm">
+                        <div>
+                          <span className="text-xs text-muted-foreground">Empresa</span>
+                          <div className="truncate">{supplierName || "—"}</div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <span className="text-xs text-muted-foreground">Fatura Nº</span>
+                            <div>
+                              {meta?.invoiceNumber ? (
+                                <Button
+                                  variant="link"
+                                  className="h-auto p-0 font-medium"
+                                  onClick={() => {
+                                    if (!meta?.id) return;
+                                    const q = new URLSearchParams();
+                                    q.set("invoiceId", meta.id);
+                                    q.set("tab", "invoices");
+                                    q.set("requestId", request.id);
+                                    const suffix = q.toString() ? `?${q.toString()}` : "";
+                                    router.push(`/products/${it.productId}${suffix}`);
+                                  }}
+                                  title="Abrir produto e fatura"
+                                >
+                                  {meta.invoiceNumber}
+                                </Button>
+                              ) : (
+                                <span className="text-muted-foreground">—</span>
+                              )}
+                            </div>
+                          </div>
+                          <div>
+                            <span className="text-xs text-muted-foreground">Data</span>
+                            <div>{meta?.issuedAt ? formatDatePt(meta.issuedAt) : "—"}</div>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <span className="text-xs text-muted-foreground">REQ</span>
+                            <div className="font-mono text-xs">{reqNumber || "—"}</div>
+                          </div>
+                          <div>
+                            <span className="text-xs text-muted-foreground">Data REQ</span>
+                            <div>{reqDate ? formatDatePt(reqDate) : "—"}</div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Desktop */}
+              <div className="hidden md:block">
+                <Table className="min-w-[980px]">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="min-w-[240px]">Produto</TableHead>
+                      <TableHead className="min-w-[200px]">Empresa</TableHead>
+                      <TableHead className="min-w-[140px]">Fatura Nº</TableHead>
+                      <TableHead className="min-w-[130px]">Data</TableHead>
+                      <TableHead className="min-w-[160px]">REQ</TableHead>
+                      <TableHead className="min-w-[130px]">Data REQ</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {request.items.map((it, idx) => {
+                      const supplierName = it.product?.supplier?.name || "";
+                      const meta = it.productId ? invoiceByProductId[it.productId] : undefined;
+
+                      const reqNumber = meta?.reqNumber || request.gtmiNumber;
+                      const reqDate = meta?.reqDate || request.requestedAt;
+
+                      return (
+                        <TableRow key={`sup-${it.id || idx}`}>
+                          <TableCell className="max-w-[280px] truncate">
+                            {it.product?.name
+                              ? `${it.product.name}${it.product.sku ? ` (${it.product.sku})` : ""}`
+                              : it.productId}
+                          </TableCell>
+                          <TableCell className="max-w-[240px] truncate">{supplierName || "—"}</TableCell>
+                          <TableCell>
+                            {meta?.invoiceNumber ? (
+                              <Button
+                                variant="link"
+                                className="h-auto p-0 font-medium"
+                                onClick={() => {
+                                  if (!meta?.id) return;
+                                  const q = new URLSearchParams();
+                                  q.set("invoiceId", meta.id);
+                                  q.set("tab", "invoices");
+                                  q.set("requestId", request.id);
+                                  const suffix = q.toString() ? `?${q.toString()}` : "";
+                                  router.push(`/products/${it.productId}${suffix}`);
+                                }}
+                                title="Abrir produto e fatura"
+                              >
+                                {meta.invoiceNumber}
+                              </Button>
+                            ) : (
+                              "—"
+                            )}
+                          </TableCell>
+                          <TableCell>{meta?.issuedAt ? formatDatePt(meta.issuedAt) : "—"}</TableCell>
+                          <TableCell className="font-mono text-xs">{reqNumber || "—"}</TableCell>
+                          <TableCell>{reqDate ? formatDatePt(reqDate) : "—"}</TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
             </div>
 
             {request.title?.trim() || request.notes?.trim() ? (

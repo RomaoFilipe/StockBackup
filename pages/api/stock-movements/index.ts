@@ -7,7 +7,9 @@ const querySchema = z
   .object({
     productId: z.string().uuid().optional(),
     unitId: z.string().uuid().optional(),
-    type: z.enum(["IN", "OUT"]).optional(),
+    type: z
+      .enum(["IN", "OUT", "RETURN", "REPAIR_OUT", "REPAIR_IN", "SCRAP", "LOST"])
+      .optional(),
     performedByUserId: z.string().uuid().optional(),
     assignedToUserId: z.string().uuid().optional(),
     invoiceNumber: z.string().max(64).optional(),

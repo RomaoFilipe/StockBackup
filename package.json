@@ -35,6 +35,8 @@
     "@types/cookies": "^0.9.0",
     "@types/papaparse": "^5.3.16",
     "@types/qrcode": "^1.5.5",
+    "@zxing/browser": "^0.1.5",
+    "@zxing/library": "^0.21.3",
     "autoprefixer": "^10.4.20",
     "axios": "^1.8.2",
     "bcryptjs": "^3.0.2",
