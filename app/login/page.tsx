@@ -5,8 +5,16 @@ import { useAuth } from "@/app/authContext";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import Loading from "@/components/Loading"; // Import Loading component
 import { useToast } from "@/hooks/use-toast"; // Import toast hook
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
 
 export default function Login() {
   const [email, setEmail] = useState("");
@@ -64,38 +72,70 @@ export default function Login() {
     }
   };
 
-
-
   return (
-    <div className="flex justify-center items-center h-screen">
-      <form onSubmit={handleSubmit} className="w-full max-w-md p-8 space-y-4">
-        <h2 className="text-2xl font-bold">Login</h2>
-        {isAuthLoading && (
-          <p className="text-sm text-muted-foreground">A verificar sessão...</p>
-        )}
-        <Input
-          type="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          placeholder="Email"
-          required
-        />
-        <Input
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          placeholder="Password"
-          required
-        />
-        <Button type="submit" className="w-full" disabled={isLoading}>
-          {isLoading ? "Logging In..." : "Login"}
-        </Button>
-        <div className="text-center">
-          <p className="text-sm text-muted-foreground">
-            Precisa de acesso? Peça a um administrador para criar o utilizador.
-          </p>
-        </div>
-      </form>
+    <div className="min-h-svh bg-gradient-to-b from-background to-muted/40">
+      <div className="mx-auto flex min-h-svh w-full max-w-md items-center px-4 py-10">
+        <Card className="w-full">
+          <CardHeader className="space-y-2">
+            <CardTitle className="text-2xl">Login</CardTitle>
+            <CardDescription>
+              Entre com as suas credenciais para continuar.
+              {isAuthLoading ? (
+                <span className="mt-1 block">A verificar sessão...</span>
+              ) : null}
+            </CardDescription>
+          </CardHeader>
+
+          <CardContent>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="email">Email</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="nome@empresa.com"
+                  autoComplete="email"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  required
+                  disabled={isLoading}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="password">Password</Label>
+                <Input
+                  id="password"
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="A sua password"
+                  autoComplete="current-password"
+                  required
+                  disabled={isLoading}
+                />
+              </div>
+
+              <Button
+                type="submit"
+                className="w-full"
+                disabled={isAuthLoading}
+                isLoading={isLoading}
+              >
+                {isLoading ? "A entrar..." : "Login"}
+              </Button>
+            </form>
+          </CardContent>
+
+          <CardFooter className="justify-center">
+            <p className="text-center text-sm text-muted-foreground">
+              Precisa de acesso? Peça a um administrador para criar o utilizador.
+            </p>
+          </CardFooter>
+        </Card>
+      </div>
     </div>
   );
 }
