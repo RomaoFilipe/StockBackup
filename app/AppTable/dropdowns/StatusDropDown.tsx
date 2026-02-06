@@ -46,6 +46,9 @@ export function StatusDropDown({
 }: StatusDropDownProps) {
   const [open, setOpen] = React.useState(false);
 
+  const selectedCount = selectedStatuses.length;
+  const displayLabel = selectedCount > 0 ? `${label} (${selectedCount})` : label;
+
   function returnColor(status: string) {
     switch (status) {
       case "Available":
@@ -64,7 +67,6 @@ export function StatusDropDown({
       const updatedStatuses = prev.includes(value)
         ? prev.filter((status) => status !== value)
         : [...prev, value];
-      console.log("Updated Selected Statuses:", updatedStatuses); // Debug log
       return updatedStatuses;
     });
   }
@@ -74,12 +76,12 @@ export function StatusDropDown({
   }
 
   return (
-    <div className="flex items-center space-x-4 poppins">
+    <div className="poppins">
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <Button variant={buttonVariant} className={buttonClassName ?? "h-10"}>
             <LuGitPullRequestDraft />
-            {label}
+            {displayLabel}
           </Button>
         </PopoverTrigger>
         <PopoverContent

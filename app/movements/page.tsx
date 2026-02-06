@@ -85,7 +85,7 @@ const isUuid = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]
 export default function MovementsPage() {
   const router = useRouter();
   const { toast } = useToast();
-  const { isLoggedIn, user } = useAuth();
+  const { isLoggedIn, isAuthLoading, user } = useAuth();
 
   const isAdmin = user?.role === "ADMIN";
 
@@ -191,6 +191,10 @@ export default function MovementsPage() {
   };
 
   useEffect(() => {
+    if (isAuthLoading) {
+      return;
+    }
+
     if (!isLoggedIn) {
       router.replace("/login");
       return;
@@ -198,7 +202,7 @@ export default function MovementsPage() {
 
     loadBootstrap();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoggedIn, isAdmin]);
+  }, [isAuthLoading, isLoggedIn, isAdmin]);
 
   useEffect(() => {
     // When admin changes tenant/user, refresh dropdowns + movements

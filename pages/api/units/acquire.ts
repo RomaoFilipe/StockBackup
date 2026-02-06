@@ -29,9 +29,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   const requestingUserId = session.id;
-  const { code, asUserId, assignedToUserId, reason, costCenter, notes } = parsed.data;
-
-  const tenantUserId = asUserId && session.role === "ADMIN" ? asUserId : requestingUserId;
+  const tenantId = session.tenantId;
+  const { code, assignedToUserId, reason, costCenter, notes } = parsed.data;
 
   try {
     const updated = await prisma.$transaction(async (tx) => {
@@ -42,7 +41,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           id: true,
           status: true,
           productId: true,
-          userId: true,
+          tenantId: true,
           invoiceId: true,
           invoice: {
             select: {
@@ -57,7 +56,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
 
       // Ensure the code belongs to the same tenant/user inventory
-      if (unit.userId !== tenantUserId) {
+      if (unit.tenantId !== tenantId) {
         return { kind: "forbidden" as const };
       }
 
@@ -96,7 +95,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         data: {
           type: "OUT",
           quantity: BigInt(1) as any,
-          userId: tenantUserId,
+          tenantId,
           productId: unit.productId,
           unitId: unit.id,
           invoiceId: unit.invoiceId,

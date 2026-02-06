@@ -62,8 +62,7 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         disabled={isLoading || props.disabled} // Disable button when loading
         {...props}
       >
-        {isLoading ? <FaSpinner className="animate-spin" /> : children}{" "}
-        {/* Show spinner when loading */}
+        {isLoading ? <FaSpinner className="animate-spin" /> : children}
       </Comp>
     );
   }

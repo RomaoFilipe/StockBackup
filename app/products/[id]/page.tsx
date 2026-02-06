@@ -20,9 +20,17 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import AttachmentsDialog from "@/app/components/AttachmentsDialog";
 import { QRCodeComponent } from "@/components/ui/qr-code";
@@ -105,9 +113,24 @@ export default function ProductDetailsPage() {
   const searchParams = useSearchParams();
   const { toast } = useToast();
 
+  const tabParam = searchParams?.get("tab");
+  const invoiceIdFromQuery = searchParams?.get("invoiceId");
   const requestIdFromQuery = searchParams?.get("requestId");
   const asUserIdFromQuery = searchParams?.get("asUserId") ?? searchParams?.get("userId");
   const [origin, setOrigin] = useState("");
+
+  const initialTab = useMemo(() => {
+    const allowed = new Set(["details", "invoices", "units", "movements"]);
+    if (tabParam && allowed.has(tabParam)) return tabParam;
+    if (invoiceIdFromQuery) return "invoices";
+    return "details";
+  }, [tabParam, invoiceIdFromQuery]);
+
+  const [tab, setTab] = useState<string>(initialTab);
+
+  useEffect(() => {
+    setTab(initialTab);
+  }, [initialTab]);
 
   const [product, setProduct] = useState<ProductDetails | null>(null);
   const [invoices, setInvoices] = useState<ProductInvoice[]>([]);
@@ -115,6 +138,7 @@ export default function ProductDetailsPage() {
 
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [reqNumber, setReqNumber] = useState("");
+  const [reqDate, setReqDate] = useState("");
   const [issuedAt, setIssuedAt] = useState("");
   const [quantity, setQuantity] = useState<number>(1);
   const [unitPrice, setUnitPrice] = useState<number>(0);
@@ -123,6 +147,13 @@ export default function ProductDetailsPage() {
   const [invoiceDialogOpen, setInvoiceDialogOpen] = useState(false);
   const [invoiceRepoQuery, setInvoiceRepoQuery] = useState("");
   const [invoiceAttachment, setInvoiceAttachment] = useState<File | null>(null);
+  const [requestAttachment, setRequestAttachment] = useState<File | null>(null);
+
+  const [requestPickOpen, setRequestPickOpen] = useState(false);
+  const [requestCandidates, setRequestCandidates] = useState<
+    Array<{ id: string; gtmiNumber: string; title: string | null; requestedAt: string }>
+  >([]);
+  const [pickedRequestId, setPickedRequestId] = useState<string>("");
 
   const [units, setUnits] = useState<ProductUnit[]>([]);
   const [unitsLoading, setUnitsLoading] = useState(false);
@@ -385,16 +416,18 @@ export default function ProductDetailsPage() {
     }
   };
 
-  const addInvoice = async () => {
+  const addInvoice = async (overrideRequestId?: string) => {
     if (!productId) return;
     setSaving(true);
     try {
+      const effectiveRequestId = overrideRequestId || requestIdFromQuery || undefined;
       const payload = {
         asUserId: asUserIdFromQuery || undefined,
         productId,
-        requestId: requestIdFromQuery || undefined,
+        requestId: effectiveRequestId,
         invoiceNumber,
         reqNumber: reqNumber.trim() ? reqNumber.trim() : undefined,
+        reqDate: reqDate ? new Date(reqDate).toISOString() : undefined,
         issuedAt: issuedAt ? new Date(issuedAt).toISOString() : undefined,
         quantity,
         unitPrice,
@@ -426,13 +459,33 @@ export default function ProductDetailsPage() {
         }
       }
 
+      if (createdInvoice?.id && requestAttachment) {
+        const fd = new FormData();
+        fd.append("kind", "INVOICE");
+        fd.append("invoiceId", createdInvoice.id);
+        fd.append("file", requestAttachment);
+
+        const uploadRes = await fetch("/api/storage", {
+          method: "POST",
+          body: fd,
+          credentials: "include",
+        });
+
+        if (!uploadRes.ok) {
+          const data = await uploadRes.json().catch(() => ({}));
+          throw new Error(data?.error || "Falha ao enviar anexo");
+        }
+      }
+
       setInvoiceNumber("");
       setReqNumber("");
+      setReqDate("");
       setIssuedAt("");
       setQuantity(1);
       setUnitPrice(0);
       setNotes("");
       setInvoiceAttachment(null);
+      setRequestAttachment(null);
 
       setInvoiceDialogOpen(false);
 
@@ -441,15 +494,30 @@ export default function ProductDetailsPage() {
 
       toast({
         title: "Fatura adicionada",
-        description: invoiceAttachment ? "Stock e anexo registados." : "Stock registado.",
+        description:
+          invoiceAttachment || requestAttachment
+            ? "Stock e anexos registados."
+            : "Stock registado.",
       });
     } catch (error: any) {
-      const msg = error?.response?.data?.error || error?.message || "Não foi possível criar a fatura.";
-      toast({
-        title: "Erro",
-        description: msg,
-        variant: "destructive",
-      });
+      const status = error?.response?.status;
+      const candidates = error?.response?.data?.candidates;
+      if (status === 409 && Array.isArray(candidates) && candidates.length > 0) {
+        setRequestCandidates(candidates);
+        setPickedRequestId(String(candidates[0]?.id ?? ""));
+        setRequestPickOpen(true);
+        toast({
+          title: "Selecionar requisição",
+          description: "Existem múltiplas requisições possíveis para este produto. Escolha uma.",
+        });
+      } else {
+        const msg = error?.response?.data?.error || error?.message || "Não foi possível criar a fatura.";
+        toast({
+          title: "Erro",
+          description: msg,
+          variant: "destructive",
+        });
+      }
     } finally {
       setSaving(false);
     }
@@ -470,6 +538,25 @@ export default function ProductDetailsPage() {
       return hay.includes(q);
     });
   }, [invoices, invoiceRepoQuery]);
+
+  useEffect(() => {
+    if (!invoiceIdFromQuery) return;
+    if (loading) return;
+
+    // Ensure invoices tab is open, then scroll to the invoice card.
+    if (tab !== "invoices") {
+      setTab("invoices");
+    }
+
+    // Defer to allow TabsContent to render.
+    const id = invoiceIdFromQuery;
+    const handle = window.setTimeout(() => {
+      const el = document.getElementById(`invoice-${id}`);
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 50);
+
+    return () => window.clearTimeout(handle);
+  }, [invoiceIdFromQuery, loading, tab, invoices.length]);
 
   return (
     <AuthenticatedLayout>
@@ -495,7 +582,7 @@ export default function ProductDetailsPage() {
             }
           />
         ) : (
-          <Tabs defaultValue="details" className="space-y-4">
+          <Tabs value={tab} onValueChange={setTab} className="space-y-4">
             <TabsList>
               <TabsTrigger value="details">Detalhes</TabsTrigger>
               <TabsTrigger value="invoices">Faturas</TabsTrigger>
@@ -744,6 +831,13 @@ export default function ProductDetailsPage() {
                       onChange={(e) => setReqNumber(e.target.value)}
                     />
 
+                    <Input
+                      type="date"
+                      value={reqDate}
+                      onChange={(e) => setReqDate(e.target.value)}
+                      placeholder="Data da REQ (opcional)"
+                    />
+
                     {requestIdFromQuery ? (
                       <div className="text-xs text-muted-foreground">
                         Requisição: <span className="font-medium">{requestIdFromQuery}</span>
@@ -773,8 +867,25 @@ export default function ProductDetailsPage() {
                     <Input placeholder="Notas (opcional)" value={notes} onChange={(e) => setNotes(e.target.value)} />
 
                     <div className="space-y-1">
-                      <div className="text-xs text-muted-foreground">Anexo (opcional)</div>
-                      <Input type="file" onChange={(e) => setInvoiceAttachment(e.target.files?.[0] ?? null)} />
+                      <div className="text-xs text-muted-foreground">Anexos (opcional)</div>
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        <div className="space-y-1">
+                          <div className="text-xs text-muted-foreground">Cópia digitalizada da fatura</div>
+                          <Input
+                            type="file"
+                            accept="application/pdf,image/*"
+                            onChange={(e) => setInvoiceAttachment(e.target.files?.[0] ?? null)}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <div className="text-xs text-muted-foreground">Cópia do pedido/requisição (se existir)</div>
+                          <Input
+                            type="file"
+                            accept="application/pdf,image/*"
+                            onChange={(e) => setRequestAttachment(e.target.files?.[0] ?? null)}
+                          />
+                        </div>
+                      </div>
                     </div>
 
                     <div className="flex items-center justify-between">
@@ -783,12 +894,70 @@ export default function ProductDetailsPage() {
                         <Button variant="outline" onClick={() => setInvoiceDialogOpen(false)} disabled={saving}>
                           Cancelar
                         </Button>
-                        <Button onClick={addInvoice} disabled={saving || !invoiceNumber.trim() || quantity <= 0}>
+                        <Button onClick={() => addInvoice()} disabled={saving || !invoiceNumber.trim() || quantity <= 0}>
                           {saving ? "A guardar..." : "Adicionar"}
                         </Button>
                       </div>
                     </div>
                   </div>
+                </DialogContent>
+              </Dialog>
+
+              <Dialog open={requestPickOpen} onOpenChange={setRequestPickOpen}>
+                <DialogContent className="sm:max-w-[560px]">
+                  <DialogHeader>
+                    <DialogTitle>Selecionar requisição</DialogTitle>
+                    <DialogDescription>
+                      Há mais do que uma requisição possível para este produto. Selecione qual deve ficar associada à fatura.
+                    </DialogDescription>
+                  </DialogHeader>
+
+                  <div className="space-y-3">
+                    <div className="space-y-1">
+                      <div className="text-sm font-medium">Requisição</div>
+                      <Select value={pickedRequestId} onValueChange={setPickedRequestId}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecionar requisição" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {requestCandidates.map((c) => (
+                            <SelectItem key={c.id} value={c.id}>
+                              {c.gtmiNumber}
+                              {c.title ? ` - ${c.title}` : ""}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {pickedRequestId ? (
+                        <div className="text-xs text-muted-foreground">
+                          {(() => {
+                            const selected = requestCandidates.find((c) => c.id === pickedRequestId);
+                            if (!selected) return "";
+                            return selected.requestedAt
+                              ? `Data: ${new Date(selected.requestedAt).toLocaleString()}`
+                              : "";
+                          })()}
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <DialogFooter>
+                    <Button variant="outline" onClick={() => setRequestPickOpen(false)} disabled={saving}>
+                      Cancelar
+                    </Button>
+                    <Button
+                      onClick={() => {
+                        const selected = requestCandidates.find((c) => c.id === pickedRequestId);
+                        if (selected?.gtmiNumber) setReqNumber(selected.gtmiNumber);
+                        setRequestPickOpen(false);
+                        if (pickedRequestId) addInvoice(pickedRequestId);
+                      }}
+                      disabled={saving || !pickedRequestId}
+                    >
+                      Associar e registar
+                    </Button>
+                  </DialogFooter>
                 </DialogContent>
               </Dialog>
 
@@ -831,7 +1000,16 @@ export default function ProductDetailsPage() {
                 ) : (
                   <div className="mt-4 space-y-2">
                     {filteredInvoices.map((inv) => (
-                      <div key={inv.id} className="border rounded-md p-3">
+                      <div
+                        key={inv.id}
+                        id={`invoice-${inv.id}`}
+                        className={
+                          "border rounded-md p-3 " +
+                          (invoiceIdFromQuery && invoiceIdFromQuery === inv.id
+                            ? "ring-2 ring-primary/40 bg-muted/20"
+                            : "")
+                        }
+                      >
                         <div className="flex items-center justify-between">
                           <div className="font-medium">{inv.invoiceNumber}</div>
                           <div className="text-xs text-muted-foreground">

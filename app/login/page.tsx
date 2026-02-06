@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "@/app/authContext";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import Loading from "@/components/Loading"; // Import Loading component
@@ -12,9 +12,18 @@ export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false); // Add loading state
-  const { login } = useAuth();
+  const { login, isLoggedIn, isAuthLoading } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { toast } = useToast(); // Use toast hook
+
+  useEffect(() => {
+    if (isAuthLoading) return;
+    if (!isLoggedIn) return;
+
+    const redirect = searchParams?.get("redirect");
+    router.replace(redirect && redirect.startsWith("/") ? redirect : "/");
+  }, [isAuthLoading, isLoggedIn, router, searchParams]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -33,15 +42,21 @@ export default function Login() {
       setEmail("");
       setPassword("");
 
-      // Redirect to dashboard after a short delay
-      setTimeout(() => {
-        router.push("/");
-      }, 1500);
-    } catch (error) {
-      // Show error toast
+      const redirect = searchParams?.get("redirect");
+      router.replace(redirect && redirect.startsWith("/") ? redirect : "/");
+    } catch (error: any) {
+      const backendMsg =
+        error?.response?.data?.message ||
+        error?.response?.data?.error ||
+        (typeof error?.response?.data === "string" ? error.response.data : null);
+
+      const code = error?.response?.data?.code;
+
       toast({
         title: "Login Failed",
-        description: "Invalid email or password. Please try again.",
+        description:
+          (code ? `${code}: ` : "") +
+          (backendMsg || "Não foi possível efetuar login."),
         variant: "destructive",
       });
     } finally {
@@ -55,6 +70,9 @@ export default function Login() {
     <div className="flex justify-center items-center h-screen">
       <form onSubmit={handleSubmit} className="w-full max-w-md p-8 space-y-4">
         <h2 className="text-2xl font-bold">Login</h2>
+        {isAuthLoading && (
+          <p className="text-sm text-muted-foreground">A verificar sessão...</p>
+        )}
         <Input
           type="email"
           value={email}

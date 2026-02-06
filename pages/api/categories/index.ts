@@ -1,4 +1,5 @@
 import { NextApiRequest, NextApiResponse } from "next";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/prisma/client";
 import { getSessionServer } from "@/utils/auth";
 
@@ -11,17 +12,25 @@ export default async function handler(
     return res.status(401).json({ error: "Unauthorized" });
   }
 
+  const isAdmin = session.role === "ADMIN";
+
   const { method } = req;
-  const userId = session.id; // Use session.id to get the user ID
+  const tenantId = session.tenantId;
 
   switch (method) {
     case "POST":
+      if (!isAdmin) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
       try {
-        const { name } = req.body;
+        const name = String(req.body?.name ?? "").trim();
+        if (!name) {
+          return res.status(400).json({ error: "Name is required" });
+        }
         const category = await prisma.category.create({
           data: {
             name,
-            userId,
+            tenantId,
           },
         });
         res.status(201).json(category);
@@ -33,7 +42,8 @@ export default async function handler(
     case "GET":
       try {
         const categories = await prisma.category.findMany({
-          where: { userId },
+          where: { tenantId },
+          orderBy: { name: "asc" },
         });
         res.status(200).json(categories);
       } catch (error) {
@@ -42,16 +52,29 @@ export default async function handler(
       }
       break;
     case "PUT":
+      if (!isAdmin) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
       try {
         const { id, name } = req.body;
 
-        if (!id || !name) {
+        if (!id || !String(name ?? "").trim()) {
           return res.status(400).json({ error: "ID and name are required" });
         }
 
-        const updatedCategory = await prisma.category.update({
-          where: { id },
-          data: { name },
+        const normalizedName = String(name).trim();
+
+        const updated = await prisma.category.updateMany({
+          where: { id, tenantId },
+          data: { name: normalizedName },
+        });
+
+        if (updated.count === 0) {
+          return res.status(404).json({ error: "Category not found" });
+        }
+
+        const updatedCategory = await prisma.category.findFirst({
+          where: { id, tenantId },
         });
 
         res.status(200).json(updatedCategory);
@@ -61,27 +84,25 @@ export default async function handler(
       }
       break;
     case "DELETE":
+      if (!isAdmin) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
       try {
         const { id } = req.body;
-        console.log("Deleting category with ID:", id); // Debug statement
 
-        // Check if the category exists
-        const category = await prisma.category.findUnique({
-          where: { id },
+        const deleted = await prisma.category.deleteMany({
+          where: { id, tenantId },
         });
 
-        if (!category) {
+        if (deleted.count === 0) {
           return res.status(404).json({ error: "Category not found" });
         }
 
-        const deleteResponse = await prisma.category.delete({
-          where: { id },
-        });
-
-        console.log("Delete response:", deleteResponse); // Debug statement
-
         res.status(204).end();
       } catch (error) {
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2003") {
+          return res.status(409).json({ error: "Não é possível remover: existem produtos associados." });
+        }
         console.error("Error deleting category:", error);
         res.status(500).json({ error: "Failed to delete category" });
       }

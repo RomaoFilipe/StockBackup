@@ -8,9 +8,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(401).json({ error: "Unauthorized" });
   }
 
-  const isAdmin = session.role === "ADMIN";
-  const asUserIdFromQuery = typeof req.query.asUserId === "string" ? req.query.asUserId : undefined;
-  const userId = isAdmin && asUserIdFromQuery ? asUserIdFromQuery : session.id;
+  const tenantId = session.tenantId;
 
   const id = req.query.id;
   if (typeof id !== "string") {
@@ -24,7 +22,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   try {
     const product = await prisma.product.findFirst({
-      where: { id, userId },
+      where: { id, tenantId },
       include: {
         category: true,
         supplier: true,

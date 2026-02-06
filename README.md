@@ -33,7 +33,7 @@ Stockly is designed to help businesses and individuals efficiently manage their 
 ### Authentication & Security
 
 - **JWT Authentication**: Secure token-based authentication
-- **User Registration**: Secure account creation with password hashing
+- **Admin Provisioning**: No public self-registration (users are created by an admin)
 - **Session Management**: Persistent login sessions with automatic token refresh
 - **Protected Routes**: Automatic redirection for unauthenticated users
 - **Password Security**: bcryptjs hashing for secure password storage
@@ -239,7 +239,17 @@ Editar `.env` e garantir pelo menos:
 ```env
 DATABASE_URL="postgresql://stockly:stockly_password@localhost:5432/stockly?schema=public"
 JWT_SECRET="<um-segredo-bom>"
-ALLOW_REGISTRATION="true"
+# Optional but recommended for multi-tenant deployments
+# DEFAULT_TENANT_SLUG="default"
+
+# Optional: allowlist cross-site login origins
+# CORS_ALLOWED_ORIGINS="http://localhost:3000"
+
+# Optional: if behind a proxy/load balancer that sets x-forwarded-for
+# TRUST_PROXY="true"
+
+# Optional: prevent initial lockout (recommended to set explicitly in production)
+# ALLOWLIST_BOOTSTRAP_ADMIN="false"
 ```
 
 ### ✅ Comandos rápidos (EC2) (copy/paste)
@@ -346,7 +356,7 @@ Edita o `.env` e ajusta pelo menos:
 - `DATABASE_URL` (ligação ao Postgres)
 - `JWT_SECRET` (segredo para assinar sessões)
 
-Nota: para permitir registo via UI, define `ALLOW_REGISTRATION=true`.
+Nota: não existe registo público via UI — users são criados por Admin.
 
 ### 4) Preparar a base de dados (Prisma)
 
@@ -388,8 +398,8 @@ npx prisma migrate deploy
 ### Troubleshooting rápido
 
 - Erro a ligar ao Postgres: confirma o serviço, user/password e `DATABASE_URL`.
-- Registo desativado (HTTP 410): define `ALLOW_REGISTRATION=true`.
-- CORS/Origin not allowed no login: define `ALLOWED_ORIGINS` com a lista de origens permitidas (separadas por vírgula).
+- Registo desativado: está desativado por design (users são criados por Admin).
+- CORS/Origin not allowed no login: define `CORS_ALLOWED_ORIGINS` (alias: `ALLOWED_ORIGINS`) com a lista de origens permitidas (separadas por vírgula).
 
 ---
 
@@ -473,8 +483,11 @@ npx prisma migrate deploy
 
 | Variable                  | Description | Default |
 | ------------------------ | ----------- | ------- |
-| `ALLOW_REGISTRATION`     | Enables registration endpoint (`/register`) when set to `true` | disabled |
-| `ALLOWED_ORIGINS`        | Comma-separated allowed origins for cross-site login | empty |
+| `ALLOW_REGISTRATION`     | (Deprecated) Registration is disabled (Admin-only provisioning); this flag is ignored | disabled |
+| `CORS_ALLOWED_ORIGINS`   | Comma-separated allowed origins for cross-site login (alias: `ALLOWED_ORIGINS`) | empty |
+| `DEFAULT_TENANT_SLUG`    | Tenant slug used when none is provided (header `x-tenant-slug` or body `tenantSlug`) | `default` |
+| `TRUST_PROXY`            | When `true`, uses `x-forwarded-for` (left-most IP) as the client IP | `false` |
+| `ALLOWLIST_BOOTSTRAP_ADMIN` | When `true`, allows first `ADMIN` login with empty allowlist and seeds allowlist with current IP | `true` in dev, `false` in production |
 | `NEXT_PUBLIC_API_BASE_URL` | API base URL (useful if front/back are split) | `/api` |
 
 ### Local PostgreSQL Setup (non-Docker)
@@ -576,7 +589,7 @@ model Supplier {
 
 ### Authentication Endpoints
 
-This project is configured as **login-only** by default (accounts are created by an administrator). If you ever need to re-enable self-registration, set `ALLOW_REGISTRATION=true`.
+This project is configured as **login-only** (accounts are created by an administrator). Public self-registration is disabled.
 
 ### Roles / Pessoas
 
@@ -593,7 +606,7 @@ There is a local file storage module:
 
 - UI: `/storage` (tabs by type)
 - API: `GET/POST /api/storage`, `GET/DELETE /api/storage/[id]`
-- Files are stored on disk under `storage/<userId>/...` and indexed in Postgres (`StoredFile`).
+- Files are stored on disk under `storage/<tenantId>/...` and indexed in Postgres (`StoredFile`).
 
 #### POST `/api/auth/login`
 
@@ -1061,7 +1074,7 @@ npm run lint
 
 ### Manual Testing Checklist
 
-- [ ] User registration and login
+- [ ] Admin-provisioned login (no self-registration)
 - [ ] Product CRUD operations
 - [ ] Category management
 - [ ] Supplier management
@@ -1332,7 +1345,7 @@ If you encounter any issues or have questions:
 
 | Feature                   | Status      | Description                            |
 | ------------------------- | ----------- | -------------------------------------- |
-| User Authentication       | ✅ Complete | JWT-based auth with registration/login |
+| User Authentication       | ✅ Complete | JWT-based auth (admin-provisioned users) |
 | Product Management        | ✅ Complete | Full CRUD with search and filtering    |
 | Category Management       | ✅ Complete | Create, edit, delete categories        |
 | Supplier Management       | ✅ Complete | Manage product suppliers               |

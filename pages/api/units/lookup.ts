@@ -24,13 +24,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(400).json({ error: "Invalid query" });
   }
 
-  const requestingUserId = session.id;
-  const tenantUserId = parsed.data.asUserId && session.role === "ADMIN" ? parsed.data.asUserId : requestingUserId;
+  const tenantId = session.tenantId;
 
   try {
     const prismaAny = prisma as any;
     const unit = await prismaAny.productUnit.findFirst({
-      where: { code: parsed.data.code, userId: tenantUserId },
+      where: { code: parsed.data.code, tenantId },
       select: {
         id: true,
         code: true,

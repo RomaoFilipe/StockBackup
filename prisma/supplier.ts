@@ -2,17 +2,16 @@ import { prisma } from "@/prisma/client";
 
 export const createSupplier = async (data: {
   name: string;
-  userId: string;
+  tenantId: string;
 }) => {
-  console.log("Creating supplier with data:", data); // Debugging log
   return prisma.supplier.create({
     data,
   });
 };
 
-export const getSuppliersByUser = async (userId: string) => {
+export const getSuppliersByUser = async (tenantId: string) => {
   return prisma.supplier.findMany({
-    where: { userId },
+    where: { tenantId },
   });
 };
 

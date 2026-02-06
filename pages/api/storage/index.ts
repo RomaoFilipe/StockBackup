@@ -6,6 +6,15 @@ import crypto from "crypto";
 import { IncomingForm } from "formidable";
 import { prisma } from "@/prisma/client";
 import { getSessionServer } from "@/utils/auth";
+import {
+  buildInvoiceFolderName,
+  buildProductFolderName,
+  buildRequestFolderName,
+  buildStoredFileName,
+  getInvoiceStorageDir,
+  getProductInvoiceStorageDir,
+  getRequestStorageDir,
+} from "@/utils/storageLayout";
 
 export const config = {
   api: {
@@ -19,6 +28,17 @@ const ensureDir = async (dir: string) => {
   await fs.promises.mkdir(dir, { recursive: true });
 };
 
+const moveFile = async (from: string, to: string) => {
+  try {
+    await fs.promises.rename(from, to);
+  } catch (error: any) {
+    // EXDEV can happen if temp upload dir is on another device.
+    if (error?.code !== "EXDEV") throw error;
+    await fs.promises.copyFile(from, to);
+    await fs.promises.unlink(from);
+  }
+};
+
 const toSafeFileName = (name: string) => {
   const base = name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 120);
   return base || "file";
@@ -30,7 +50,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(401).json({ error: "Unauthorized" });
   }
 
-  const userId = session.id;
+  const tenantId = session.tenantId;
 
   if (req.method === "GET") {
     const kind = req.query.kind;
@@ -48,7 +68,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     try {
       const files = await prisma.storedFile.findMany({
         where: {
-          userId,
+          tenantId,
           kind: parsedKind.data,
           invoiceId: invoiceId ?? undefined,
           requestId: requestId ?? undefined,
@@ -116,38 +136,164 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
 
       // Validate ownership of linked entities
+      let invoiceMeta:
+        | {
+            id: string;
+            invoiceNumber: string;
+            issuedAt: Date;
+            requestId: string | null;
+            product: { id: string; sku: string; name: string };
+          }
+        | null = null;
       if (invoiceId) {
         const inv = await prisma.productInvoice.findFirst({
-          where: { id: String(invoiceId), userId },
-          select: { id: true },
+          where: { id: String(invoiceId), tenantId },
+          select: {
+            id: true,
+            invoiceNumber: true,
+            issuedAt: true,
+            requestId: true,
+            product: { select: { id: true, sku: true, name: true } },
+          },
         });
         if (!inv) return res.status(404).json({ error: "Invoice not found" });
+        invoiceMeta = {
+          id: inv.id,
+          invoiceNumber: inv.invoiceNumber,
+          issuedAt: inv.issuedAt,
+          requestId: inv.requestId ?? null,
+          product: inv.product,
+        };
       }
+
+      let requestMeta:
+        | {
+            id: string;
+            gtmiNumber: string;
+            gtmiYear: number;
+            requestedAt: Date;
+            requesterName: string | null;
+            title: string | null;
+            userName: string | null;
+          }
+        | null = null;
       if (requestId) {
         const reqRow = await prisma.request.findFirst({
-          where: { id: String(requestId), userId },
-          select: { id: true },
+          where: { id: String(requestId), tenantId },
+          select: {
+            id: true,
+            gtmiNumber: true,
+            gtmiYear: true,
+            requestedAt: true,
+            requesterName: true,
+            title: true,
+            user: { select: { name: true } },
+          },
         });
         if (!reqRow) return res.status(404).json({ error: "Request not found" });
+
+        requestMeta = {
+          id: reqRow.id,
+          gtmiNumber: reqRow.gtmiNumber,
+          gtmiYear: reqRow.gtmiYear,
+          requestedAt: reqRow.requestedAt,
+          requesterName: reqRow.requesterName,
+          title: reqRow.title,
+          userName: reqRow.user?.name ?? null,
+        };
       }
 
-      const safeOriginal = toSafeFileName(originalName);
-      const ext = path.extname(safeOriginal).slice(0, 16);
+      const originalBase = path.basename(String(originalName));
+      const originalForDb = (
+        originalBase
+          .replace(/[\r\n\0]/g, " ")
+          .replace(/\s+/g, " ")
+          .trim()
+          .slice(0, 180) || "file"
+      );
+
       const id = crypto.randomUUID();
 
-      const userDir = path.join(process.cwd(), "storage", userId);
-      await ensureDir(userDir);
+      let destDir = path.join(process.cwd(), "storage", tenantId);
+      if (parsedKind.data === "REQUEST" && requestMeta) {
+        const folderName = buildRequestFolderName({
+          gtmiNumber: requestMeta.gtmiNumber,
+          requesterName: requestMeta.requesterName ?? requestMeta.userName,
+          summary: requestMeta.title,
+          requestedAt: requestMeta.requestedAt,
+        });
+        destDir = getRequestStorageDir({
+          tenantId,
+          gtmiYear: requestMeta.gtmiYear,
+          folderName,
+        });
+      }
 
-      const fileName = `${id}${ext}`;
-      const destPath = path.join(userDir, fileName);
-      await fs.promises.rename(tempPath, destPath);
+      if (parsedKind.data === "INVOICE" && invoiceMeta) {
+        const invoiceFolderName = buildInvoiceFolderName({
+          invoiceNumber: invoiceMeta.invoiceNumber,
+          issuedAt: invoiceMeta.issuedAt,
+        });
+
+        // If the invoice is linked to a request, store it inside the request folder.
+        if (invoiceMeta.requestId) {
+          const reqRow = await prisma.request.findFirst({
+            where: { id: invoiceMeta.requestId, tenantId },
+            select: {
+              id: true,
+              gtmiNumber: true,
+              gtmiYear: true,
+              requestedAt: true,
+              requesterName: true,
+              title: true,
+              user: { select: { name: true } },
+            },
+          });
+
+          if (reqRow) {
+            const folderName = buildRequestFolderName({
+              gtmiNumber: reqRow.gtmiNumber,
+              requesterName: reqRow.requesterName ?? reqRow.user?.name,
+              summary: reqRow.title,
+              requestedAt: reqRow.requestedAt,
+            });
+            const requestDir = getRequestStorageDir({
+              tenantId,
+              gtmiYear: reqRow.gtmiYear,
+              folderName,
+            });
+
+            destDir = path.join(requestDir, "FATURAS", invoiceFolderName);
+          }
+        }
+
+        // Default: organize invoices under the product folder-by-year.
+        if (!destDir) {
+          const productFolderName = buildProductFolderName({
+            sku: invoiceMeta.product.sku,
+            name: invoiceMeta.product.name,
+          });
+          destDir = getProductInvoiceStorageDir({
+            tenantId,
+            year: invoiceMeta.issuedAt.getFullYear(),
+            productFolderName,
+            invoiceFolderName,
+          });
+        }
+      }
+
+      await ensureDir(destDir);
+
+      const fileName = buildStoredFileName({ originalName: originalForDb, id });
+      const destPath = path.join(destDir, fileName);
+      await moveFile(tempPath, destPath);
 
       const created = await prisma.storedFile.create({
         data: {
           id,
-          userId,
+          tenantId,
           kind: parsedKind.data,
-          originalName: safeOriginal,
+          originalName: originalForDb,
           fileName,
           mimeType,
           sizeBytes,

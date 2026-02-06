@@ -2,9 +2,8 @@
 
 import { Product } from "@/app/types";
 import { Column, ColumnDef } from "@tanstack/react-table";
-import Link from "next/link";
 
-import ProductDropDown from "./ProductsDropDown";
+import ProductActionsIcons from "./ProductActionsIcons";
 
 import {
   DropdownMenu,
@@ -90,12 +89,7 @@ export const columns: ColumnDef<Product>[] = [
     cell: ({ row }) => {
       const name = row.original.name;
       return (
-        <Link
-          href={`/products/${row.original.id}`}
-          className="underline underline-offset-2 hover:opacity-80"
-        >
-          {name}
-        </Link>
+        <span className="font-medium">{name}</span>
       );
     },
     header: ({ column }) => <SortableHeader column={column} label="Name" />,
@@ -203,8 +197,11 @@ export const columns: ColumnDef<Product>[] = [
   },
   {
     id: "actions",
+    header: () => <div className="text-right">Ações</div>,
+    enableSorting: false,
+    meta: { align: "right" },
     cell: ({ row }) => {
-      return <ProductDropDown row={row} />;
+      return <ProductActionsIcons product={row.original} />;
     },
   },
 ];

@@ -219,9 +219,9 @@ export default function FiltersAndActions({
   const filteredProducts = getFilteredProducts();
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div className="flex flex-1 flex-col gap-3 sm:flex-row sm:items-center lg:items-stretch">
+    <div className="space-y-5">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex flex-1 flex-col gap-4 sm:flex-row sm:items-center sm:gap-x-3 sm:gap-y-3 lg:flex-nowrap lg:items-stretch">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -245,27 +245,30 @@ export default function FiltersAndActions({
             )}
           </div>
 
-          <CategoryDropDown
-            selectedCategory={selectedCategory}
-            setSelectedCategory={setSelectedCategory}
-            buttonVariant="outline"
-            buttonClassName="h-11 rounded-full px-4"
-            label="Categoria"
-          />
-          <StatusDropDown
-            selectedStatuses={selectedStatuses}
-            setSelectedStatuses={setSelectedStatuses}
-            buttonVariant="outline"
-            buttonClassName="h-11 rounded-full px-4"
-            label="Estado"
-          />
-          <SuppliersDropDown
-            selectedSuppliers={selectedSuppliers}
-            setSelectedSuppliers={setSelectedSuppliers}
-            buttonVariant="outline"
-            buttonClassName="h-11 rounded-full px-4"
-            label="Fornecedor"
-          />
+          <div className="-mx-1 flex w-full gap-2 overflow-x-auto px-1 pb-1 sm:mx-0 sm:w-auto sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0">
+            <CategoryDropDown
+              selectedCategory={selectedCategory}
+              setSelectedCategory={setSelectedCategory}
+              buttonVariant={selectedCategory.length > 0 ? "secondary" : "outline"}
+              buttonClassName="h-10 shrink-0 whitespace-nowrap rounded-full px-3 text-sm sm:h-11 sm:px-4 sm:text-base"
+              label="Categoria"
+            />
+            <StatusDropDown
+              selectedStatuses={selectedStatuses}
+              setSelectedStatuses={setSelectedStatuses}
+              buttonVariant={selectedStatuses.length > 0 ? "secondary" : "outline"}
+              buttonClassName="h-10 shrink-0 whitespace-nowrap rounded-full px-3 text-sm sm:h-11 sm:px-4 sm:text-base"
+              label="Estado"
+            />
+            <SuppliersDropDown
+              selectedSuppliers={selectedSuppliers}
+              setSelectedSuppliers={setSelectedSuppliers}
+              buttonVariant={selectedSuppliers.length > 0 ? "secondary" : "outline"}
+              buttonClassName="h-10 shrink-0 whitespace-nowrap rounded-full px-3 text-sm sm:h-11 sm:px-4 sm:text-base"
+              label="Fornecedor"
+            />
+          </div>
+
           <div className="flex items-center gap-2 lg:hidden">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -280,10 +283,10 @@ export default function FiltersAndActions({
                   <AddProductDialog
                     allProducts={allProducts}
                     userId={userId}
-                    trigger={<DropdownMenuItem>Produto</DropdownMenuItem>}
+                    trigger={<DropdownMenuItem onSelect={(event) => event.preventDefault()}>Produto</DropdownMenuItem>}
                   />
-                  <AddCategoryDialog trigger={<DropdownMenuItem>Categoria</DropdownMenuItem>} />
-                  <AddSupplierDialog trigger={<DropdownMenuItem>Fornecedor</DropdownMenuItem>} />
+                  <AddCategoryDialog trigger={<DropdownMenuItem onSelect={(event) => event.preventDefault()}>Categoria</DropdownMenuItem>} />
+                  <AddSupplierDialog trigger={<DropdownMenuItem onSelect={(event) => event.preventDefault()}>Fornecedor</DropdownMenuItem>} />
                 </DropdownMenuGroup>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -303,21 +306,21 @@ export default function FiltersAndActions({
                   <CategoryDropDown
                     selectedCategory={selectedCategory}
                     setSelectedCategory={setSelectedCategory}
-                    buttonVariant="outline"
+                    buttonVariant={selectedCategory.length > 0 ? "secondary" : "outline"}
                     buttonClassName="h-11 w-full justify-start rounded-xl"
                     label="Categoria"
                   />
                   <StatusDropDown
                     selectedStatuses={selectedStatuses}
                     setSelectedStatuses={setSelectedStatuses}
-                    buttonVariant="outline"
+                    buttonVariant={selectedStatuses.length > 0 ? "secondary" : "outline"}
                     buttonClassName="h-11 w-full justify-start rounded-xl"
                     label="Estado"
                   />
                   <SuppliersDropDown
                     selectedSuppliers={selectedSuppliers}
                     setSelectedSuppliers={setSelectedSuppliers}
-                    buttonVariant="outline"
+                    buttonVariant={selectedSuppliers.length > 0 ? "secondary" : "outline"}
                     buttonClassName="h-11 w-full justify-start rounded-xl"
                     label="Fornecedor"
                   />
@@ -362,7 +365,7 @@ export default function FiltersAndActions({
           </div>
         </div>
 
-        <div className="hidden items-center gap-3 lg:flex">
+        <div className="hidden items-center gap-4 lg:flex">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button className="h-11 gap-2 rounded-full px-5 font-semibold">
@@ -376,10 +379,10 @@ export default function FiltersAndActions({
                 <AddProductDialog
                   allProducts={allProducts}
                   userId={userId}
-                  trigger={<DropdownMenuItem>Produto</DropdownMenuItem>}
+                  trigger={<DropdownMenuItem onSelect={(event) => event.preventDefault()}>Produto</DropdownMenuItem>}
                 />
-                <AddCategoryDialog trigger={<DropdownMenuItem>Categoria</DropdownMenuItem>} />
-                <AddSupplierDialog trigger={<DropdownMenuItem>Fornecedor</DropdownMenuItem>} />
+                <AddCategoryDialog trigger={<DropdownMenuItem onSelect={(event) => event.preventDefault()}>Categoria</DropdownMenuItem>} />
+                <AddSupplierDialog trigger={<DropdownMenuItem onSelect={(event) => event.preventDefault()}>Fornecedor</DropdownMenuItem>} />
               </DropdownMenuGroup>
             </DropdownMenuContent>
           </DropdownMenu>

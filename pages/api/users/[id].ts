@@ -6,6 +6,7 @@ import { getSessionServer } from "@/utils/auth";
 const updateUserSchema = z.object({
   name: z.string().min(1).max(100).optional(),
   role: z.enum(["USER", "ADMIN"]).optional(),
+  isActive: z.boolean().optional(),
 });
 
 const requireAdmin = async (req: NextApiRequest, res: NextApiResponse) => {
@@ -17,6 +18,11 @@ const requireAdmin = async (req: NextApiRequest, res: NextApiResponse) => {
 
   if (session.role !== "ADMIN") {
     res.status(403).json({ error: "Forbidden" });
+    return null;
+  }
+
+  if (!session.tenantId) {
+    res.status(500).json({ error: "Session missing tenant" });
     return null;
   }
 
@@ -43,10 +49,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(400).json({ error: "You cannot remove your own admin role" });
     }
 
+    if (id === session.id && parsed.data.isActive === false) {
+      return res.status(400).json({ error: "You cannot deactivate your own account" });
+    }
+
     try {
       const updateResult = await prisma.user.updateMany({
-        where: { id },
-        data: parsed.data,
+        where: { id, tenantId: session.tenantId },
+        data: {
+          ...(parsed.data.name ? { name: parsed.data.name.trim() } : {}),
+          ...(parsed.data.role ? { role: parsed.data.role } : {}),
+          ...(typeof parsed.data.isActive === "boolean" ? { isActive: parsed.data.isActive } : {}),
+        },
       });
 
       if (updateResult.count === 0) {
@@ -61,6 +75,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           email: true,
           username: true,
           role: true,
+          isActive: true,
           createdAt: true,
           updatedAt: true,
         },
@@ -87,14 +102,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     try {
-      const deleted = await prisma.user.deleteMany({ where: { id } });
-      if (deleted.count === 0) {
+      const updated = await prisma.user.updateMany({
+        where: { id, tenantId: session.tenantId },
+        data: { isActive: false },
+      });
+
+      if (updated.count === 0) {
         return res.status(404).json({ error: "User not found" });
       }
       return res.status(204).end();
     } catch (error) {
       console.error("DELETE /api/users/[id] error:", error);
-      return res.status(500).json({ error: "Failed to delete user" });
+      return res.status(500).json({ error: "Failed to deactivate user" });
     }
   }
 

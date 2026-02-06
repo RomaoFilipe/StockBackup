@@ -29,10 +29,19 @@ import { Product } from "@/app/types";
 import { useAuth } from "@/app/authContext";
 import axiosInstance from "@/utils/axiosInstance";
 
+type RequestingServiceDto = {
+  id: number;
+  codigo: string;
+  designacao: string;
+  ativo: boolean;
+};
+
 const ProductSchema = z.object({
   // Fatura
   invoiceNumber: z.string().min(1, "Nº de fatura é obrigatório").max(64),
   reqNumber: z.string().max(64).optional(),
+  invoiceDate: z.string().min(1, "Data da fatura é obrigatória"),
+  reqDate: z.string().optional(),
   invoiceNotes: z.string().max(500).optional(),
 
   // Produto
@@ -57,6 +66,8 @@ const ProductSchema = z.object({
 interface ProductFormData {
   invoiceNumber: string;
   reqNumber?: string;
+  invoiceDate: string;
+  reqDate?: string;
   invoiceNotes?: string;
   productName: string;
   productDescription?: string;
@@ -81,6 +92,8 @@ export default function AddProductDialog({
     defaultValues: {
       invoiceNumber: "",
       reqNumber: "",
+      invoiceDate: new Date().toISOString().slice(0, 10),
+      reqDate: "",
       invoiceNotes: "",
       productName: "",
       productDescription: "",
@@ -97,8 +110,11 @@ export default function AddProductDialog({
   const [isSubmitting, setIsSubmitting] = useState(false); // Button loading state
   const dialogCloseRef = useRef<HTMLButtonElement | null>(null);
   const [attachment, setAttachment] = useState<File | null>(null);
+  const [requestAttachment, setRequestAttachment] = useState<File | null>(null);
   const [createdInvoiceId, setCreatedInvoiceId] = useState<string | null>(null);
   const [createdUnitPreviewCodes, setCreatedUnitPreviewCodes] = useState<string[]>([]);
+  const [requestingServices, setRequestingServices] = useState<RequestingServiceDto[]>([]);
+  const [requestingServiceId, setRequestingServiceId] = useState<string>("");
 
   const {
     isLoading,
@@ -121,6 +137,16 @@ export default function AddProductDialog({
     if (isLoggedIn && openProductDialog) {
       loadCategories();
       loadSuppliers();
+
+      (async () => {
+        try {
+          const res = await axiosInstance.get("/requesting-services");
+          setRequestingServices(res.data || []);
+        } catch {
+          // optional: keep form usable even if services list fails
+          setRequestingServices([]);
+        }
+      })();
     }
   }, [isLoggedIn, openProductDialog, loadCategories, loadSuppliers]);
 
@@ -129,6 +155,8 @@ export default function AddProductDialog({
       reset({
         invoiceNumber: "",
         reqNumber: "",
+        invoiceDate: new Date().toISOString().slice(0, 10),
+        reqDate: "",
         invoiceNotes: "",
         productName: selectedProduct.name,
         productDescription: (selectedProduct as any).description ?? "",
@@ -143,6 +171,8 @@ export default function AddProductDialog({
       reset({
         invoiceNumber: "",
         reqNumber: "",
+        invoiceDate: new Date().toISOString().slice(0, 10),
+        reqDate: "",
         invoiceNotes: "",
         productName: "",
         productDescription: "",
@@ -153,8 +183,10 @@ export default function AddProductDialog({
       setSelectedCategory("");
       setSelectedSupplier("");
       setAttachment(null);
+      setRequestAttachment(null);
       setCreatedInvoiceId(null);
       setCreatedUnitPreviewCodes([]);
+      setRequestingServiceId("");
     }
   }, [selectedProduct, openProductDialog, reset]);
 
@@ -183,7 +215,10 @@ export default function AddProductDialog({
         const intakeRes = await axiosInstance.post("/intake", {
           invoiceNumber: data.invoiceNumber,
           reqNumber: data.reqNumber || undefined,
+          issuedAt: data.invoiceDate ? new Date(data.invoiceDate).toISOString() : undefined,
+          reqDate: data.reqDate?.trim() ? new Date(data.reqDate).toISOString() : undefined,
           notes: data.invoiceNotes || undefined,
+          requestingServiceId: requestingServiceId ? Number(requestingServiceId) : undefined,
           quantity: data.quantity,
           unitPrice: data.price,
           product: {
@@ -217,9 +252,21 @@ export default function AddProductDialog({
           });
         }
 
+        // Upload request attachment (optional) also linked to invoiceId
+        if (requestAttachment) {
+          const form = new FormData();
+          form.append("kind", "INVOICE");
+          form.append("invoiceId", created.invoice.id);
+          form.append("file", requestAttachment);
+          await fetch("/api/storage", {
+            method: "POST",
+            body: form,
+          });
+        }
+
         toast({
           title: "Entrada registada",
-          description: `Fatura criada e ${data.quantity} QR(s) gerado(s) por unidade.`,
+          description: `Fatura criada, anexos guardados (se escolhidos) e ${data.quantity} QR(s) gerado(s) por unidade.`,
         });
 
         // Refresh list
@@ -321,6 +368,43 @@ export default function AddProductDialog({
                         placeholder="REQ-1234"
                       />
                     </div>
+
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium">Data da fatura</label>
+                      <input
+                        type="date"
+                        className="h-11 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm"
+                        {...methods.register("invoiceDate")}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium">Data da REQ</label>
+                      <input
+                        type="date"
+                        className="h-11 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm"
+                        {...methods.register("reqDate")}
+                      />
+                    </div>
+
+                    <div className="space-y-1 sm:col-span-2">
+                      <label className="text-sm font-medium">Serviço requisitante (opcional)</label>
+                      <select
+                        value={requestingServiceId}
+                        onChange={(e) => setRequestingServiceId(e.target.value)}
+                        className="h-11 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm"
+                      >
+                        <option value="">(Sem serviço)</option>
+                        {requestingServices.map((s) => (
+                          <option key={s.id} value={String(s.id)}>
+                            {s.codigo} — {s.designacao}
+                          </option>
+                        ))}
+                      </select>
+                      {requestingServices.length === 0 ? (
+                        <div className="text-xs text-muted-foreground">Lista de serviços indisponível.</div>
+                      ) : null}
+                    </div>
+
                     <div className="space-y-1 sm:col-span-2">
                       <label className="text-sm font-medium">Notas</label>
                       <Textarea
@@ -425,7 +509,7 @@ export default function AddProductDialog({
 
                 <Card className="border-border/60">
                   <CardHeader className="pb-2">
-                    <CardTitle className="text-base">4) Anexo</CardTitle>
+                    <CardTitle className="text-base">4) Anexos</CardTitle>
                   </CardHeader>
                   <CardContent className="grid grid-cols-1 gap-3">
                     <div className="space-y-1">
@@ -435,6 +519,19 @@ export default function AddProductDialog({
                         accept="application/pdf,image/*"
                         className="block w-full text-sm"
                         onChange={(e) => setAttachment(e.target.files?.[0] ?? null)}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        PDF ou imagem. (Opcional)
+                      </p>
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium">Cópia do pedido/requisição (se existir)</label>
+                      <input
+                        type="file"
+                        accept="application/pdf,image/*"
+                        className="block w-full text-sm"
+                        onChange={(e) => setRequestAttachment(e.target.files?.[0] ?? null)}
                       />
                       <p className="text-xs text-muted-foreground">
                         PDF ou imagem. (Opcional)

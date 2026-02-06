@@ -40,6 +40,9 @@ export function CategoryDropDown({
   const { categories, loadCategories } = useProductStore();
   const { user } = useAuth(); // Get the logged-in user's info
 
+  const selectedCount = selectedCategory.length;
+  const displayLabel = selectedCount > 0 ? `${label} (${selectedCount})` : label;
+
   React.useEffect(() => {
     loadCategories();
   }, [loadCategories]);
@@ -63,12 +66,12 @@ export function CategoryDropDown({
   }
 
   return (
-    <div className="flex items-center space-x-4 poppins">
+    <div className="poppins">
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <Button variant={buttonVariant} className={buttonClassName ?? "h-10"}>
             <LuGitPullRequestDraft />
-            {label}
+            {displayLabel}
           </Button>
         </PopoverTrigger>
         <PopoverContent className="p-0 w-56 poppins" side="bottom" align="end">

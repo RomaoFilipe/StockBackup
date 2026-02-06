@@ -13,7 +13,7 @@ import { useProductStore } from "../useProductStore";
 
 const AppTable = React.memo(() => {
   const { allProducts, loadProducts, isLoading } = useProductStore();
-  const { isLoggedIn, user } = useAuth();
+  const { isLoggedIn, isAuthLoading, user } = useAuth();
   const router = useRouter();
 
   // State for column filters, search term, and pagination
@@ -43,12 +43,14 @@ const AppTable = React.memo(() => {
 
   // Load products if the user is logged in
   useEffect(() => {
+    if (isAuthLoading) return;
+
     if (!isLoggedIn) {
-      router.push("/login");
+      router.replace("/login");
     } else {
       handleLoadProducts();
     }
-  }, [isLoggedIn, handleLoadProducts, router]);
+  }, [isAuthLoading, isLoggedIn, handleLoadProducts, router]);
 
   useEffect(() => {
     // Debug log for products - only log in development
@@ -60,21 +62,21 @@ const AppTable = React.memo(() => {
   // Memoize the product count
   const productCount = useMemo(() => allProducts.length, [allProducts]);
 
-  if (!isLoggedIn || !user) {
+  if (isAuthLoading || !isLoggedIn || !user) {
     return null;
   }
 
   return (
     <Card className="flex flex-col shadow-none poppins border-none">
       {/* Centered Header */}
-      <CardHeader className="flex flex-col justify-center items-center space-y-2 sm:space-y-0 sm:flex-row sm:justify-between sm:space-x-4">
+      <CardHeader className="flex flex-col items-center justify-center space-y-2 pb-10 sm:flex-row sm:justify-between sm:space-x-4 sm:space-y-0 sm:pb-12">
         <div className="flex flex-col items-center sm:items-start">
           <CardTitle className="font-bold text-[23px]">Produtos</CardTitle>
           <p className="text-sm text-slate-600">{productCount} produtos</p>
         </div>
       </CardHeader>
 
-      <CardContent>
+    <CardContent className="pb-10 pt-8 lg:pt-10">
         {/* Filters and Actions */}
         <FiltersAndActions
           userId={user.id}

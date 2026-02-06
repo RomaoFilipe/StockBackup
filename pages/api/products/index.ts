@@ -12,7 +12,7 @@ export default async function handler(
   }
 
   const { method } = req;
-  const userId = session.id;
+  const tenantId = session.tenantId;
 
   switch (method) {
     case "POST":
@@ -29,6 +29,19 @@ export default async function handler(
           return res.status(400).json({ error: "SKU must be unique" });
         }
 
+        // Ensure category/supplier belong to the same tenant
+        const [category, supplier] = await Promise.all([
+          prisma.category.findFirst({ where: { id: categoryId, tenantId }, select: { id: true, name: true } }),
+          prisma.supplier.findFirst({ where: { id: supplierId, tenantId, isActive: true }, select: { id: true, name: true } }),
+        ]);
+
+        if (!category) {
+          return res.status(400).json({ error: "Invalid category" });
+        }
+        if (!supplier) {
+          return res.status(400).json({ error: "Invalid supplier" });
+        }
+
         // Use Prisma for product creation to ensure consistency
         const product = await prisma.product.create({
           data: {
@@ -38,21 +51,13 @@ export default async function handler(
             price,
             quantity: BigInt(quantity) as any,
             status,
-            userId,
+            tenantId,
             categoryId,
             supplierId,
             createdAt: new Date(),
           },
         });
-        
-        // Fetch category and supplier data for the response
-        const category = await prisma.category.findUnique({
-          where: { id: categoryId },
-        });
-        const supplier = await prisma.supplier.findUnique({
-          where: { id: supplierId },
-        });
-        
+
         // Return the created product data with category and supplier names
         res.status(201).json({
           id: product.id,
@@ -62,12 +67,12 @@ export default async function handler(
           price: product.price,
           quantity: Number(product.quantity),
           status: product.status,
-          userId: product.userId,
+          tenantId: product.tenantId,
           categoryId: product.categoryId,
           supplierId: product.supplierId,
           createdAt: product.createdAt.toISOString(),
-          category: category?.name || "Unknown",
-          supplier: supplier?.name || "Unknown",
+          category: category.name,
+          supplier: supplier.name,
         });
       } catch (error) {
         res.status(500).json({ error: "Failed to create product" });
@@ -77,34 +82,22 @@ export default async function handler(
     case "GET":
       try {
         const products = await prisma.product.findMany({
-          where: { userId },
+          where: { tenantId },
+          include: {
+            category: { select: { name: true } },
+            supplier: { select: { name: true } },
+          },
         });
 
-        // Debug log - only log in development
-        if (process.env.NODE_ENV === 'development') {
-          console.log("Raw products from database:", products);
-        }
-
-        // Fetch category and supplier data separately
-        const transformedProducts = await Promise.all(
-          products.map(async (product) => {
-            const category = await prisma.category.findUnique({
-              where: { id: product.categoryId },
-            });
-            const supplier = await prisma.supplier.findUnique({
-              where: { id: product.supplierId },
-            });
-
-            return {
-              ...product,
-              quantity: Number(product.quantity), // Convert BigInt to Number
-              createdAt: product.createdAt.toISOString(), // Convert `createdAt` to ISO string
-              description: (product as any).description ?? null,
-              category: category?.name || "Unknown", // Transform category to string
-              supplier: supplier?.name || "Unknown", // Transform supplier to string
-            };
-          })
-        );
+        const transformedProducts = products.map((product) => ({
+          ...product,
+          quantity: Number(product.quantity),
+          createdAt: product.createdAt.toISOString(),
+          updatedAt: product.updatedAt.toISOString(),
+          description: product.description ?? null,
+          category: product.category?.name || "Unknown",
+          supplier: product.supplier?.name || "Unknown",
+        }));
 
         res.status(200).json(transformedProducts);
       } catch (error) {
@@ -126,6 +119,28 @@ export default async function handler(
           supplierId,
         } = req.body;
 
+        const existing = await prisma.product.findFirst({
+          where: { id, tenantId },
+          select: { id: true },
+        });
+
+        if (!existing) {
+          return res.status(404).json({ error: "Product not found" });
+        }
+
+        // Ensure category/supplier belong to the same tenant
+        const [category, supplier] = await Promise.all([
+          prisma.category.findFirst({ where: { id: categoryId, tenantId }, select: { id: true, name: true } }),
+          prisma.supplier.findFirst({ where: { id: supplierId, tenantId, isActive: true }, select: { id: true, name: true } }),
+        ]);
+
+        if (!category) {
+          return res.status(400).json({ error: "Invalid category" });
+        }
+        if (!supplier) {
+          return res.status(400).json({ error: "Invalid supplier" });
+        }
+
         const updatedProduct = await prisma.product.update({
           where: { id },
           data: {
@@ -140,14 +155,6 @@ export default async function handler(
           },
         });
 
-        // Fetch category and supplier data for the response
-        const category = await prisma.category.findUnique({
-          where: { id: categoryId },
-        });
-        const supplier = await prisma.supplier.findUnique({
-          where: { id: supplierId },
-        });
-
         // Return the updated product data with category and supplier names
         res.status(200).json({
           id: updatedProduct.id,
@@ -157,12 +164,12 @@ export default async function handler(
           price: updatedProduct.price,
           quantity: Number(updatedProduct.quantity), // Convert BigInt to Number
           status: updatedProduct.status,
-          userId: updatedProduct.userId,
+          tenantId: updatedProduct.tenantId,
           categoryId: updatedProduct.categoryId,
           supplierId: updatedProduct.supplierId,
           createdAt: updatedProduct.createdAt.toISOString(),
-          category: category?.name || "Unknown",
-          supplier: supplier?.name || "Unknown",
+          category: category.name,
+          supplier: supplier.name,
         });
       } catch (error) {
         res.status(500).json({ error: "Failed to update product" });
@@ -173,9 +180,13 @@ export default async function handler(
       try {
         const { id } = req.body;
 
-        await prisma.product.delete({
-          where: { id },
+        const deleted = await prisma.product.deleteMany({
+          where: { id, tenantId },
         });
+
+        if (deleted.count === 0) {
+          return res.status(404).json({ error: "Product not found" });
+        }
 
         res.status(204).end();
       } catch (error) {

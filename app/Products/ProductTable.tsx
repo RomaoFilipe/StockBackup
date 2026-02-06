@@ -29,6 +29,7 @@ import EmptyState from "@/app/components/EmptyState";
 import { Badge } from "@/components/ui/badge";
 import ProductQrDialog from "./ProductQrDialog";
 import ProductDropDown from "./ProductsDropDown";
+import { QrCode } from "lucide-react";
 
 interface DataTableProps<TData, TValue> {
   data: TData[];
@@ -70,16 +71,17 @@ export const ProductTable = React.memo(function ProductTable({
   selectedStatuses,
   selectedSuppliers,
 }: DataTableProps<Product, unknown>) {
-  const { isLoggedIn } = useAuth();
+  const { isLoggedIn, isAuthLoading } = useAuth();
   const router = useRouter();
 
   const [sorting, setSorting] = useState<SortingState>([]);
 
   useEffect(() => {
+    if (isAuthLoading) return;
     if (!isLoggedIn) {
       router.replace("/login");
     }
-  }, [isLoggedIn, router]);
+  }, [isAuthLoading, isLoggedIn, router]);
 
   const filteredData = useMemo(() => {
     const filtered = data.filter((product) => {
@@ -119,19 +121,13 @@ export const ProductTable = React.memo(function ProductTable({
     getSortedRowModel: getSortedRowModel(),
   });
 
-  const handleRowClick = (id: string) => (event: React.MouseEvent) => {
-    const target = event.target as HTMLElement;
-    if (target.closest("[data-no-row-click]")) return;
-    router.push(`/products/${id}`);
-  };
-
   const pageCount = Math.max(1, table.getPageCount());
   const totalRows = filteredData.length;
   const startRow = totalRows === 0 ? 0 : pagination.pageIndex * pagination.pageSize + 1;
   const endRow = Math.min(totalRows, (pagination.pageIndex + 1) * pagination.pageSize);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6 ">
       {isLoading ? (
         <div className="space-y-4">
           <div className="hidden lg:block">
@@ -156,7 +152,7 @@ export const ProductTable = React.memo(function ProductTable({
         </div>
       ) : (
         <>
-          <div className="hidden lg:block rounded-2xl border border-border/60 bg-card/60 shadow-sm">
+          <div className="mt-6 hidden lg:block rounded-2xl border border-border/60 bg-card/60 shadow-sm">
             <Table>
               <TableHeader className="sticky top-0 z-10 bg-background/90 backdrop-blur">
                 {table.getHeaderGroups().map((headerGroup) => (
@@ -183,8 +179,7 @@ export const ProductTable = React.memo(function ProductTable({
                   table.getRowModel().rows.map((row) => (
                     <TableRow
                       key={row.id}
-                      onClick={handleRowClick(row.original.id)}
-                      className="cursor-pointer transition-colors hover:bg-muted/40"
+                      className="transition-colors hover:bg-muted/40"
                       data-state={row.getIsSelected() && "selected"}
                     >
                       {row.getVisibleCells().map((cell) => {
@@ -227,7 +222,6 @@ export const ProductTable = React.memo(function ProductTable({
                 return (
                   <div
                     key={row.id}
-                    onClick={handleRowClick(product.id)}
                     className="rounded-2xl border border-border/60 bg-card/60 p-4 shadow-sm"
                   >
                     <div className="flex items-start justify-between gap-3">
@@ -268,8 +262,14 @@ export const ProductTable = React.memo(function ProductTable({
                         data={qrData}
                         title={`QR • ${product.name}`}
                         trigger={
-                          <Button variant="outline" size="sm" className="h-8 rounded-full">
-                            Ver QR
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            className="h-8 w-8 rounded-full"
+                            aria-label={`Ver QR • ${product.name}`}
+                            title="Ver QR"
+                          >
+                            <QrCode className="h-4 w-4" />
                           </Button>
                         }
                       />
@@ -290,11 +290,11 @@ export const ProductTable = React.memo(function ProductTable({
             )}
           </div>
 
-          <div className="flex flex-col items-center gap-3 rounded-2xl border border-border/60 bg-card/60 p-4 shadow-sm lg:flex-row lg:justify-between">
+          <div className="flex flex-col items-center gap-4 rounded-2xl border border-border/60 bg-card/60 px-5 py-5 shadow-sm lg:flex-row lg:justify-between">
             <div className="text-sm text-muted-foreground">
               A mostrar {startRow}-{endRow} de {totalRows} produtos
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-3">
               <Button
                 variant="outline"
                 size="sm"

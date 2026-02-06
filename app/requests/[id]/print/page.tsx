@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import axiosInstance from "@/utils/axiosInstance";
 import { Button } from "@/components/ui/button";
+import QRCode from "qrcode";
 
 type GoodsType = "MATERIALS_SERVICES" | "WAREHOUSE_MATERIALS" | "OTHER_PRODUCTS";
 
@@ -50,6 +51,19 @@ type RequestDto = {
   signedByUserId?: string | null;
   signedBy?: { id: string; name: string; email: string } | null;
 
+  signedVoidedAt?: string | null;
+  signedVoidedReason?: string | null;
+  signedVoidedBy?: { id: string; name: string; email: string } | null;
+
+  pickupSignedAt?: string | null;
+  pickupSignedByName?: string | null;
+  pickupSignedByTitle?: string | null;
+  pickupSignatureDataUrl?: string | null;
+
+  pickupVoidedAt?: string | null;
+  pickupVoidedReason?: string | null;
+  pickupVoidedBy?: { id: string; name: string; email: string } | null;
+
   createdAt: string;
   updatedAt: string;
   items: RequestItemDto[];
@@ -86,6 +100,16 @@ export default function PrintRequestPage() {
   const [request, setRequest] = useState<RequestDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [printing, setPrinting] = useState(false);
+  const [origin, setOrigin] = useState("");
+  const [verifyQrDataUrl, setVerifyQrDataUrl] = useState<string>("");
+  const [checksum, setChecksum] = useState<string>("");
+
+  useEffect(() => {
+    const envBase = String(process.env.NEXT_PUBLIC_APP_URL ?? "")
+      .trim()
+      .replace(/\/+$/, "");
+    setOrigin(envBase || window.location.origin);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -125,6 +149,57 @@ export default function PrintRequestPage() {
   const signedText = request?.signedAt
     ? `${request.signedByName || request.signedBy?.name || ""}${request.signedByTitle ? ` • ${request.signedByTitle}` : ""}\n${safeDateTimeLabel(request.signedAt)}`
     : "";
+
+  const pickupSignedText = request?.pickupSignedAt
+    ? `${request.pickupSignedByName || ""}${request.pickupSignedByTitle ? ` • ${request.pickupSignedByTitle}` : ""}\n${safeDateTimeLabel(request.pickupSignedAt)}`
+    : "";
+
+  const verifyUrl = useMemo(() => {
+    if (!origin || !requestId) return "";
+    return `${origin}/requests/${requestId}`;
+  }, [origin, requestId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      if (!verifyUrl) return;
+      try {
+        const url = await QRCode.toDataURL(verifyUrl, {
+          width: 140,
+          margin: 1,
+          color: { dark: "#000000", light: "#FFFFFF" },
+        });
+        if (!cancelled) setVerifyQrDataUrl(url);
+      } catch {
+        if (!cancelled) setVerifyQrDataUrl("");
+      }
+    };
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [verifyUrl]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      if (!request) return;
+      if (!crypto?.subtle) return;
+      const payload = `${request.id}|${request.gtmiNumber}|${request.requestedAt}|${request.updatedAt}`;
+      const bytes = new TextEncoder().encode(payload);
+      const hash = await crypto.subtle.digest("SHA-256", bytes);
+      const short = Array.from(new Uint8Array(hash))
+        .slice(0, 5)
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("")
+        .toUpperCase();
+      if (!cancelled) setChecksum(short);
+    };
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [request]);
 
   return (
     <div className="print-page">
@@ -215,7 +290,44 @@ export default function PrintRequestPage() {
         }
 
         .sign {
-          height: 54px;
+          height: 86px;
+        }
+
+        .signature-img {
+          display: block;
+          width: 100%;
+          height: 44px;
+          object-fit: contain;
+          margin-top: 6px;
+        }
+
+        .qr-box {
+          display: flex;
+          flex-direction: column;
+          align-items: flex-end;
+          gap: 6px;
+        }
+
+        .qr-img {
+          width: 92px;
+          height: 92px;
+          border: 1px solid rgba(0, 0, 0, 0.18);
+          border-radius: 8px;
+        }
+
+        .checksum {
+          font-size: 10px;
+          color: rgba(0, 0, 0, 0.65);
+        }
+
+        .warn {
+          border: 1px solid rgba(185, 28, 28, 0.25);
+          background: rgba(185, 28, 28, 0.06);
+          border-radius: 10px;
+          padding: 8px 10px;
+          margin-bottom: 10px;
+          font-size: 11px;
+          color: rgba(185, 28, 28, 0.95);
         }
 
         @media print {
@@ -256,14 +368,28 @@ export default function PrintRequestPage() {
         <p className="text-sm text-muted-foreground">Requisição não encontrada.</p>
       ) : (
         <div className="sheet">
+          {!request.pickupSignedAt || !request.signedAt || request.pickupVoidedAt || request.signedVoidedAt ? (
+            <div className="warn">
+              Atenção: documento sem assinaturas completas.
+              {!request.pickupSignedAt ? " • Falta assinatura (Responsável do pedido)." : ""}
+              {!request.signedAt ? " • Falta assinatura (Técnico GTMI)." : ""}
+              {request.pickupVoidedAt ? " • Assinatura do responsável foi anulada." : ""}
+              {request.signedVoidedAt ? " • Assinatura do técnico foi anulada." : ""}
+            </div>
+          ) : null}
+
           <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginBottom: 10 }}>
             <div>
               <div className="title">Pedido de material de consumo / serviço</div>
               <div className="subtitle">Nº: {request.gtmiNumber}</div>
             </div>
-            <div style={{ textAlign: "right" }}>
-              <div className="subtitle">Data/Hora do pedido</div>
-              <div className="value">{safeDateTimeLabel(request.requestedAt)}</div>
+            <div className="qr-box">
+              {verifyQrDataUrl ? <img src={verifyQrDataUrl} alt="QR de verificação" className="qr-img" /> : null}
+              {checksum ? <div className="checksum">Código: {checksum}</div> : null}
+              <div style={{ textAlign: "right" }}>
+                <div className="subtitle">Data/Hora do pedido</div>
+                <div className="value">{safeDateTimeLabel(request.requestedAt)}</div>
+              </div>
             </div>
           </div>
 
@@ -360,18 +486,38 @@ export default function PrintRequestPage() {
 
           <div className="row">
             <div className="field sign">
-              <div className="label">Assinatura (Requisitante)</div>
-              <div className="value">{request.requesterName || ""}</div>
+              <div className="label">Assinatura (Responsável do pedido)</div>
+              <div className="value">
+                {request.pickupSignedAt
+                  ? pickupSignedText || request.requesterName || ""
+                  : request.pickupVoidedAt
+                    ? `ANULADA${request.pickupVoidedReason ? ` • ${request.pickupVoidedReason}` : ""}\n${safeDateTimeLabel(request.pickupVoidedAt)}`
+                    : request.requesterName || ""}
+              </div>
+              {request.pickupSignatureDataUrl ? (
+                <img
+                  src={request.pickupSignatureDataUrl}
+                  alt="Assinatura do responsável do pedido"
+                  className="signature-img"
+                />
+              ) : null}
             </div>
             <div className="field sign">
-              <div className="label">Assinatura (Aprovação)</div>
-              <div className="value">{signedText}</div>
+              <div className="label">Assinatura (Técnico GTMI)</div>
+              <div className="value">
+                {request.signedAt
+                  ? signedText
+                  : request.signedVoidedAt
+                    ? `ANULADA${request.signedVoidedReason ? ` • ${request.signedVoidedReason}` : ""}\n${safeDateTimeLabel(request.signedVoidedAt)}`
+                    : ""}
+              </div>
             </div>
           </div>
 
           <div className="subtitle" style={{ marginTop: 10 }}>
             Criado por: {request.createdBy?.name || ""}{request.createdBy?.email ? ` (${request.createdBy.email})` : ""}
             {request.user && request.user.id !== request.createdBy?.id ? ` • Para: ${request.user.name}` : ""}
+            {verifyUrl ? ` • Verificar: ${verifyUrl}` : ""}
           </div>
         </div>
       )}

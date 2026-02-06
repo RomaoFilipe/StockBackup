@@ -190,7 +190,7 @@ function StoragePane({ kind, title }: { kind: StorageKind; title: string }) {
 export default function StoragePage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { isLoggedIn } = useAuth();
+  const { isLoggedIn, isAuthLoading } = useAuth();
 
   const tabParam = searchParams?.get("tab");
   const initialTab = useMemo(() => {
@@ -208,10 +208,10 @@ export default function StoragePage() {
   }, [initialTab]);
 
   useEffect(() => {
-    if (!isLoggedIn) {
+    if (!isAuthLoading && !isLoggedIn) {
       router.replace("/login");
     }
-  }, [isLoggedIn, router]);
+  }, [isAuthLoading, isLoggedIn, router]);
 
   return (
     <AuthenticatedLayout>

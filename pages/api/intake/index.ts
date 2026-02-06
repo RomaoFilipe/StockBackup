@@ -9,7 +9,9 @@ const createIntakeSchema = z.object({
   invoiceNumber: z.string().min(1).max(64),
   reqNumber: z.string().max(64).optional(),
   requestId: z.string().uuid().optional(),
+  requestingServiceId: z.number().int().optional(),
   issuedAt: z.string().datetime().optional(),
+  reqDate: z.string().datetime().optional(),
   notes: z.string().max(500).optional(),
 
   quantity: z.number().int().positive(),
@@ -41,7 +43,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(401).json({ error: "Unauthorized" });
   }
 
-  const isAdmin = session.role === "ADMIN";
+  const tenantId = session.tenantId;
 
   if (req.method !== "POST") {
     res.setHeader("Allow", ["POST"]);
@@ -54,19 +56,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   const {
-    asUserId,
     invoiceNumber,
     reqNumber,
     requestId,
+    requestingServiceId,
     issuedAt,
+    reqDate,
     notes,
     quantity,
     unitPrice,
     productId,
     product,
   } = parsed.data;
-
-  const actingUserId = isAdmin && asUserId ? asUserId : session.id;
 
   if (!productId && !product) {
     return res.status(400).json({ error: "Either productId or product is required" });
@@ -75,6 +76,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   try {
     const result = await prisma.$transaction(async (tx) => {
       let targetProductId = productId;
+      let targetSupplierName: string | null = null;
+      let targetRequest: { id: string; gtmiNumber: string; requestedAt: Date } | null = null;
+
+      if (typeof requestingServiceId === "number") {
+        const svc = await tx.requestingService.findUnique({
+          where: { id: requestingServiceId },
+          select: { id: true, ativo: true },
+        });
+        if (!svc) {
+          throw Object.assign(new Error("Serviço requisitante inválido"), { code: "INVALID_REQUESTING_SERVICE" });
+        }
+        if (!svc.ativo) {
+          throw Object.assign(new Error("Serviço requisitante inativo"), { code: "INACTIVE_REQUESTING_SERVICE" });
+        }
+      }
 
       if (!targetProductId) {
         // Ensure SKU unique (global unique in schema). Provide clearer error.
@@ -83,9 +99,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           throw Object.assign(new Error("SKU must be unique"), { code: "SKU_UNIQUE" });
         }
 
+        // Ensure category/supplier belong to this tenant
+        const [category, supplier] = await Promise.all([
+          tx.category.findFirst({ where: { id: product!.categoryId, tenantId }, select: { id: true } }),
+          tx.supplier.findFirst({ where: { id: product!.supplierId, tenantId }, select: { id: true } }),
+        ]);
+        if (!category) {
+          throw Object.assign(new Error("Invalid category"), { code: "INVALID_CATEGORY" });
+        }
+        if (!supplier) {
+          throw Object.assign(new Error("Invalid supplier"), { code: "INVALID_SUPPLIER" });
+        }
+
         const createdProduct = await tx.product.create({
           data: {
-            userId: actingUserId,
+            tenantId,
             name: product!.name,
             description: product!.description,
             sku: product!.sku,
@@ -98,40 +126,100 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         });
 
         targetProductId = createdProduct.id;
+
+        const sup = await tx.supplier.findFirst({
+          where: { id: product!.supplierId, tenantId },
+          select: { name: true },
+        });
+        targetSupplierName = sup?.name ?? null;
       } else {
         // Ensure product belongs to user
         const existing = await tx.product.findFirst({
-          where: { id: targetProductId, userId: actingUserId },
-          select: { id: true },
+          where: { id: targetProductId, tenantId },
+          select: { id: true, supplier: { select: { name: true } } },
         });
         if (!existing) {
           throw Object.assign(new Error("Product not found"), { code: "PRODUCT_NOT_FOUND" });
         }
+
+        targetSupplierName = existing.supplier?.name ?? null;
       }
 
+      // Resolve request linking:
+      // - If requestId is provided, validate and use it.
+      // - Else if reqNumber is provided, try to match that GTMI number.
+      // - Else attempt a conservative auto-link if there is exactly one recent matching request for this product.
       if (requestId) {
         const request = await tx.request.findFirst({
           where: {
             id: requestId,
-            userId: actingUserId,
+            tenantId,
             items: { some: { productId: targetProductId! } },
           },
-          select: { id: true },
+          select: { id: true, gtmiNumber: true, requestedAt: true },
         });
 
         if (!request) {
           throw Object.assign(new Error("Request not found for this product"), { code: "REQUEST_NOT_FOUND" });
         }
+        targetRequest = { id: request.id, gtmiNumber: request.gtmiNumber, requestedAt: request.requestedAt };
+      } else if (reqNumber?.trim()) {
+        const request = await tx.request.findFirst({
+          where: {
+            tenantId,
+            gtmiNumber: reqNumber.trim(),
+            items: { some: { productId: targetProductId! } },
+          },
+          select: { id: true, gtmiNumber: true, requestedAt: true },
+        });
+
+        if (request) {
+          targetRequest = { id: request.id, gtmiNumber: request.gtmiNumber, requestedAt: request.requestedAt };
+        }
+      } else {
+        const candidates = await tx.request.findMany({
+          where: {
+            tenantId,
+            status: { in: ["SUBMITTED", "APPROVED", "FULFILLED"] },
+            items: { some: { productId: targetProductId! } },
+          },
+          orderBy: { requestedAt: "desc" },
+          take: 10,
+          select: { id: true, gtmiNumber: true, title: true, requestedAt: true },
+        });
+
+        if (candidates.length === 1) {
+          targetRequest = { id: candidates[0].id, gtmiNumber: candidates[0].gtmiNumber, requestedAt: candidates[0].requestedAt };
+        } else if (candidates.length > 1) {
+          throw Object.assign(new Error("Multiple requests match this product"), {
+            code: "REQUEST_AMBIGUOUS",
+            candidates: candidates.map((c) => ({
+              id: c.id,
+              gtmiNumber: c.gtmiNumber,
+              title: c.title ?? null,
+              requestedAt: c.requestedAt.toISOString(),
+            })),
+          });
+        }
       }
+
+      const effectiveReqNumber = targetRequest?.gtmiNumber ?? (reqNumber?.trim() ? reqNumber.trim() : null);
+      const effectiveReqDate = reqDate
+        ? new Date(reqDate)
+        : targetRequest
+          ? targetRequest.requestedAt
+          : null;
 
       // Create invoice row (acts as the grouping for this intake)
       const createdInvoice = await tx.productInvoice.create({
         data: {
-          userId: actingUserId,
+          tenantId,
           productId: targetProductId!,
-          requestId: requestId ?? null,
+          requestId: targetRequest?.id ?? requestId ?? null,
           invoiceNumber,
-          reqNumber: reqNumber ?? null,
+          reqNumber: effectiveReqNumber,
+          reqDate: effectiveReqDate,
+          requestingServiceId: typeof requestingServiceId === "number" ? requestingServiceId : null,
           issuedAt: issuedAt ? new Date(issuedAt) : new Date(),
           quantity: BigInt(quantity) as any,
           unitPrice: unitPrice ?? 0,
@@ -139,10 +227,41 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         } as any,
       });
 
+      // Auto-fill supplier option in the linked request for traceability.
+      if (targetRequest) {
+        const supplierLabel = (targetSupplierName ?? "").trim();
+        const reqLabel = effectiveReqNumber ? `REQ.N: ${effectiveReqNumber}` : "";
+        const raw = [supplierLabel ? `${supplierLabel}` : null, `FT: ${invoiceNumber}`, reqLabel || null]
+          .filter(Boolean)
+          .join(" - ");
+        const value = raw.slice(0, 200);
+
+        const existing = await tx.request.findFirst({
+          where: { id: targetRequest.id, tenantId },
+          select: { supplierOption1: true, supplierOption2: true, supplierOption3: true },
+        });
+
+        if (existing) {
+          const slots = [existing.supplierOption1, existing.supplierOption2, existing.supplierOption3].map((v) =>
+            typeof v === "string" ? v.trim() : ""
+          );
+          const already = slots.some((v) => v === value);
+          if (!already) {
+            const patch: any = {};
+            if (!slots[0]) patch.supplierOption1 = value;
+            else if (!slots[1]) patch.supplierOption2 = value;
+            else if (!slots[2]) patch.supplierOption3 = value;
+            if (Object.keys(patch).length) {
+              await tx.request.update({ where: { id: targetRequest.id }, data: patch });
+            }
+          }
+        }
+      }
+
       // Create per-unit QR codes
       const unitsToCreate = Array.from({ length: quantity }).map(() => ({
         id: crypto.randomUUID(),
-        userId: actingUserId,
+        tenantId,
         productId: targetProductId!,
         invoiceId: createdInvoice.id,
         code: crypto.randomUUID(),
@@ -172,7 +291,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         data: {
           type: "IN",
           quantity: BigInt(quantity) as any,
-          userId: actingUserId,
+          tenantId,
           productId: targetProductId!,
           invoiceId: createdInvoice.id,
           requestId: requestId ?? null,
@@ -218,6 +337,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     if (error?.code === "REQUEST_NOT_FOUND") {
       return res.status(404).json({ error: "Request not found for this product" });
+    }
+
+    if (error?.code === "REQUEST_AMBIGUOUS") {
+      return res.status(409).json({
+        error: "Multiple requests match this product. Please choose one.",
+        candidates: Array.isArray(error?.candidates) ? error.candidates : [],
+      });
+    }
+
+    if (error?.code === "INVALID_CATEGORY") {
+      return res.status(400).json({ error: "Invalid category" });
+    }
+
+    if (error?.code === "INVALID_SUPPLIER") {
+      return res.status(400).json({ error: "Invalid supplier" });
     }
 
     console.error("POST /api/intake error:", error);

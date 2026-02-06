@@ -37,9 +37,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(400).json({ error: "Invalid query" });
   }
 
-  const requestingUserId = session.id;
-  const tenantUserId =
-    parsed.data.asUserId && session.role === "ADMIN" ? parsed.data.asUserId : requestingUserId;
+  const tenantId = session.tenantId;
 
   const take = parsed.data.limit ?? 50;
   const q = parsed.data.q?.trim();
@@ -56,7 +54,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     const where: any = {
-      userId: tenantUserId,
+      tenantId,
       ...(parsed.data.productId ? { productId: parsed.data.productId } : {}),
       ...(parsed.data.unitId ? { unitId: parsed.data.unitId } : {}),
       ...(parsed.data.type ? { type: parsed.data.type } : {}),

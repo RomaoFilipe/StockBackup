@@ -285,7 +285,7 @@ export default function AppShell({ children }: AppShellProps) {
             </div>
           </header>
 
-          <main className="flex-1 px-4 pb-24 pt-6 sm:px-6 lg:px-10 lg:pb-10">
+          <main className="flex-1 px-4 pb-24 pt-10 sm:px-6 sm:pt-10 lg:px-10 lg:pb-10 lg:pt-12">
             {children}
           </main>
         </div>

@@ -13,24 +13,52 @@ enum UserRole {
   ADMIN
 }
 
+enum IpAccessRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model Tenant {
+  id        String   @id @default(uuid()) @db.Uuid
+  slug      String   @unique
+  name      String
+  createdAt DateTime @default(now())
+
+  users            User[]
+  allowedIps       AllowedIp[]
+  ipAccessRequests IpAccessRequest[]
+
+  categories     Category[]
+  suppliers      Supplier[]
+  products       Product[]
+  productInvoices ProductInvoice[]
+  units          ProductUnit[]
+  requests       Request[]
+  storedFiles    StoredFile[]
+  stockMovements StockMovement[]
+}
+
 model User {
   id        String   @id @default(uuid()) @db.Uuid
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  name     String
-  email    String  @unique
-  password String
-  username String? @unique
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  name         String
+  email        String
+  passwordHash String @map("password")
+  username     String?
+
+  isActive Boolean @default(true)
+
+  createdByUserId String? @db.Uuid
+  createdBy       User?   @relation("UserCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  createdUsers    User[]  @relation("UserCreatedBy")
 
   role UserRole @default(USER)
-
-  products        Product[]
-  categories      Category[]
-  suppliers       Supplier[]
-  productInvoices ProductInvoice[]
-
-  units ProductUnit[]
 
   acquiredUnits ProductUnit[] @relation("ProductUnitAcquiredBy")
 
@@ -42,11 +70,22 @@ model User {
 
   signedRequests Request[] @relation("RequestSignedBy")
 
-  storedFiles StoredFile[]
+  signedVoidedRequests Request[] @relation("RequestSignedVoidedBy")
 
-  stockMovements           StockMovement[] @relation("StockMovementTenant")
+  pickupRecordedRequests Request[] @relation("RequestPickupRecordedBy")
+
+  pickupVoidedRequests Request[] @relation("RequestPickupVoidedBy")
+
   stockMovementsPerformed  StockMovement[] @relation("StockMovementPerformedBy")
   stockMovementsAssignedTo StockMovement[] @relation("StockMovementAssignedTo")
+
+  createdAllowedIps       AllowedIp[]        @relation("AllowedIpCreatedBy")
+  ipAccessRequests        IpAccessRequest[]  @relation("IpAccessRequestUser")
+  reviewedIpAccessRequests IpAccessRequest[] @relation("IpAccessRequestReviewedBy")
+
+  @@unique([tenantId, email])
+  @@unique([tenantId, username])
+  @@index([tenantId])
 }
 
 model Category {
@@ -56,29 +95,39 @@ model Category {
   createdAt DateTime @default(now())
   updatedAt DateTime @default(now()) @updatedAt
 
-  userId String @db.Uuid
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenantId String @db.Uuid @map("userId")
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   products Product[]
 
-  @@unique([userId, name])
-  @@index([userId])
+  @@unique([tenantId, name])
+  @@index([tenantId])
 }
 
 model Supplier {
   id   String @id @default(uuid()) @db.Uuid
   name String
 
+  nif         String? @db.VarChar(30)
+  email       String? @db.VarChar(255)
+  phone       String? @db.VarChar(60)
+  contactName String? @db.VarChar(120)
+  address     String? @db.Text
+  notes       String? @db.Text
+
+  isActive Boolean @default(true)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @default(now()) @updatedAt
 
-  userId String @db.Uuid
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenantId String @db.Uuid @map("userId")
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   products Product[]
 
-  @@unique([userId, name])
-  @@index([userId])
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@index([isActive])
 }
 
 model Product {
@@ -92,11 +141,11 @@ model Product {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @default(now()) @updatedAt
 
-  userId     String @db.Uuid
+  tenantId   String @db.Uuid @map("userId")
   categoryId String @db.Uuid
   supplierId String @db.Uuid
 
-  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   category Category @relation(fields: [categoryId], references: [id], onDelete: Restrict)
   supplier Supplier @relation(fields: [supplierId], references: [id], onDelete: Restrict)
 
@@ -108,7 +157,7 @@ model Product {
 
   stockMovements StockMovement[]
 
-  @@index([userId])
+  @@index([tenantId])
   @@index([categoryId])
   @@index([supplierId])
 }
@@ -139,6 +188,8 @@ model Request {
   requestedAt DateTime @default(now())
 
   requestingService    String?
+  requestingServiceId  Int?
+  requestingServiceRef RequestingService? @relation(fields: [requestingServiceId], references: [id], onDelete: SetNull)
   requesterName        String?
   requesterEmployeeNo  String?
   deliveryLocation     String?
@@ -157,8 +208,35 @@ model Request {
   signedByUserId String? @db.Uuid
   signedBy       User?   @relation("RequestSignedBy", fields: [signedByUserId], references: [id], onDelete: SetNull)
 
+  signedIp        String?
+  signedUserAgent String?
+
+  signedVoidedAt       DateTime?
+  signedVoidedReason   String?
+  signedVoidedByUserId String? @db.Uuid
+  signedVoidedBy       User?   @relation("RequestSignedVoidedBy", fields: [signedVoidedByUserId], references: [id], onDelete: SetNull)
+
+  pickupSignedAt           DateTime?
+  pickupSignedByName       String?
+  pickupSignedByTitle      String?
+  pickupSignatureDataUrl   String?  @db.Text
+
+  pickupSignedIp        String?
+  pickupSignedUserAgent String?
+
+  pickupRecordedByUserId String? @db.Uuid
+  pickupRecordedBy       User?   @relation("RequestPickupRecordedBy", fields: [pickupRecordedByUserId], references: [id], onDelete: SetNull)
+
+  pickupVoidedAt       DateTime?
+  pickupVoidedReason   String?
+  pickupVoidedByUserId String? @db.Uuid
+  pickupVoidedBy       User?   @relation("RequestPickupVoidedBy", fields: [pickupVoidedByUserId], references: [id], onDelete: SetNull)
+
   createdAt       DateTime @default(now())
   updatedAt       DateTime @default(now()) @updatedAt
+
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   // Who the request is for (requester/owner)
   userId String @db.Uuid
@@ -176,14 +254,22 @@ model Request {
 
   stockMovements StockMovement[]
 
-  @@unique([userId, gtmiNumber])
-  @@unique([userId, gtmiYear, gtmiSeq])
+  @@unique([tenantId, gtmiNumber])
+  @@unique([tenantId, gtmiYear, gtmiSeq])
+  @@index([tenantId])
   @@index([userId])
   @@index([createdByUserId])
   @@index([status])
   @@index([requestedAt])
   @@index([signedAt])
   @@index([signedByUserId])
+  @@index([signedVoidedAt])
+  @@index([signedVoidedByUserId])
+  @@index([pickupSignedAt])
+  @@index([pickupRecordedByUserId])
+  @@index([pickupVoidedAt])
+  @@index([pickupVoidedByUserId])
+  @@index([requestingServiceId])
 }
 
 model RequestItem {
@@ -206,27 +292,46 @@ model RequestItem {
   @@index([productId])
 }
 
+model RequestingService {
+  id         Int     @id
+  codigo     String  @db.VarChar(10)
+  designacao String
+  ativo      Boolean @default(true)
+
+  requests Request[]
+  invoices ProductInvoice[]
+
+  @@unique([codigo])
+  @@index([ativo])
+  @@map("servicos_requisitantes")
+}
+
 model ProductInvoice {
   id            String   @id @default(uuid()) @db.Uuid
   invoiceNumber String
   reqNumber     String?
+  reqDate       DateTime?
   issuedAt      DateTime @default(now())
   quantity      BigInt
   unitPrice     Float
   notes         String?
 
+  requestingServiceId Int?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @default(now()) @updatedAt
 
-  userId    String @db.Uuid
+  tenantId  String @db.Uuid @map("userId")
   productId String @db.Uuid
 
   requestId String? @db.Uuid
 
-  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
   request Request? @relation(fields: [requestId], references: [id], onDelete: SetNull)
+
+  requestingService RequestingService? @relation(fields: [requestingServiceId], references: [id], onDelete: SetNull)
 
   files StoredFile[]
 
@@ -234,10 +339,11 @@ model ProductInvoice {
 
   stockMovements StockMovement[]
 
-  @@unique([userId, invoiceNumber])
-  @@index([userId])
+  @@unique([tenantId, invoiceNumber])
+  @@index([tenantId])
   @@index([productId])
   @@index([requestId])
+  @@index([requestingServiceId])
 }
 
 enum ProductUnitStatus {
@@ -259,8 +365,8 @@ model ProductUnit {
   createdAt  DateTime  @default(now())
   acquiredAt DateTime?
 
-  userId String @db.Uuid
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenantId String @db.Uuid @map("userId")
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   productId String  @db.Uuid
   product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
@@ -281,10 +387,10 @@ model ProductUnit {
 
   stockMovements StockMovement[]
 
-  @@unique([userId, serialNumber])
-  @@unique([userId, partNumber])
-  @@unique([userId, assetTag])
-  @@index([userId])
+  @@unique([tenantId, serialNumber])
+  @@unique([tenantId, partNumber])
+  @@unique([tenantId, assetTag])
+  @@index([tenantId])
   @@index([productId])
   @@index([invoiceId])
   @@index([acquiredByUserId])
@@ -308,8 +414,8 @@ model StockMovement {
   createdAt DateTime @default(now())
 
   // Tenant/owner inventory
-  userId String @db.Uuid
-  user   User   @relation("StockMovementTenant", fields: [userId], references: [id], onDelete: Cascade)
+  tenantId String @db.Uuid @map("userId")
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   productId String  @db.Uuid
   product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
@@ -329,7 +435,7 @@ model StockMovement {
   assignedToUserId String? @db.Uuid
   assignedTo       User?   @relation("StockMovementAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
 
-  @@index([userId])
+  @@index([tenantId])
   @@index([productId])
   @@index([unitId])
   @@index([invoiceId])
@@ -358,8 +464,8 @@ model StoredFile {
   createdAt DateTime @default(now())
   updatedAt DateTime @default(now()) @updatedAt
 
-  userId String @db.Uuid
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenantId String @db.Uuid @map("userId")
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   // optional links
   invoiceId String?         @db.Uuid
@@ -368,8 +474,53 @@ model StoredFile {
   requestId String?  @db.Uuid
   request   Request? @relation(fields: [requestId], references: [id], onDelete: Cascade)
 
-  @@index([userId])
+  @@index([tenantId])
   @@index([kind])
   @@index([invoiceId])
   @@index([requestId])
+}
+
+model AllowedIp {
+  id       String  @id @default(uuid()) @db.Uuid
+  tenantId String  @db.Uuid
+  tenant   Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  ipOrCidr String
+  isActive Boolean @default(true)
+  note     String?
+
+  createdAt       DateTime @default(now())
+  createdByUserId String?  @db.Uuid
+  createdBy       User?    @relation("AllowedIpCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([isActive])
+}
+
+model IpAccessRequest {
+  id       String                @id @default(uuid()) @db.Uuid
+  tenantId String                @db.Uuid
+  tenant   Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  userId String? @db.Uuid
+  user   User?   @relation("IpAccessRequestUser", fields: [userId], references: [id], onDelete: SetNull)
+
+  email     String
+  ip        String
+  userAgent String?
+
+  status IpAccessRequestStatus @default(PENDING)
+
+  createdAt  DateTime  @default(now())
+  reviewedAt DateTime?
+
+  reviewedByUserId String? @db.Uuid
+  reviewedBy       User?   @relation("IpAccessRequestReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+
+  note String?
+
+  @@index([tenantId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([reviewedAt])
 }

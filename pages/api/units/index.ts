@@ -32,14 +32,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(400).json({ error: "invoiceId or productId is required" });
   }
 
-  const isAdmin = session.role === "ADMIN";
-  const userId = isAdmin && asUserId ? asUserId : session.id;
+  const tenantId = session.tenantId;
 
   try {
     const prismaAny = prisma as any;
     const units = await prismaAny.productUnit.findMany({
       where: {
-        userId,
+        tenantId,
         invoiceId: invoiceId ?? undefined,
         productId: productId ?? undefined,
       },

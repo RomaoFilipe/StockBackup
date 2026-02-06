@@ -147,6 +147,17 @@ export default function AppHeader() {
                 Pessoas
               </Button>
             ) : null}
+
+            {isAdmin ? (
+              <Button
+                variant={isActive("/admin") ? "secondary" : "ghost"}
+                size="sm"
+                onClick={() => handleNavigation("/admin")}
+              >
+                <FiFileText className="mr-2 h-4 w-4" />
+                Gestão
+              </Button>
+            ) : null}
           </div>
 
           {/* Secondary links */}

@@ -50,7 +50,22 @@ export interface ProductUnit {
 export interface Supplier {
   id: string;
   name: string;
-  userId: string;
+  // Multi-tenant: DB column is userId but Prisma field is tenantId.
+  // Keep both optional to be compatible with existing code paths.
+  tenantId?: string;
+  userId?: string;
+
+  nif?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  contactName?: string | null;
+  address?: string | null;
+  notes?: string | null;
+
+  isActive?: boolean;
+
+  createdAt?: Date | string;
+  updatedAt?: Date | string;
 }
 
 // Define the Category interface

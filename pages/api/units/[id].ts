@@ -41,8 +41,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(400).json({ error: "Invalid query" });
   }
 
-  const isAdmin = session.role === "ADMIN";
-  const userId = isAdmin && parsedQuery.data.asUserId ? parsedQuery.data.asUserId : session.id;
+  const tenantId = session.tenantId;
   const unitId = parsedQuery.data.id;
 
   if (req.method !== "PATCH") {
@@ -75,7 +74,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   try {
     const prismaAny = prisma as any;
     const existing = await prismaAny.productUnit.findFirst({
-      where: { id: unitId, userId },
+      where: { id: unitId, tenantId },
       select: { id: true },
     });
 

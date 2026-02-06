@@ -8,7 +8,7 @@ import { getSessionServer } from "@/utils/auth";
 const createUserSchema = z.object({
   name: z.string().min(1).max(100),
   email: z.string().email().max(255),
-  password: z.string().min(6).max(200),
+  password: z.string().min(8).max(200),
   role: z.enum(["USER", "ADMIN"]).optional(),
 });
 
@@ -24,6 +24,11 @@ const requireAdmin = async (req: NextApiRequest, res: NextApiResponse) => {
     return null;
   }
 
+  if (!session.tenantId) {
+    res.status(500).json({ error: "Session missing tenant" });
+    return null;
+  }
+
   return session;
 };
 
@@ -34,6 +39,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (req.method === "GET") {
     try {
       const users = await prisma.user.findMany({
+        where: { tenantId: session.tenantId },
         orderBy: { createdAt: "desc" },
         select: {
           id: true,
@@ -41,6 +47,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           email: true,
           username: true,
           role: true,
+          isActive: true,
           createdAt: true,
           updatedAt: true,
         },
@@ -72,10 +79,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       const created = await prisma.user.create({
         data: {
-          name,
-          email,
-          password: hashedPassword,
+          tenantId: session.tenantId,
+          name: name.trim(),
+          email: email.trim().toLowerCase(),
+          passwordHash: hashedPassword,
           role: role ?? "USER",
+          isActive: true,
+          createdByUserId: session.id,
         },
         select: {
           id: true,
@@ -83,6 +93,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           email: true,
           username: true,
           role: true,
+          isActive: true,
           createdAt: true,
           updatedAt: true,
         },

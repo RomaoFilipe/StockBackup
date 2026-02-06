@@ -9,9 +9,8 @@ export default async function handler(
     return res.status(405).json({ error: "Method Not Allowed" });
   }
 
-  const isSecure =
-    req.headers["x-forwarded-proto"] === "https" ||
-    process.env.NODE_ENV !== "development";
+  const forwardedProto = String(req.headers["x-forwarded-proto"] ?? "");
+  const isSecure = forwardedProto === "https" || Boolean((req.socket as any)?.encrypted);
 
   const cookies = new Cookies(req, res, { secure: isSecure });
   cookies.set("session_id", "", {

@@ -19,9 +19,11 @@ export default async function handler(
     // Return user data without sensitive information
     res.status(200).json({
       id: user.id,
+      tenantId: (user as any).tenantId,
       name: user.name,
       email: user.email,
       role: user.role,
+      isActive: (user as any).isActive,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
     });

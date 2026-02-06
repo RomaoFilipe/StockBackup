@@ -38,6 +38,9 @@ export function SuppliersDropDown({
   const [open, setOpen] = React.useState(false);
   const { suppliers, loadSuppliers } = useProductStore();
 
+  const selectedCount = selectedSuppliers.length;
+  const displayLabel = selectedCount > 0 ? `${label} (${selectedCount})` : label;
+
   React.useEffect(() => {
     loadSuppliers();
   }, [loadSuppliers]);
@@ -56,12 +59,12 @@ export function SuppliersDropDown({
   }
 
   return (
-    <div className="flex items-center space-x-4 poppins">
+    <div className="poppins">
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <Button variant={buttonVariant} className={buttonClassName ?? "h-10"}>
             <LuGitPullRequestDraft />
-            {label}
+            {displayLabel}
           </Button>
         </PopoverTrigger>
         <PopoverContent className="p-0 w-56 poppins" side="bottom" align="end">

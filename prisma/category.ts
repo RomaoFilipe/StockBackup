@@ -2,17 +2,16 @@ import { prisma } from "@/prisma/client";
 
 export const createCategory = async (data: {
   name: string;
-  userId: string;
+  tenantId: string;
 }) => {
-  console.log("Creating category with data:", data); // Debugging log
   return prisma.category.create({
     data,
   });
 };
 
-export const getCategoriesByUser = async (userId: string) => {
+export const getCategoriesByUser = async (tenantId: string) => {
   return prisma.category.findMany({
-    where: { userId },
+    where: { tenantId },
   });
 };
 
