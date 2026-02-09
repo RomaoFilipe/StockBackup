@@ -12,6 +12,10 @@ import {
   getRequestStorageDir,
 } from "@/utils/storageLayout";
 
+function computeProductStatus(quantity: number) {
+  return quantity > 20 ? "Available" : quantity > 0 ? "Stock Low" : "Stock Out";
+}
+
 function getClientIp(req: NextApiRequest) {
   const xf = req.headers["x-forwarded-for"];
   const raw = Array.isArray(xf) ? xf[0] : xf;
@@ -214,8 +218,71 @@ async function createSystemRequestApprovalPdf(args: {
 
 const updateSchema = z.object({
   status: z.enum(["DRAFT", "SUBMITTED", "APPROVED", "REJECTED", "FULFILLED"]).optional(),
-  title: z.string().min(1).max(120).optional(),
-  notes: z.string().max(1000).optional(),
+  title: z.string().max(120).nullable().optional(),
+  notes: z.string().max(1000).nullable().optional(),
+
+  requestedAt: z
+    .string()
+    .min(1)
+    .refine((v) => !Number.isNaN(new Date(v).getTime()), "Invalid date")
+    .transform((v) => new Date(v))
+    .optional(),
+
+  requestingServiceId: z.number().int().optional(),
+  requesterName: z.string().max(120).nullable().optional(),
+  requesterEmployeeNo: z.string().max(60).nullable().optional(),
+  deliveryLocation: z.string().max(200).nullable().optional(),
+  expectedDeliveryFrom: z
+    .union([
+      z
+        .string()
+        .min(1)
+        .refine((v) => !Number.isNaN(new Date(v).getTime()), "Invalid date")
+        .transform((v) => new Date(v)),
+      z.null(),
+    ])
+    .optional(),
+  expectedDeliveryTo: z
+    .union([
+      z
+        .string()
+        .min(1)
+        .refine((v) => !Number.isNaN(new Date(v).getTime()), "Invalid date")
+        .transform((v) => new Date(v)),
+      z.null(),
+    ])
+    .optional(),
+  goodsTypes: z.array(z.enum(["MATERIALS_SERVICES", "WAREHOUSE_MATERIALS", "OTHER_PRODUCTS"]))
+    .optional(),
+
+  supplierOption1: z.string().max(200).nullable().optional(),
+  supplierOption2: z.string().max(200).nullable().optional(),
+  supplierOption3: z.string().max(200).nullable().optional(),
+
+  items: z
+    .array(
+      z.object({
+        id: z.string().uuid(),
+        notes: z.string().max(500).nullable().optional(),
+        unit: z.string().max(60).nullable().optional(),
+        reference: z.string().max(120).nullable().optional(),
+        destination: z.string().max(120).nullable().optional(),
+      })
+    )
+    .optional(),
+
+  replaceItems: z
+    .array(
+      z.object({
+        productId: z.string().uuid(),
+        quantity: z.number().int().positive(),
+        notes: z.string().max(500).nullable().optional(),
+        unit: z.string().max(60).nullable().optional(),
+        reference: z.string().max(120).nullable().optional(),
+        destination: z.string().max(120).nullable().optional(),
+      })
+    )
+    .optional(),
   sign: z
     .object({
       name: z.string().min(1).max(120),
@@ -400,8 +467,108 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     try {
-      const { sign, pickupSign, voidSign, voidPickupSign, ...rest } = parsed.data;
+      const { sign, pickupSign, voidSign, voidPickupSign, items, replaceItems, ...rest } = parsed.data;
       const updateData: any = { ...rest };
+
+      const hasNonSignatureUpdates = Object.keys(rest).length > 0 || Boolean(items?.length) || Boolean(replaceItems);
+      if (hasNonSignatureUpdates) {
+        const existing = await prisma.request.findFirst({ where: { id, tenantId }, select: { signedAt: true } });
+        if (existing?.signedAt) {
+          return res.status(409).json({
+            error: "Request is signed and cannot be edited. Void the signature to make changes.",
+          });
+        }
+      }
+
+      if (Object.prototype.hasOwnProperty.call(updateData, "title")) {
+        const raw = updateData.title;
+        if (typeof raw === "string") {
+          const trimmed = raw.trim();
+          updateData.title = trimmed ? trimmed : null;
+        }
+      }
+
+      if (Object.prototype.hasOwnProperty.call(updateData, "notes")) {
+        const raw = updateData.notes;
+        if (typeof raw === "string") {
+          const trimmed = raw.trim();
+          updateData.notes = trimmed ? trimmed : null;
+        }
+      }
+
+      if (Object.prototype.hasOwnProperty.call(updateData, "requesterName")) {
+        const raw = updateData.requesterName;
+        if (typeof raw === "string") {
+          const trimmed = raw.trim();
+          updateData.requesterName = trimmed ? trimmed : null;
+        }
+      }
+
+      if (Object.prototype.hasOwnProperty.call(updateData, "requesterEmployeeNo")) {
+        const raw = updateData.requesterEmployeeNo;
+        if (typeof raw === "string") {
+          const trimmed = raw.trim();
+          updateData.requesterEmployeeNo = trimmed ? trimmed : null;
+        }
+      }
+
+      if (Object.prototype.hasOwnProperty.call(updateData, "deliveryLocation")) {
+        const raw = updateData.deliveryLocation;
+        if (typeof raw === "string") {
+          const trimmed = raw.trim();
+          updateData.deliveryLocation = trimmed ? trimmed : null;
+        }
+      }
+
+      for (const k of ["supplierOption1", "supplierOption2", "supplierOption3"] as const) {
+        if (!Object.prototype.hasOwnProperty.call(updateData, k)) continue;
+        const raw = updateData[k];
+        if (typeof raw === "string") {
+          const trimmed = raw.trim();
+          updateData[k] = trimmed ? trimmed : null;
+        }
+      }
+
+      if (Object.prototype.hasOwnProperty.call(updateData, "requestingServiceId")) {
+        const requestingServiceId = updateData.requestingServiceId;
+        if (typeof requestingServiceId !== "number" || !Number.isFinite(requestingServiceId)) {
+          return res.status(400).json({ error: "Serviço requisitante inválido" });
+        }
+
+        const svc = await prisma.requestingService.findUnique({
+          where: { id: requestingServiceId },
+          select: { id: true, ativo: true, codigo: true, designacao: true },
+        });
+        if (!svc) {
+          return res.status(400).json({ error: "Serviço requisitante inválido" });
+        }
+        if (!svc.ativo) {
+          return res.status(400).json({ error: "Serviço requisitante inativo" });
+        }
+        updateData.requestingService = `${svc.codigo} — ${svc.designacao}`.slice(0, 120);
+      }
+
+      if (Object.prototype.hasOwnProperty.call(updateData, "requestedAt")) {
+        const next = updateData.requestedAt;
+        if (!(next instanceof Date) || Number.isNaN(next.getTime())) {
+          return res.status(400).json({ error: "Data/Hora do pedido inválida" });
+        }
+
+        const existing = await prisma.request.findFirst({
+          where: { id, tenantId },
+          select: { gtmiYear: true },
+        });
+        if (!existing) {
+          return res.status(404).json({ error: "Request not found" });
+        }
+
+        const nextYear = next.getFullYear();
+        if (existing.gtmiYear !== nextYear) {
+          return res.status(400).json({
+            error: "Não é possível alterar o ano do pedido (GTMI). Ajuste apenas data/hora dentro do mesmo ano.",
+          });
+        }
+      }
 
       const ip = getClientIp(req);
       const userAgent = typeof req.headers["user-agent"] === "string" ? req.headers["user-agent"] : undefined;
@@ -474,12 +641,343 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         updateData.pickupVoidedByUserId = null;
       }
 
-      const updated = await prisma.request.updateMany({
-        where: { id, tenantId },
-        data: updateData,
+      const updated = await prisma.$transaction(async (tx) => {
+        const updatedRequest = await tx.request.updateMany({
+          where: { id, tenantId },
+          data: updateData,
+        });
+
+        if (updatedRequest.count === 0) {
+          return { updatedCount: 0 };
+        }
+
+        if (items?.length) {
+          const results = await Promise.all(
+            items.map(async (it) => {
+              const data: any = {};
+
+              if (Object.prototype.hasOwnProperty.call(it, "notes")) {
+                const v = it.notes;
+                data.notes = typeof v === "string" ? (v.trim() ? v.trim() : null) : v === null ? null : undefined;
+              }
+              if (Object.prototype.hasOwnProperty.call(it, "unit")) {
+                const v = it.unit;
+                data.unit = typeof v === "string" ? (v.trim() ? v.trim() : null) : v === null ? null : undefined;
+              }
+              if (Object.prototype.hasOwnProperty.call(it, "reference")) {
+                const v = it.reference;
+                data.reference = typeof v === "string" ? (v.trim() ? v.trim() : null) : v === null ? null : undefined;
+              }
+              if (Object.prototype.hasOwnProperty.call(it, "destination")) {
+                const v = it.destination;
+                data.destination = typeof v === "string" ? (v.trim() ? v.trim() : null) : v === null ? null : undefined;
+              }
+
+              // No-op updates are allowed.
+              return tx.requestItem.updateMany({
+                where: { id: it.id, requestId: id },
+                data,
+              });
+            })
+          );
+
+          const updatedItemsCount = results.reduce((acc, r) => acc + (r?.count ?? 0), 0);
+          if (updatedItemsCount !== items.length) {
+            throw new Error("One or more request items were not found");
+          }
+        }
+
+        if (replaceItems) {
+          if (replaceItems.length < 1) {
+            throw new Error("Replace items must include at least one item");
+          }
+
+          const txAny = tx as any;
+
+          const existingRequest = await tx.request.findFirst({
+            where: { id, tenantId },
+            select: {
+              id: true,
+              userId: true,
+              gtmiNumber: true,
+              items: {
+                select: {
+                  id: true,
+                  productId: true,
+                  quantity: true,
+                  destination: true,
+                },
+              },
+            },
+          });
+          if (!existingRequest) {
+            return { updatedCount: 0 };
+          }
+
+          const performerUserId = session.id;
+          const assignedToUserId = existingRequest.userId;
+          const stockReason = `Requisi\u00e7\u00e3o ${existingRequest.gtmiNumber}`;
+          const editReason = `Edi\u00e7\u00e3o: ${stockReason}`;
+
+          const existingProductIds = existingRequest.items.map((it) => it.productId);
+          const nextProductIds = replaceItems.map((it) => it.productId);
+          const uniqueProductIds = Array.from(new Set([...existingProductIds, ...nextProductIds]));
+
+          const unitCounts = await Promise.all(
+            uniqueProductIds.map(async (productId) => {
+              const count = await txAny.productUnit.count({ where: { tenantId, productId } });
+              return [productId, Number(count)] as const;
+            })
+          );
+          const unitCountByProductId = new Map<string, number>(unitCounts);
+          const isUnitTracked = (productId: string) => (unitCountByProductId.get(productId) ?? 0) > 0;
+
+          // === Restore stock for existing items ===
+          for (const it of existingRequest.items) {
+            const qty = Number(it.quantity);
+            if (!Number.isFinite(qty) || qty <= 0) continue;
+
+            if (isUnitTracked(it.productId)) {
+              const code = typeof it.destination === "string" ? it.destination.trim() : "";
+              if (!code) {
+                throw new Error("Cannot restore unit-tracked item without destination code");
+              }
+
+              const unit = await txAny.productUnit.findFirst({
+                where: { tenantId, productId: it.productId, code },
+                select: { id: true, status: true, invoiceId: true, assignedToUserId: true },
+              });
+
+              if (!unit || unit.status !== "ACQUIRED") {
+                throw new Error("Cannot restore unit (not found or not acquired)");
+              }
+
+              await txAny.productUnit.update({
+                where: { id: unit.id },
+                data: { status: "IN_STOCK", assignedToUserId: null },
+                select: { id: true },
+              });
+
+              await txAny.stockMovement.create({
+                data: {
+                  type: "RETURN",
+                  quantity: BigInt(1) as any,
+                  tenantId,
+                  productId: it.productId,
+                  unitId: unit.id,
+                  invoiceId: unit.invoiceId ?? null,
+                  requestId: existingRequest.id,
+                  performedByUserId: performerUserId,
+                  assignedToUserId: unit.assignedToUserId ?? assignedToUserId,
+                  reason: editReason,
+                },
+                select: { id: true },
+              });
+
+              const productAfter = await tx.product.update({
+                where: { id: it.productId },
+                data: { quantity: { increment: BigInt(1) as any } },
+                select: { quantity: true },
+              });
+              await tx.product.update({
+                where: { id: it.productId },
+                data: { status: computeProductStatus(Number(productAfter.quantity)) },
+              });
+            } else {
+              await txAny.stockMovement.create({
+                data: {
+                  type: "IN",
+                  quantity: BigInt(qty) as any,
+                  tenantId,
+                  productId: it.productId,
+                  requestId: existingRequest.id,
+                  performedByUserId: performerUserId,
+                  assignedToUserId,
+                  reason: editReason,
+                },
+                select: { id: true },
+              });
+
+              const productAfter = await tx.product.update({
+                where: { id: it.productId },
+                data: { quantity: { increment: BigInt(qty) as any } },
+                select: { quantity: true },
+              });
+              await tx.product.update({
+                where: { id: it.productId },
+                data: { status: computeProductStatus(Number(productAfter.quantity)) },
+              });
+            }
+          }
+
+          await tx.requestItem.deleteMany({ where: { requestId: existingRequest.id } });
+
+          // === Validate products for new items ===
+          const products = await tx.product.findMany({
+            where: { tenantId, id: { in: Array.from(new Set(nextProductIds)) } },
+            select: { id: true, quantity: true },
+          });
+          const productById = new Map(products.map((p) => [p.id, p] as const));
+          for (const item of replaceItems) {
+            if (!productById.has(item.productId)) {
+              throw new Error("One or more products were not found");
+            }
+          }
+
+          const createdItems: Array<{
+            productId: string;
+            quantity: number;
+            notes?: string | null;
+            unit?: string | null;
+            reference?: string | null;
+            destination?: string | null;
+          }> = [];
+
+          // === Allocate stock for new items ===
+          for (const item of replaceItems) {
+            const qty = Number(item.quantity);
+            if (!Number.isFinite(qty) || qty <= 0) {
+              throw new Error("Invalid quantity");
+            }
+
+            if (isUnitTracked(item.productId)) {
+              if (qty !== 1) {
+                throw new Error("Para produtos com QR (unidades), use linhas separadas (Qtd=1 por unidade).");
+              }
+
+              const requestedCode = typeof item.destination === "string" ? item.destination.trim() : "";
+
+              const unit = requestedCode
+                ? await txAny.productUnit.findFirst({
+                    where: {
+                      tenantId,
+                      productId: item.productId,
+                      code: requestedCode,
+                      status: "IN_STOCK",
+                    },
+                    select: { id: true, code: true, invoiceId: true },
+                  })
+                : await txAny.productUnit.findFirst({
+                    where: {
+                      tenantId,
+                      productId: item.productId,
+                      status: "IN_STOCK",
+                    },
+                    orderBy: { createdAt: "asc" },
+                    select: { id: true, code: true, invoiceId: true },
+                  });
+
+              if (!unit) {
+                throw new Error("Sem unidades em stock para um dos produtos selecionados.");
+              }
+
+              await txAny.productUnit.updateMany({
+                where: { id: unit.id, status: "IN_STOCK" },
+                data: {
+                  status: "ACQUIRED",
+                  acquiredAt: new Date(),
+                  acquiredByUserId: performerUserId,
+                  assignedToUserId,
+                  acquiredReason: stockReason,
+                },
+              });
+
+              await txAny.stockMovement.create({
+                data: {
+                  type: "OUT",
+                  quantity: BigInt(1) as any,
+                  tenantId,
+                  productId: item.productId,
+                  unitId: unit.id,
+                  invoiceId: unit.invoiceId ?? null,
+                  requestId: existingRequest.id,
+                  performedByUserId: performerUserId,
+                  assignedToUserId,
+                  reason: stockReason,
+                },
+                select: { id: true },
+              });
+
+              const productAfter = await tx.product.update({
+                where: { id: item.productId },
+                data: { quantity: { decrement: BigInt(1) as any } },
+                select: { quantity: true },
+              });
+              await tx.product.update({
+                where: { id: item.productId },
+                data: { status: computeProductStatus(Number(productAfter.quantity)) },
+              });
+
+              createdItems.push({
+                productId: item.productId,
+                quantity: 1,
+                notes: typeof item.notes === "string" ? (item.notes.trim() ? item.notes.trim() : null) : item.notes ?? null,
+                unit: typeof item.unit === "string" ? (item.unit.trim() ? item.unit.trim() : null) : item.unit ?? null,
+                reference:
+                  typeof item.reference === "string" ? (item.reference.trim() ? item.reference.trim() : null) : item.reference ?? null,
+                destination: unit.code,
+              });
+            } else {
+              const product = await tx.product.findUnique({ where: { id: item.productId }, select: { quantity: true } });
+              const currentQty = Number(product?.quantity ?? BigInt(0));
+              if (currentQty < qty) {
+                throw new Error("Stock insuficiente para um dos produtos selecionados.");
+              }
+
+              await txAny.stockMovement.create({
+                data: {
+                  type: "OUT",
+                  quantity: BigInt(qty) as any,
+                  tenantId,
+                  productId: item.productId,
+                  requestId: existingRequest.id,
+                  performedByUserId: performerUserId,
+                  assignedToUserId,
+                  reason: stockReason,
+                },
+                select: { id: true },
+              });
+
+              const productAfter = await tx.product.update({
+                where: { id: item.productId },
+                data: { quantity: { decrement: BigInt(qty) as any } },
+                select: { quantity: true },
+              });
+              await tx.product.update({
+                where: { id: item.productId },
+                data: { status: computeProductStatus(Number(productAfter.quantity)) },
+              });
+
+              createdItems.push({
+                productId: item.productId,
+                quantity: qty,
+                notes: typeof item.notes === "string" ? (item.notes.trim() ? item.notes.trim() : null) : item.notes ?? null,
+                unit: typeof item.unit === "string" ? (item.unit.trim() ? item.unit.trim() : null) : item.unit ?? null,
+                reference:
+                  typeof item.reference === "string" ? (item.reference.trim() ? item.reference.trim() : null) : item.reference ?? null,
+                destination:
+                  typeof item.destination === "string" ? (item.destination.trim() ? item.destination.trim() : null) : item.destination ?? null,
+              });
+            }
+          }
+
+          await tx.requestItem.createMany({
+            data: createdItems.map((it) => ({
+              requestId: existingRequest.id,
+              productId: it.productId,
+              quantity: BigInt(it.quantity) as any,
+              notes: it.notes ?? null,
+              unit: it.unit ?? null,
+              reference: it.reference ?? null,
+              destination: it.destination ?? null,
+            })),
+          });
+        }
+
+        return { updatedCount: updatedRequest.count };
       });
 
-      if (updated.count === 0) {
+      if (updated.updatedCount === 0) {
         return res.status(404).json({ error: "Request not found" });
       }
 
@@ -575,7 +1073,27 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           updatedAt: it.updatedAt.toISOString(),
         })),
       });
-    } catch (error) {
+    } catch (error: any) {
+      if (typeof error?.message === "string") {
+        if (error.message === "One or more request items were not found") {
+          return res.status(400).json({ error: "One or more request items were not found" });
+        }
+        if (error.message === "Replace items must include at least one item") {
+          return res.status(400).json({ error: "A requisição deve ter pelo menos um item." });
+        }
+        if (error.message === "One or more products were not found") {
+          return res.status(404).json({ error: "One or more products were not found" });
+        }
+        if (
+          error.message === "Stock insuficiente para um dos produtos selecionados." ||
+          error.message === "Sem unidades em stock para um dos produtos selecionados." ||
+          error.message === "Para produtos com QR (unidades), use linhas separadas (Qtd=1 por unidade)." ||
+          error.message === "Cannot restore unit-tracked item without destination code" ||
+          error.message === "Cannot restore unit (not found or not acquired)"
+        ) {
+          return res.status(400).json({ error: error.message });
+        }
+      }
       console.error("PATCH /api/requests/[id] error:", error);
       return res.status(500).json({ error: "Failed to update request" });
     }

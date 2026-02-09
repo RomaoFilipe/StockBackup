@@ -28,6 +28,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/app/authContext";
 import { ModeToggle } from "@/app/AppHeader/ModeToggle";
+import { RequestsNotificationsBell } from "@/app/AppHeader/RequestsNotificationsBell";
 
 interface AppShellProps {
   children: React.ReactNode;
@@ -52,6 +53,12 @@ const navItemsBase: NavItem[] = [
     label: "Requisições",
     href: "/requests",
     icon: LayoutGrid,
+    mobile: true,
+  },
+  {
+    label: "Equipamentos",
+    href: "/equipamentos",
+    icon: Boxes,
     mobile: true,
   },
   {
@@ -96,14 +103,18 @@ export default function AppShell({ children }: AppShellProps) {
   const navItems = useMemo(() => {
     const items = [...navItemsBase];
     if (user?.role === "ADMIN") {
-      items.splice(3, 0, {
+      const scanIndex = items.findIndex((i) => i.href === "/scan");
+      const insertDbAt = scanIndex >= 0 ? scanIndex : items.length;
+      items.splice(insertDbAt, 0, {
         label: "DB",
         href: "/DB",
         icon: Database,
         mobile: true,
       });
 
-      items.splice(5, 0, {
+      const insightsIndex = items.findIndex((i) => i.href === "/business-insights");
+      const insertUsersAt = insightsIndex >= 0 ? insightsIndex : items.length;
+      items.splice(insertUsersAt, 0, {
         label: "Pessoas",
         href: "/users",
         icon: Users,
@@ -228,6 +239,7 @@ export default function AppShell({ children }: AppShellProps) {
 
               <div className="flex items-center gap-2">
                 <ModeToggle />
+                <RequestsNotificationsBell />
                 <div className="flex size-9 items-center justify-center rounded-full bg-primary/15 text-xs font-semibold text-primary">
                   {user?.name?.slice(0, 2).toUpperCase() || "ST"}
                 </div>

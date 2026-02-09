@@ -5,8 +5,16 @@ export function middleware(request: NextRequest) {
   // Get the pathname of the request
   const path = request.nextUrl.pathname;
 
+  // Legacy route: /admin is now /DB
+  if (path === "/admin" || path.startsWith("/admin/")) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/DB";
+    url.search = request.nextUrl.search;
+    return NextResponse.redirect(url);
+  }
+
   // Define protected routes that require authentication
-  const protectedRoutes = ["/api-docs", "/api-status", "/business-insights", "/users", "/storage", "/DB"];
+  const protectedRoutes = ["/api-docs", "/api-status", "/business-insights", "/users", "/storage", "/DB", "/equipamentos"];
 
   // Check if the current path is a protected route
   const isProtectedRoute = protectedRoutes.some((route) =>

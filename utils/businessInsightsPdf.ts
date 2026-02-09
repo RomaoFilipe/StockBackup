@@ -19,6 +19,20 @@ export type BusinessInsightsPdfData = {
     byStatus: Array<{ status: string; count: number }>;
     topProducts: Array<{ name: string; quantity: number }>;
   };
+
+  operations?: {
+    windowLabel: string;
+    requestsPending: number;
+    movementsTotal: number;
+    outQuantity: number;
+    lossesQuantity: number;
+    inactive90DaysCount: number;
+    neverMovedCount: number;
+    unitsTotal: number;
+    unitsInRepair: number;
+    unitsLost: number;
+    unitsScrapped: number;
+  };
 };
 
 function formatDateTimePt(date: Date) {
@@ -111,6 +125,21 @@ export async function buildBusinessInsightsPdfBytes(data: BusinessInsightsPdfDat
   drawLine(`Sem stock: ${safeText(data.inventory.outOfStockItems)}`);
   drawLine(`Quantidade total: ${safeText(data.inventory.totalQuantity)}`);
   drawLine(`Preço médio (aprox.): ${safeText(data.inventory.averagePrice)} €`);
+
+  if (data.operations) {
+    drawDivider();
+    drawLine("Controlo operacional", { size: 13, bold: true });
+    drawLine(`Janela: ${safeText(data.operations.windowLabel)}`, { size: 10, color: rgb(0.25, 0.25, 0.25) });
+    drawLine(`Requisições a tratar: ${safeText(data.operations.requestsPending)}`);
+    drawLine(`Movimentos: ${safeText(data.operations.movementsTotal)} (OUT: ${safeText(data.operations.outQuantity)})`);
+    drawLine(`Perdas/Sucata: ${safeText(data.operations.lossesQuantity)}`);
+    drawLine(`Inativos (≥ 90d): ${safeText(data.operations.inactive90DaysCount)} | Nunca movidos: ${safeText(data.operations.neverMovedCount)}`);
+    drawLine(
+      `Unidades: ${safeText(data.operations.unitsTotal)} (Reparação: ${safeText(data.operations.unitsInRepair)}, Perdidas: ${safeText(
+        data.operations.unitsLost
+      )}, Sucata: ${safeText(data.operations.unitsScrapped)})`
+    );
+  }
 
   const bytes = await doc.save();
   return bytes;

@@ -274,17 +274,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const unitsGrouped = await prisma.productUnit.groupBy({
       by: ["status"],
       where: { tenantId },
-      _count: { _all: true },
+      _count: { status: true },
     });
 
-    const unitsByStatus = unitsGrouped.map((r) => ({ status: String(r.status), count: r._count._all }));
+    const unitsByStatus = unitsGrouped.map((r) => ({ status: String(r.status), count: r._count.status }));
     const totalUnits = unitsByStatus.reduce((sum, r) => sum + r.count, 0);
 
     const unitsByProduct = await prisma.productUnit.groupBy({
       by: ["productId"],
       where: { tenantId },
-      _count: { _all: true },
-      orderBy: { _count: { _all: "desc" } },
+      _count: { productId: true },
+      orderBy: { _count: { productId: "desc" } },
       take: 8,
     });
 
@@ -297,7 +297,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const unitsTopProducts = unitsByProduct.map((r) => {
       const p = productMetaMap.get(r.productId);
-      return { productId: r.productId, name: p?.name ?? "Produto", sku: p?.sku ?? "", units: r._count._all };
+      return { productId: r.productId, name: p?.name ?? "Produto", sku: p?.sku ?? "", units: r._count.productId };
     });
 
     const data: MunicipalReportData = {

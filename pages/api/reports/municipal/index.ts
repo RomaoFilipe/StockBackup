@@ -135,7 +135,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       },
     });
 
-    let invoicesCount = invoices.length;
+    const invoicesCount = invoices.length;
     let invoicesTotalQty = 0;
     let invoicesTotalSpend = 0;
 
@@ -308,11 +308,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const unitsGrouped = await prisma.productUnit.groupBy({
       by: ["status"],
       where: { tenantId },
-      _count: { _all: true },
+      _count: { status: true },
     });
 
     const unitsByStatus = unitsGrouped
-      .map((r) => ({ status: String(r.status), count: r._count._all }))
+      .map((r) => ({ status: String(r.status), count: r._count.status }))
       .sort((a, b) => b.count - a.count);
 
     const totalUnits = unitsByStatus.reduce((sum, s) => sum + s.count, 0);
@@ -320,8 +320,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const unitsByProduct = await prisma.productUnit.groupBy({
       by: ["productId"],
       where: { tenantId },
-      _count: { _all: true },
-      orderBy: { _count: { _all: "desc" } },
+      _count: { productId: true },
+      orderBy: { _count: { productId: "desc" } },
       take: 10,
     });
 
@@ -339,7 +339,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         productId: r.productId,
         name: p?.name ?? "Produto",
         sku: p?.sku ?? "",
-        units: r._count._all,
+        units: r._count.productId,
       };
     });
 

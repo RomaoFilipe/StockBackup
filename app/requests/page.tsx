@@ -31,7 +31,7 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import AttachmentsDialog from "@/app/components/AttachmentsDialog";
-import { Paperclip, Plus, Printer, QrCode, RefreshCcw, Trash2 } from "lucide-react";
+import { Paperclip, PenLine, Plus, Printer, QrCode, RefreshCcw, Trash2 } from "lucide-react";
 import type { Product } from "@/app/types";
 type AvailableUnitDto = { id: string; code: string };
 
@@ -181,6 +181,7 @@ export default function RequestsPage() {
   const [qrRequest, setQrRequest] = useState<RequestDto | null>(null);
 
   const [createOpen, setCreateOpen] = useState(false);
+  const [editRequestId, setEditRequestId] = useState<string | null>(null);
 
   const [requestedAt, setRequestedAt] = useState(() => toDatetimeLocalValue(new Date()));
   const [title, setTitle] = useState("");
@@ -210,6 +211,72 @@ export default function RequestsPage() {
   const [items, setItems] = useState<NewRequestItem[]>([
     { productId: "", quantity: 1, unit: "", reference: "", destination: "", notes: "" },
   ]);
+
+  const resetForm = () => {
+    setRequestedAt(toDatetimeLocalValue(new Date()));
+    setTitle("");
+    setNotes("");
+    setRequestingServiceId("");
+    setRequesterName("");
+    setRequesterEmployeeNo("");
+    setDeliveryLocation("");
+    setExpectedDeliveryFrom("");
+    setExpectedDeliveryTo("");
+    setGoodsTypes({
+      MATERIALS_SERVICES: false,
+      WAREHOUSE_MATERIALS: false,
+      OTHER_PRODUCTS: false,
+    });
+    setItems([{ productId: "", quantity: 1, unit: "", reference: "", destination: "", notes: "" }]);
+    setInvoiceByProductId({});
+    setInvoiceLoadingByProductId({});
+    setUnitHintByProductId({});
+    setUnitLoadingByRow({});
+  };
+
+  const openCreateModal = () => {
+    setEditRequestId(null);
+    resetForm();
+    setCreateOpen(true);
+  };
+
+  const openEditModal = (r: RequestDto) => {
+    if (!r?.id) return;
+    setEditRequestId(r.id);
+
+    setRequestedAt(toDatetimeLocalValue(new Date(r.requestedAt)));
+    setTitle(r.title ?? "");
+    setNotes(r.notes ?? "");
+    setRequestingServiceId(r.requestingServiceId ? String(r.requestingServiceId) : "");
+    setRequesterName(r.requesterName ?? "");
+    setRequesterEmployeeNo(r.requesterEmployeeNo ?? "");
+    setDeliveryLocation(r.deliveryLocation ?? "");
+    setExpectedDeliveryFrom(r.expectedDeliveryFrom ? String(r.expectedDeliveryFrom).slice(0, 10) : "");
+    setExpectedDeliveryTo(r.expectedDeliveryTo ? String(r.expectedDeliveryTo).slice(0, 10) : "");
+    setGoodsTypes({
+      MATERIALS_SERVICES: Boolean(r.goodsTypes?.includes("MATERIALS_SERVICES")),
+      WAREHOUSE_MATERIALS: Boolean(r.goodsTypes?.includes("WAREHOUSE_MATERIALS")),
+      OTHER_PRODUCTS: Boolean(r.goodsTypes?.includes("OTHER_PRODUCTS")),
+    });
+
+    setItems(
+      (Array.isArray(r.items) ? r.items : []).map((it) => ({
+        productId: it.productId,
+        quantity: Number(it.quantity),
+        unit: it.unit ?? "",
+        reference: it.reference ?? "",
+        destination: it.destination ?? "",
+        notes: it.notes ?? "",
+      }))
+    );
+
+    // Clear caches; they will repopulate based on selected items.
+    setInvoiceByProductId({});
+    setInvoiceLoadingByProductId({});
+    setUnitHintByProductId({});
+    setUnitLoadingByRow({});
+    setCreateOpen(true);
+  };
   async function fetchAvailableUnits(args: { productId: string; take?: number; exclude?: string[] }) {
     const res = await axiosInstance.get("/units/available", {
       params: {
@@ -546,6 +613,7 @@ export default function RequestsPage() {
       setInvoiceLoadingByProductId({});
 
       setCreateOpen(false);
+      setEditRequestId(null);
 
       toast({
         title: "Requisição criada",
@@ -553,6 +621,113 @@ export default function RequestsPage() {
       });
     } catch (error: any) {
       const msg = error?.response?.data?.error || "Não foi possível criar a requisição.";
+      toast({
+        title: "Erro",
+        description: msg,
+        variant: "destructive",
+      });
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const updateRequest = async () => {
+    if (!canCreate) return;
+    if (!editRequestId) return;
+
+    setCreating(true);
+    try {
+      const requestedAtDate = requestedAt ? new Date(requestedAt) : new Date();
+      if (Number.isNaN(requestedAtDate.getTime())) {
+        toast({
+          title: "Erro",
+          description: "Data/Hora do pedido inválida.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const serviceId = requestingServiceId ? Number(requestingServiceId) : NaN;
+      if (!Number.isFinite(serviceId)) {
+        toast({
+          title: "Erro",
+          description: "Selecione um serviço requisitante.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const expectedFromDate = expectedDeliveryFrom ? new Date(expectedDeliveryFrom) : undefined;
+      if (expectedFromDate && Number.isNaN(expectedFromDate.getTime())) {
+        toast({
+          title: "Erro",
+          description: "Data prevista (de) inválida.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const expectedToDate = expectedDeliveryTo ? new Date(expectedDeliveryTo) : undefined;
+      if (expectedToDate && Number.isNaN(expectedToDate.getTime())) {
+        toast({
+          title: "Erro",
+          description: "Data prevista (até) inválida.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const effectiveGoodsTypes = (Object.keys(goodsTypes) as GoodsType[]).filter((k) => goodsTypes[k]);
+
+      const supplierNamesOrdered = Array.from(
+        new Set(
+          items
+            .map((it) => (it.productId ? (productById.get(it.productId) as any)?.supplier : undefined))
+            .filter((s): s is string => Boolean(s))
+        )
+      );
+
+      const supplierOption1 = supplierNamesOrdered[0] || null;
+      const supplierOption2 = supplierNamesOrdered[1] || null;
+      const supplierOption3 = supplierNamesOrdered[2] || null;
+
+      const payload = {
+        requestedAt: requestedAtDate.toISOString(),
+        requestingServiceId: serviceId,
+        title: title.trim() ? title.trim() : null,
+        notes: notes.trim() ? notes.trim() : null,
+        requesterName: requesterName.trim() ? requesterName.trim() : null,
+        requesterEmployeeNo: requesterEmployeeNo.trim() ? requesterEmployeeNo.trim() : null,
+        deliveryLocation: deliveryLocation.trim() ? deliveryLocation.trim() : null,
+        expectedDeliveryFrom: expectedFromDate ? expectedFromDate.toISOString() : null,
+        expectedDeliveryTo: expectedToDate ? expectedToDate.toISOString() : null,
+        goodsTypes: effectiveGoodsTypes,
+        supplierOption1,
+        supplierOption2,
+        supplierOption3,
+        replaceItems: items.map((it) => ({
+          productId: it.productId,
+          quantity: it.quantity,
+          unit: it.unit?.trim() ? it.unit.trim() : null,
+          reference: it.reference?.trim() ? it.reference.trim() : null,
+          destination: it.destination?.trim() ? it.destination.trim() : null,
+          notes: it.notes?.trim() ? it.notes.trim() : null,
+        })),
+      };
+
+      await axiosInstance.patch(`/requests/${editRequestId}`, payload);
+
+      setCreateOpen(false);
+      setEditRequestId(null);
+      resetForm();
+      await loadAll();
+
+      toast({
+        title: "Atualizado",
+        description: "A requisição foi atualizada.",
+      });
+    } catch (error: any) {
+      const msg = error?.response?.data?.error || error?.message || "Não foi possível guardar alterações.";
       toast({
         title: "Erro",
         description: msg,
@@ -588,7 +763,7 @@ export default function RequestsPage() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Button onClick={() => setCreateOpen(true)}>
+            <Button onClick={openCreateModal}>
               <Plus className="h-4 w-4 sm:mr-2" />
               <span className="hidden sm:inline">Nova requisição</span>
             </Button>
@@ -675,6 +850,16 @@ export default function RequestsPage() {
                         </div>
 
                         <div className="mt-3 flex justify-end gap-1">
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            onClick={() => openEditModal(r)}
+                            disabled={Boolean(r.signedAt) || (!isAdmin && r.userId !== user?.id)}
+                            title={r.signedAt ? "Assinada — anule a assinatura para editar" : "Editar"}
+                            aria-label="Editar"
+                          >
+                            <PenLine className="h-4 w-4" />
+                          </Button>
                           <AttachmentsDialog
                             kind="REQUEST"
                             requestId={r.id}
@@ -792,6 +977,16 @@ export default function RequestsPage() {
                             </TableCell>
                             <TableCell className="text-right py-2 px-3">
                               <div className="inline-flex items-center gap-1">
+                                <Button
+                                  variant="outline"
+                                  size="icon"
+                                  onClick={() => openEditModal(r)}
+                                  disabled={Boolean(r.signedAt) || (!isAdmin && r.userId !== user?.id)}
+                                  title={r.signedAt ? "Assinada — anule a assinatura para editar" : "Editar"}
+                                  aria-label="Editar"
+                                >
+                                  <PenLine className="h-4 w-4" />
+                                </Button>
                                 <AttachmentsDialog
                                   kind="REQUEST"
                                   requestId={r.id}
@@ -840,15 +1035,25 @@ export default function RequestsPage() {
             </CardContent>
           </Card>
 
-          <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+          <Dialog
+            open={createOpen}
+            onOpenChange={(o) => {
+              setCreateOpen(o);
+              if (!o) setEditRequestId(null);
+            }}
+          >
             <DialogContent className="w-[96vw] max-w-[1200px] max-h-[90vh] overflow-y-auto overflow-x-hidden">
               <DialogHeader>
-                <DialogTitle>Nova requisição</DialogTitle>
-                <DialogDescription>Preencha os dados e adicione pelo menos um item.</DialogDescription>
+                <DialogTitle>{editRequestId ? "Editar requisição" : "Nova requisição"}</DialogTitle>
+                <DialogDescription>
+                  {editRequestId
+                    ? "Atualize os dados e os itens. (Só é possível antes de assinar.)"
+                    : "Preencha os dados e adicione pelo menos um item."}
+                </DialogDescription>
               </DialogHeader>
 
               <div className="space-y-4">
-                {isAdmin ? (
+                {isAdmin && !editRequestId ? (
                   <div className="space-y-2">
                     <div className="text-sm font-medium">Criar em nome de</div>
                     <Select value={asUserId} onValueChange={setAsUserId}>
@@ -946,6 +1151,15 @@ export default function RequestsPage() {
                     onChange={(e) => setExpectedDeliveryTo(e.target.value)}
                   />
                 </div>
+              </div>
+
+              <div className="space-y-1">
+                <div className="text-sm font-medium">Fundamento do Pedido</div>
+                <Textarea
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="Escreva o motivo/fundamento do pedido..."
+                />
               </div>
 
               <div className="space-y-2">
@@ -1493,19 +1707,30 @@ export default function RequestsPage() {
                   <div className="text-sm font-medium">Título (opcional)</div>
                   <Input value={title} onChange={(e) => setTitle(e.target.value)} />
                 </div>
-                <div className="space-y-1">
-                  <div className="text-sm font-medium">Notas gerais (opcional)</div>
-                  <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Notas" />
-                </div>
               </div>
             </div>
 
             <DialogFooter>
-              <Button variant="outline" onClick={() => setCreateOpen(false)}>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setCreateOpen(false);
+                  setEditRequestId(null);
+                }}
+              >
                 Cancelar
               </Button>
-              <Button onClick={createRequest} disabled={!canCreate || creating}>
-                {creating ? "A criar..." : "Criar"}
+              <Button
+                onClick={editRequestId ? updateRequest : createRequest}
+                disabled={!canCreate || creating}
+              >
+                {editRequestId
+                  ? creating
+                    ? "A guardar..."
+                    : "Guardar"
+                  : creating
+                    ? "A criar..."
+                    : "Criar"}
               </Button>
             </DialogFooter>
           </DialogContent>
