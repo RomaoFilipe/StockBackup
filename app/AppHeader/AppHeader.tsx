@@ -4,10 +4,20 @@ import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { useRouter } from "next/navigation";
 import { usePathname } from "next/navigation";
-import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { AiFillProduct } from "react-icons/ai";
-import { FiActivity, FiBarChart, FiFileText, FiHome } from "react-icons/fi"; // Import icons for new nav items
+import {
+  FiActivity,
+  FiArchive,
+  FiBarChart2,
+  FiBookOpen,
+  FiCamera,
+  FiDatabase,
+  FiFileText,
+  FiPackage,
+  FiRepeat,
+  FiUsers,
+} from "react-icons/fi";
 import { useAuth } from "../authContext";
 import { ModeToggle } from "./ModeToggle";
 
@@ -15,7 +25,6 @@ export default function AppHeader() {
   const { logout, user } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
-  const searchParams = useSearchParams();
   const { toast } = useToast();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
@@ -49,8 +58,6 @@ export default function AppHeader() {
   };
 
   const isActive = (path: string) => pathname === path || pathname?.startsWith(`${path}/`);
-
-  const storageTab = searchParams?.get("tab");
 
   const isAdmin = user?.role === "ADMIN";
 
@@ -97,7 +104,7 @@ export default function AppHeader() {
               size="sm"
               onClick={() => handleNavigation("/")}
             >
-              <FiHome className="mr-2 h-4 w-4" />
+              <FiPackage className="mr-2 h-4 w-4" />
               Produtos
             </Button>
 
@@ -115,7 +122,7 @@ export default function AppHeader() {
               size="sm"
               onClick={() => handleNavigation("/movements")}
             >
-              <FiActivity className="mr-2 h-4 w-4" />
+              <FiRepeat className="mr-2 h-4 w-4" />
               Movimentos
             </Button>
 
@@ -124,17 +131,17 @@ export default function AppHeader() {
               size="sm"
               onClick={() => handleNavigation("/storage")}
             >
-              <FiFileText className="mr-2 h-4 w-4" />
+              <FiArchive className="mr-2 h-4 w-4" />
               Storage
             </Button>
 
             <Button
-              variant={isActive("/storage") && storageTab === "documents" ? "secondary" : "ghost"}
+              variant={isActive("/scan") ? "secondary" : "ghost"}
               size="sm"
-              onClick={() => handleNavigation("/storage?tab=documents")}
+              onClick={() => handleNavigation("/scan")}
             >
-              <FiFileText className="mr-2 h-4 w-4" />
-              Documentos
+              <FiCamera className="mr-2 h-4 w-4" />
+              Scan
             </Button>
 
             {isAdmin ? (
@@ -143,19 +150,19 @@ export default function AppHeader() {
                 size="sm"
                 onClick={() => handleNavigation("/users")}
               >
-                <FiFileText className="mr-2 h-4 w-4" />
+                <FiUsers className="mr-2 h-4 w-4" />
                 Pessoas
               </Button>
             ) : null}
 
             {isAdmin ? (
               <Button
-                variant={isActive("/admin") ? "secondary" : "ghost"}
+                variant={isActive("/DB") ? "secondary" : "ghost"}
                 size="sm"
-                onClick={() => handleNavigation("/admin")}
+                onClick={() => handleNavigation("/DB")}
               >
-                <FiFileText className="mr-2 h-4 w-4" />
-                Gestão
+                <FiDatabase className="mr-2 h-4 w-4" />
+                DB
               </Button>
             ) : null}
           </div>
@@ -167,7 +174,7 @@ export default function AppHeader() {
               size="sm"
               onClick={() => handleNavigation("/business-insights")}
             >
-              <FiBarChart className="mr-2 h-4 w-4" />
+              <FiBarChart2 className="mr-2 h-4 w-4" />
               Insights
             </Button>
 
@@ -176,7 +183,7 @@ export default function AppHeader() {
               size="sm"
               onClick={() => handleNavigation("/api-docs")}
             >
-              <FiFileText className="mr-2 h-4 w-4" />
+              <FiBookOpen className="mr-2 h-4 w-4" />
               Documentação API
             </Button>
 

@@ -8,8 +8,9 @@ import {
   BarChart3,
   BookOpen,
   Boxes,
-  Files,
+  Database,
   LayoutGrid,
+  ScanLine,
   LogOut,
   Menu,
   Package,
@@ -62,11 +63,9 @@ const navItemsBase: NavItem[] = [
     mobile: true,
   },
   {
-    label: "Documentos",
-    href: "/storage?tab=documents",
-    icon: Files,
-    active: (pathname, searchParams) =>
-      pathname === "/storage" && searchParams?.get("tab") === "documents",
+    label: "Scan",
+    href: "/scan",
+    icon: ScanLine,
     mobile: true,
   },
   {
@@ -97,7 +96,14 @@ export default function AppShell({ children }: AppShellProps) {
   const navItems = useMemo(() => {
     const items = [...navItemsBase];
     if (user?.role === "ADMIN") {
-      items.splice(4, 0, {
+      items.splice(3, 0, {
+        label: "DB",
+        href: "/DB",
+        icon: Database,
+        mobile: true,
+      });
+
+      items.splice(5, 0, {
         label: "Pessoas",
         href: "/users",
         icon: Users,

@@ -215,6 +215,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const id = crypto.randomUUID();
 
       let destDir = path.join(process.cwd(), "storage", tenantId);
+      if (parsedKind.data === "DOCUMENT") {
+        const year = new Date().getFullYear();
+        destDir = path.join(process.cwd(), "storage", tenantId, String(year), "DOCUMENTOS");
+      }
+
+      if (parsedKind.data === "OTHER") {
+        const year = new Date().getFullYear();
+        destDir = path.join(process.cwd(), "storage", tenantId, String(year), "OUTROS");
+      }
+
       if (parsedKind.data === "REQUEST" && requestMeta) {
         const folderName = buildRequestFolderName({
           gtmiNumber: requestMeta.gtmiNumber,
