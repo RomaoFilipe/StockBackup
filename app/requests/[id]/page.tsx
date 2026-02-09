@@ -6,6 +6,7 @@ import { useAuth } from "@/app/authContext";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -25,8 +26,17 @@ import Image from "next/image";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { PenLine, Printer, Trash2 } from "lucide-react";
+import { useProductStore } from "@/app/useProductStore";
+import type { Product } from "@/app/types";
 
 type GoodsType = "MATERIALS_SERVICES" | "WAREHOUSE_MATERIALS" | "OTHER_PRODUCTS";
+
+type RequestingServiceDto = {
+  id: number;
+  codigo: string;
+  designacao: string;
+  ativo: boolean;
+};
 
 type RequestItemDto = {
   id: string;
@@ -64,6 +74,7 @@ type RequestDto = {
 
   requestedAt: string;
   requestingService?: string | null;
+  requestingServiceId?: number | null;
   requesterName?: string | null;
   requesterEmployeeNo?: string | null;
   deliveryLocation?: string | null;
@@ -118,6 +129,11 @@ function formatDatePt(iso?: string | null) {
   return d.toLocaleDateString("pt-PT");
 }
 
+function toDateInputValue(iso?: string | null) {
+  if (!iso) return "";
+  return String(iso).slice(0, 10);
+}
+
 const formatStatus = (status: RequestDto["status"]) => {
   switch (status) {
     case "DRAFT":
@@ -135,6 +151,16 @@ const formatStatus = (status: RequestDto["status"]) => {
   }
 };
 
+function makeClientKey() {
+  try {
+    const c: any = (globalThis as any)?.crypto;
+    if (c && typeof c.randomUUID === "function") return String(c.randomUUID());
+  } catch {
+    // ignore
+  }
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
 export default function RequestDetailsPage() {
   const router = useRouter();
   const routeParams = useParams<{ id: string }>();
@@ -151,9 +177,13 @@ export default function RequestDetailsPage() {
   const { toast } = useToast();
   const { isLoggedIn, isAuthLoading, user } = useAuth();
   const isAdmin = user?.role === "ADMIN";
+  const { allProducts, loadProducts } = useProductStore();
+  const productsList = useMemo(() => (Array.isArray(allProducts) ? allProducts : []), [allProducts]);
 
   const [request, setRequest] = useState<RequestDto | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const isSignedLocked = Boolean(request?.signedAt);
 
   const invoiceByProductId = useMemo(() => {
     const map: Record<string, RequestInvoiceDto> = {};
@@ -201,6 +231,28 @@ export default function RequestDetailsPage() {
     loadRequest();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requestId, isAuthLoading, isLoggedIn]);
+
+  const [requestingServices, setRequestingServices] = useState<RequestingServiceDto[]>([]);
+  useEffect(() => {
+    if (isAuthLoading || !isLoggedIn) return;
+    (async () => {
+      try {
+        const res = await axiosInstance.get("/requesting-services");
+        setRequestingServices(res.data || []);
+      } catch {
+        setRequestingServices([]);
+      }
+    })();
+  }, [isAuthLoading, isLoggedIn]);
+
+  // Edição foi movida para o modal na listagem (/requests).
+
+
+
+  useEffect(() => {
+    if (isAuthLoading || !isLoggedIn) return;
+    loadProducts();
+  }, [isAuthLoading, isLoggedIn, loadProducts]);
 
   const [signOpen, setSignOpen] = useState(false);
   const [signSaving, setSignSaving] = useState(false);
@@ -503,17 +555,30 @@ export default function RequestDetailsPage() {
                 </CardHeader>
                 <CardContent className="space-y-2">
                   <div className="text-sm">
-                    <span className="text-muted-foreground">Serviço:</span> {request.requestingService || "—"}
+                    <span className="text-muted-foreground">Serviço:</span>{" "}
+                    <span>{request.requestingService || "—"}</span>
                   </div>
                   <div className="text-sm">
-                    <span className="text-muted-foreground">Funcionário/Órgão:</span> {request.requesterName || "—"}
-                    {request.requesterEmployeeNo ? ` (${request.requesterEmployeeNo})` : ""}
+                    <span className="text-muted-foreground">Funcionário/Órgão:</span>{" "}
+                    <span>
+                      {request.requesterName || "—"}
+                      {request.requesterEmployeeNo ? ` (${request.requesterEmployeeNo})` : ""}
+                    </span>
                   </div>
                   <div className="text-sm">
-                    <span className="text-muted-foreground">Local de entrega:</span> {request.deliveryLocation || "—"}
+                    <span className="text-muted-foreground">Local de entrega:</span>{" "}
+                    <span>{request.deliveryLocation || "—"}</span>
                   </div>
                   <div className="text-sm">
-                    <span className="text-muted-foreground">Previsto:</span> {request.expectedDeliveryFrom ? request.expectedDeliveryFrom.slice(0, 10) : "—"} → {request.expectedDeliveryTo ? request.expectedDeliveryTo.slice(0, 10) : "—"}
+                    <span className="text-muted-foreground">Previsto:</span>{" "}
+                    <span>
+                      {request.expectedDeliveryFrom ? request.expectedDeliveryFrom.slice(0, 10) : "—"} → {request.expectedDeliveryTo ? request.expectedDeliveryTo.slice(0, 10) : "—"}
+                    </span>
+                  </div>
+
+                  <div className="text-sm">
+                    <span className="text-muted-foreground">Fundamento do Pedido:</span>
+                    <div className="mt-1 whitespace-pre-wrap">{request.notes?.trim() ? request.notes : "—"}</div>
                   </div>
                 </CardContent>
               </Card>
@@ -524,16 +589,22 @@ export default function RequestDetailsPage() {
                 </CardHeader>
                 <CardContent className="space-y-2">
                   <div className="text-sm">
-                    <span className="text-muted-foreground">Tipo:</span> {request.goodsTypes?.length ? request.goodsTypes.map((g) => goodsTypeLabels[g]).join(" • ") : "—"}
+                    <span className="text-muted-foreground">Tipo:</span>{" "}
+                    <span>
+                      {request.goodsTypes?.length ? request.goodsTypes.map((g) => goodsTypeLabels[g]).join(" • ") : "—"}
+                    </span>
                   </div>
                   <div className="text-sm">
-                    <span className="text-muted-foreground">Fornecedor 1:</span> {request.supplierOption1 || "—"}
+                    <span className="text-muted-foreground">Fornecedor 1:</span>{" "}
+                    <span>{request.supplierOption1 || "—"}</span>
                   </div>
                   <div className="text-sm">
-                    <span className="text-muted-foreground">Fornecedor 2:</span> {request.supplierOption2 || "—"}
+                    <span className="text-muted-foreground">Fornecedor 2:</span>{" "}
+                    <span>{request.supplierOption2 || "—"}</span>
                   </div>
                   <div className="text-sm">
-                    <span className="text-muted-foreground">Fornecedor 3:</span> {request.supplierOption3 || "—"}
+                    <span className="text-muted-foreground">Fornecedor 3:</span>{" "}
+                    <span>{request.supplierOption3 || "—"}</span>
                   </div>
                 </CardContent>
               </Card>
@@ -559,7 +630,9 @@ export default function RequestDetailsPage() {
                       <TableCell>{idx + 1}</TableCell>
                       <TableCell>
                         <div className="font-medium">{it.product?.name || it.productId}</div>
-                        {it.product?.sku ? <div className="text-xs text-muted-foreground">SKU: {it.product.sku}</div> : null}
+                        {it.product?.sku ? (
+                          <div className="text-xs text-muted-foreground">SKU: {it.product.sku}</div>
+                        ) : null}
                       </TableCell>
                       <TableCell>{it.quantity}</TableCell>
                       <TableCell>{it.unit || ""}</TableCell>
@@ -734,19 +807,15 @@ export default function RequestDetailsPage() {
               </div>
             </div>
 
-            {request.title?.trim() || request.notes?.trim() ? (
+            {request.title?.trim() ? (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <Card>
                   <CardHeader className="py-3">
                     <CardTitle className="text-base">Título</CardTitle>
                   </CardHeader>
-                  <CardContent className="text-sm text-muted-foreground">{request.title?.trim() ? request.title : "—"}</CardContent>
-                </Card>
-                <Card>
-                  <CardHeader className="py-3">
-                    <CardTitle className="text-base">Notas gerais</CardTitle>
-                  </CardHeader>
-                  <CardContent className="text-sm text-muted-foreground whitespace-pre-wrap">{request.notes?.trim() ? request.notes : "—"}</CardContent>
+                  <CardContent className="text-sm text-muted-foreground">
+                    {request.title?.trim() ? request.title : "—"}
+                  </CardContent>
                 </Card>
               </div>
             ) : null}

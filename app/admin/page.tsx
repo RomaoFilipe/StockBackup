@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import AuthenticatedLayout from "@/app/components/AuthenticatedLayout";
 import { useAuth } from "@/app/authContext";
 import axiosInstance from "@/utils/axiosInstance";
@@ -9,6 +9,7 @@ import { useToast } from "@/hooks/use-toast";
 import PageHeader from "@/app/components/PageHeader";
 import SectionCard from "@/app/components/SectionCard";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
@@ -51,14 +52,97 @@ type SupplierRow = {
   updatedAt?: string;
 };
 
+type PublicAccessPinRow = {
+  id: string;
+  label: string | null;
+  isActive: boolean;
+  createdAt: string;
+  lastUsedAt: string | null;
+};
+
+type PublicAccessLinkRow = {
+  id: string;
+  slug: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  requestingService: { id: number; codigo: string; designacao: string; ativo: boolean };
+  pins: PublicAccessPinRow[];
+  pinCounts: { total: number; active: number };
+  publicPath: string;
+};
+
+type PublicRequestStatus = "RECEIVED" | "ACCEPTED" | "REJECTED";
+
+type PublicRequestRow = {
+  id: string;
+  status: PublicRequestStatus;
+  createdAt: string;
+  handledAt: string | null;
+  requesterName: string;
+  requesterIp: string | null;
+  deliveryLocation: string | null;
+  title: string | null;
+  notes: string | null;
+  handledNote: string | null;
+  handledBy: { id: string; name: string; email: string } | null;
+  requestingService: { id: number; codigo: string; designacao: string } | null;
+  acceptedRequest: { id: string; gtmiNumber: string } | null;
+  items: Array<{
+    id: string;
+    productId: string;
+    quantity: number;
+    unit: string | null;
+    notes: string | null;
+    product: { id: string; name: string; sku: string } | null;
+  }>;
+};
+
+const formatPublicStatus = (status: PublicRequestStatus) => {
+  switch (status) {
+    case "RECEIVED":
+      return { label: "Recebido", className: "bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-500/20" };
+    case "ACCEPTED":
+      return {
+        label: "Aceite",
+        className: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20",
+      };
+    case "REJECTED":
+      return { label: "Rejeitado", className: "bg-rose-500/10 text-rose-700 dark:text-rose-300 border-rose-500/20" };
+    default:
+      return { label: status, className: "bg-muted/50 text-muted-foreground border-border/60" };
+  }
+};
+
+function formatDateTimePt(iso?: string | null) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleString("pt-PT");
+}
+
 export default function AdminPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { toast } = useToast();
   const { isLoggedIn, isAuthLoading, user } = useAuth();
 
+  const [origin, setOrigin] = useState("");
+
   const isAdmin = user?.role === "ADMIN";
 
-  const [tab, setTab] = useState<"services" | "categories" | "suppliers">("services");
+  useEffect(() => {
+    if (typeof window !== "undefined") setOrigin(window.location.origin);
+  }, []);
+
+  const [tab, setTab] = useState<"services" | "categories" | "suppliers" | "publicLinks" | "received">("services");
+
+  useEffect(() => {
+    const tabParam = searchParams?.get("tab");
+    if (tabParam === "received") {
+      setTab("received");
+    }
+  }, [searchParams]);
 
   const [pageSize, setPageSize] = useState<number>(25);
   const [servicesPage, setServicesPage] = useState<number>(1);
@@ -102,6 +186,36 @@ export default function AdminPage() {
   const [editSupplierOpen, setEditSupplierOpen] = useState(false);
   const [editSupplier, setEditSupplier] = useState<SupplierRow | null>(null);
   const [savingSupplier, setSavingSupplier] = useState(false);
+
+  const [accessLinks, setAccessLinks] = useState<PublicAccessLinkRow[]>([]);
+  const [accessLinksLoading, setAccessLinksLoading] = useState(false);
+  const [accessLinksLoadedOnce, setAccessLinksLoadedOnce] = useState(false);
+
+  const [createAccessServiceId, setCreateAccessServiceId] = useState<string>("");
+  const [createAccessSlug, setCreateAccessSlug] = useState("");
+  const [creatingAccess, setCreatingAccess] = useState(false);
+
+  const [pinsOpen, setPinsOpen] = useState(false);
+  const [pinsLink, setPinsLink] = useState<PublicAccessLinkRow | null>(null);
+  const [pinLabel, setPinLabel] = useState("");
+  const [creatingPin, setCreatingPin] = useState(false);
+
+  const [newPinOpen, setNewPinOpen] = useState(false);
+  const [newPinValue, setNewPinValue] = useState<string | null>(null);
+
+  const [publicRequests, setPublicRequests] = useState<PublicRequestRow[]>([]);
+  const [publicRequestsLoading, setPublicRequestsLoading] = useState(false);
+  const [publicRequestsLoadedOnce, setPublicRequestsLoadedOnce] = useState(false);
+  const [publicRequestsStatus, setPublicRequestsStatus] = useState<PublicRequestStatus>("RECEIVED");
+
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [detailsRow, setDetailsRow] = useState<PublicRequestRow | null>(null);
+
+  const [handleOpen, setHandleOpen] = useState(false);
+  const [handleMode, setHandleMode] = useState<"accept" | "reject">("accept");
+  const [handleRow, setHandleRow] = useState<PublicRequestRow | null>(null);
+  const [handleNote, setHandleNote] = useState("");
+  const [handling, setHandling] = useState(false);
 
   const loadServices = async () => {
     setServicesLoading(true);
@@ -165,6 +279,166 @@ export default function AdminPage() {
     loadSuppliers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthLoading, isLoggedIn, isAdmin]);
+
+  const loadPublicRequests = async () => {
+    setPublicRequestsLoading(true);
+    try {
+      const res = await axiosInstance.get("/admin/public-requests", {
+        params: { status: publicRequestsStatus, limit: 200 },
+      });
+      setPublicRequests(Array.isArray(res.data) ? res.data : []);
+      setPublicRequestsLoadedOnce(true);
+    } catch (error: any) {
+      const msg = error?.response?.data?.error || "Não foi possível carregar pedidos recebidos.";
+      toast({ title: "Erro", description: msg, variant: "destructive" });
+      setPublicRequests([]);
+    } finally {
+      setPublicRequestsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isAuthLoading) return;
+    if (!isLoggedIn || !isAdmin) return;
+    if (tab !== "received") return;
+    loadPublicRequests();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, publicRequestsStatus, isAuthLoading, isLoggedIn, isAdmin]);
+
+  useEffect(() => {
+    if (tab !== "received") return;
+    const id = searchParams?.get("publicRequestId");
+    if (!id) return;
+    const found = publicRequests.find((r) => r.id === id);
+    if (!found) return;
+    openDetails(found);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, searchParams, publicRequests]);
+
+  const openDetails = (row: PublicRequestRow) => {
+    setDetailsRow(row);
+    setDetailsOpen(true);
+  };
+
+  const openHandle = (mode: "accept" | "reject", row: PublicRequestRow) => {
+    setHandleMode(mode);
+    setHandleRow(row);
+    setHandleNote("");
+    setHandleOpen(true);
+  };
+
+  const confirmHandle = async () => {
+    if (!handleRow) return;
+    setHandling(true);
+    try {
+      const url = `/admin/public-requests/${handleRow.id}/${handleMode}`;
+      const res = await axiosInstance.post(url, { note: handleNote.trim() || undefined });
+
+      if (handleMode === "accept") {
+        toast({
+          title: "Pedido aceite",
+          description: res.data?.requestId ? `Criada requisição: ${String(res.data.requestId)}` : undefined,
+        });
+      } else {
+        toast({ title: "Pedido rejeitado" });
+      }
+
+      setHandleOpen(false);
+      setHandleRow(null);
+      setHandleNote("");
+      await loadPublicRequests();
+    } catch (error: any) {
+      const msg = error?.response?.data?.error || "Não foi possível concluir a ação.";
+      toast({ title: "Erro", description: msg, variant: "destructive" });
+    } finally {
+      setHandling(false);
+    }
+  };
+
+  const loadAccessLinks = async () => {
+    setAccessLinksLoading(true);
+    try {
+      const res = await axiosInstance.get("/admin/public-request-access");
+      setAccessLinks(Array.isArray(res.data) ? (res.data as PublicAccessLinkRow[]) : []);
+      setAccessLinksLoadedOnce(true);
+    } catch (error: any) {
+      const msg = error?.response?.data?.error || "Não foi possível carregar links públicos.";
+      toast({ title: "Erro", description: msg, variant: "destructive" });
+      setAccessLinks([]);
+    } finally {
+      setAccessLinksLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isAuthLoading) return;
+    if (!isLoggedIn || !isAdmin) return;
+    if (tab !== "publicLinks") return;
+    loadAccessLinks();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, isAuthLoading, isLoggedIn, isAdmin]);
+
+  const createAccessLink = async () => {
+    const requestingServiceId = Number(createAccessServiceId);
+    if (!Number.isFinite(requestingServiceId) || requestingServiceId <= 0) {
+      toast({ title: "Erro", description: "Selecione um serviço requisitante.", variant: "destructive" });
+      return;
+    }
+
+    setCreatingAccess(true);
+    try {
+      const res = await axiosInstance.post("/admin/public-request-access", {
+        requestingServiceId,
+        slug: createAccessSlug.trim() || undefined,
+      });
+
+      const publicPath = String(res.data?.publicPath || "");
+      toast({ title: "Link pronto", description: publicPath ? `URL: ${publicPath}` : undefined });
+      setCreateAccessSlug("");
+      await loadAccessLinks();
+    } catch (error: any) {
+      const msg = error?.response?.data?.error || "Não foi possível criar o link.";
+      toast({ title: "Erro", description: msg, variant: "destructive" });
+    } finally {
+      setCreatingAccess(false);
+    }
+  };
+
+  const openPins = (link: PublicAccessLinkRow) => {
+    setPinsLink(link);
+    setPinsOpen(true);
+    setPinLabel("");
+  };
+
+  const createPin = async () => {
+    if (!pinsLink) return;
+    setCreatingPin(true);
+    try {
+      const res = await axiosInstance.post(`/admin/public-request-access/${pinsLink.id}/pins`, {
+        label: pinLabel.trim() || undefined,
+      });
+      const pin = String(res.data?.pin || "");
+      setNewPinValue(pin || null);
+      setNewPinOpen(true);
+      setPinLabel("");
+      await loadAccessLinks();
+    } catch (error: any) {
+      const msg = error?.response?.data?.error || "Não foi possível gerar PIN.";
+      toast({ title: "Erro", description: msg, variant: "destructive" });
+    } finally {
+      setCreatingPin(false);
+    }
+  };
+
+  const setPinActive = async (accessId: string, pinId: string, isActive: boolean) => {
+    try {
+      await axiosInstance.patch(`/admin/public-request-access/${accessId}/pins`, { pinId, isActive });
+      await loadAccessLinks();
+    } catch (error: any) {
+      const msg = error?.response?.data?.error || "Não foi possível atualizar PIN.";
+      toast({ title: "Erro", description: msg, variant: "destructive" });
+    }
+  };
 
   const filteredServices = useMemo(() => {
     const q = servicesFilter.trim().toLowerCase();
@@ -539,6 +813,8 @@ export default function AdminPage() {
             <TabsTrigger value="services">Serviços requisitantes</TabsTrigger>
             <TabsTrigger value="categories">Categorias</TabsTrigger>
             <TabsTrigger value="suppliers">Fornecedores</TabsTrigger>
+            <TabsTrigger value="publicLinks">Links públicos</TabsTrigger>
+            <TabsTrigger value="received">Recebidos</TabsTrigger>
           </TabsList>
 
           <TabsContent value="services" className="space-y-4">
@@ -830,7 +1106,442 @@ export default function AdminPage() {
               />
             </SectionCard>
           </TabsContent>
+
+          <TabsContent value="publicLinks" className="space-y-4">
+            <SectionCard
+              title="Links públicos (PIN)"
+              description="Crie um link por serviço requisitante e gere PINs. O PIN é mostrado apenas uma vez no momento da criação."
+            >
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                <div className="space-y-1 md:col-span-2">
+                  <div className="text-sm font-medium">Serviço requisitante</div>
+                  <select
+                    className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                    value={createAccessServiceId}
+                    onChange={(e) => setCreateAccessServiceId(e.target.value)}
+                  >
+                    <option value="">Selecionar...</option>
+                    {services
+                      .slice()
+                      .sort((a, b) => (a.designacao || "").localeCompare(b.designacao || ""))
+                      .map((s) => (
+                        <option key={s.id} value={String(s.id)}>
+                          {s.designacao} {s.codigo ? `(${s.codigo})` : ""}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <div className="text-sm font-medium">Slug (opcional)</div>
+                  <Input
+                    value={createAccessSlug}
+                    onChange={(e) => setCreateAccessSlug(e.target.value)}
+                    placeholder="Ex: r-informatica"
+                  />
+                </div>
+
+                <div className="flex items-end">
+                  <Button className="w-full" onClick={createAccessLink} disabled={creatingAccess}>
+                    {creatingAccess ? "A criar..." : "Criar/obter link"}
+                  </Button>
+                </div>
+              </div>
+
+              <div className="mt-4 flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
+                <div className="text-sm text-muted-foreground">
+                  Total: {accessLinks.length} {accessLinks.length === 1 ? "link" : "links"}
+                </div>
+                <Button variant="outline" onClick={loadAccessLinks} disabled={accessLinksLoading}>
+                  {accessLinksLoading ? "A carregar..." : "Recarregar"}
+                </Button>
+              </div>
+
+              <div className="mt-4 overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Serviço</TableHead>
+                      <TableHead className="w-[280px]">URL</TableHead>
+                      <TableHead className="w-[140px]">PINs</TableHead>
+                      <TableHead className="w-[160px]">Criado</TableHead>
+                      <TableHead className="w-[160px]">Ações</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {accessLinks.map((l) => {
+                      const fullUrl = origin ? `${origin}${l.publicPath}` : l.publicPath;
+                      return (
+                        <TableRow key={l.id} className={!l.isActive ? "opacity-70" : undefined}>
+                          <TableCell>
+                            <div className="text-sm font-medium">{l.requestingService.designacao}</div>
+                            <div className="text-xs text-muted-foreground">{l.requestingService.codigo}</div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="text-xs text-muted-foreground break-all">{fullUrl}</div>
+                            <div className="text-xs text-muted-foreground">Slug: {l.slug}</div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="text-sm">
+                              {l.pinCounts.active}/{l.pinCounts.total} ativos
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-xs text-muted-foreground">{formatDateTimePt(l.createdAt)}</TableCell>
+                          <TableCell>
+                            <div className="flex flex-wrap gap-2">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={async () => {
+                                  try {
+                                    await navigator.clipboard.writeText(fullUrl);
+                                    toast({ title: "Copiado" });
+                                  } catch {
+                                    toast({ title: "Erro", description: "Não foi possível copiar.", variant: "destructive" });
+                                  }
+                                }}
+                              >
+                                Copiar URL
+                              </Button>
+                              <Button size="sm" onClick={() => openPins(l)}>
+                                PINs
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+
+                    {!accessLinksLoading && accessLinksLoadedOnce && accessLinks.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={5} className="text-sm text-muted-foreground">
+                          Sem links.
+                        </TableCell>
+                      </TableRow>
+                    ) : null}
+                  </TableBody>
+                </Table>
+              </div>
+            </SectionCard>
+          </TabsContent>
+
+          <TabsContent value="received" className="space-y-4">
+            <SectionCard
+              title="Recebidos"
+              description="Pedidos submetidos via link público (PIN). Aceite cria uma requisição e movimenta stock; rejeite fica registado no histórico."
+            >
+              <div className="flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="text-sm text-muted-foreground">Estado</div>
+                  <select
+                    className="h-9 rounded-md border bg-background px-3 text-sm"
+                    value={publicRequestsStatus}
+                    onChange={(e) => setPublicRequestsStatus(e.target.value as PublicRequestStatus)}
+                  >
+                    <option value="RECEIVED">Recebidos</option>
+                    <option value="ACCEPTED">Aceites</option>
+                    <option value="REJECTED">Rejeitados</option>
+                  </select>
+                </div>
+                <Button variant="outline" onClick={loadPublicRequests} disabled={publicRequestsLoading}>
+                  {publicRequestsLoading ? "A carregar..." : "Recarregar"}
+                </Button>
+              </div>
+
+              <div className="mt-4 overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-[160px]">Data</TableHead>
+                      <TableHead className="w-[240px]">Serviço</TableHead>
+                      <TableHead>Requerente</TableHead>
+                      <TableHead className="w-[120px]">Itens</TableHead>
+                      <TableHead className="w-[120px]">Estado</TableHead>
+                      <TableHead className="w-[260px]">Ações</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {publicRequests.map((r) => {
+                      const st = formatPublicStatus(r.status);
+                      return (
+                        <TableRow key={r.id}>
+                          <TableCell className="text-xs text-muted-foreground">{formatDateTimePt(r.createdAt)}</TableCell>
+                          <TableCell>
+                            <div className="text-sm font-medium">
+                              {r.requestingService?.designacao ?? "(Serviço desconhecido)"}
+                            </div>
+                            <div className="text-xs text-muted-foreground">{r.requestingService?.codigo ?? ""}</div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="text-sm">{r.requesterName}</div>
+                            <div className="text-xs text-muted-foreground truncate max-w-[260px]">
+                              {r.title ? r.title : r.notes ? r.notes : ""}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="text-sm">{r.items?.length ?? 0}</div>
+                          </TableCell>
+                          <TableCell>
+                            <Badge className={st.className} variant="outline">
+                              {st.label}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex flex-wrap gap-2">
+                              <Button size="sm" variant="outline" onClick={() => openDetails(r)}>
+                                Detalhes
+                              </Button>
+                              {r.status === "RECEIVED" ? (
+                                <>
+                                  <Button size="sm" onClick={() => openHandle("accept", r)}>
+                                    Aceitar
+                                  </Button>
+                                  <Button size="sm" variant="destructive" onClick={() => openHandle("reject", r)}>
+                                    Rejeitar
+                                  </Button>
+                                </>
+                              ) : r.status === "ACCEPTED" && r.acceptedRequest?.id ? (
+                                <Button size="sm" variant="secondary" onClick={() => router.push(`/requests?focus=${r.acceptedRequest?.id}`)}>
+                                  Ver requisição
+                                </Button>
+                              ) : null}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+
+                    {!publicRequestsLoading && publicRequestsLoadedOnce && publicRequests.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={6} className="text-sm text-muted-foreground">
+                          Sem pedidos.
+                        </TableCell>
+                      </TableRow>
+                    ) : null}
+                  </TableBody>
+                </Table>
+              </div>
+            </SectionCard>
+          </TabsContent>
         </Tabs>
+
+        <Dialog open={detailsOpen} onOpenChange={setDetailsOpen}>
+          <DialogContent className="sm:max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Detalhes do pedido</DialogTitle>
+              <DialogDescription>
+                {detailsRow?.requestingService?.designacao ?? ""}
+                {detailsRow?.createdAt ? ` • ${formatDateTimePt(detailsRow.createdAt)}` : ""}
+              </DialogDescription>
+            </DialogHeader>
+
+            {detailsRow ? (
+              <div className="space-y-3">
+                <div className="text-sm">
+                  <div>
+                    <span className="text-muted-foreground">Requerente:</span> {detailsRow.requesterName}
+                  </div>
+                  {detailsRow.deliveryLocation ? (
+                    <div>
+                      <span className="text-muted-foreground">Local de entrega:</span> {detailsRow.deliveryLocation}
+                    </div>
+                  ) : null}
+                  {detailsRow.title ? (
+                    <div>
+                      <span className="text-muted-foreground">Título:</span> {detailsRow.title}
+                    </div>
+                  ) : null}
+                  {detailsRow.notes ? (
+                    <div>
+                      <span className="text-muted-foreground">Notas:</span> {detailsRow.notes}
+                    </div>
+                  ) : null}
+                </div>
+
+                {detailsRow.items.length ? (
+                  <div className="rounded-md border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Produto</TableHead>
+                          <TableHead className="w-[120px]">Qtd</TableHead>
+                          <TableHead>Notas</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {detailsRow.items.map((it) => (
+                          <TableRow key={it.id}>
+                            <TableCell>
+                              <div className="text-sm font-medium">{it.product?.name ?? it.productId}</div>
+                              <div className="text-xs text-muted-foreground">{it.product?.sku ?? ""}</div>
+                            </TableCell>
+                            <TableCell>{it.quantity}</TableCell>
+                            <TableCell className="text-sm text-muted-foreground">{it.notes ?? ""}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                ) : (
+                  <div className="text-sm text-muted-foreground">Sem itens.</div>
+                )}
+
+                {detailsRow.status !== "RECEIVED" ? (
+                  <div className="text-sm text-muted-foreground">
+                    <div>Tratado em: {detailsRow.handledAt ? formatDateTimePt(detailsRow.handledAt) : ""}</div>
+                    <div>
+                      Por: {detailsRow.handledBy?.name ?? ""}
+                      {detailsRow.handledBy?.email ? ` (${detailsRow.handledBy.email})` : ""}
+                    </div>
+                    {detailsRow.handledNote ? <div>Nota: {detailsRow.handledNote}</div> : null}
+                    {detailsRow.acceptedRequest?.gtmiNumber ? <div>Requisição: {detailsRow.acceptedRequest.gtmiNumber}</div> : null}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setDetailsOpen(false)}>
+                Fechar
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={handleOpen} onOpenChange={setHandleOpen}>
+          <DialogContent className="sm:max-w-lg">
+            <DialogHeader>
+              <DialogTitle>{handleMode === "accept" ? "Aceitar pedido" : "Rejeitar pedido"}</DialogTitle>
+              <DialogDescription>
+                {handleRow?.requestingService?.designacao ?? ""}
+                {handleRow?.requesterName ? ` • ${handleRow.requesterName}` : ""}
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-2">
+              <div className="text-sm text-muted-foreground">Nota (opcional)</div>
+              <Textarea value={handleNote} onChange={(e) => setHandleNote(e.target.value)} placeholder="Ex: Validado e aceite" />
+            </div>
+
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setHandleOpen(false)} disabled={handling}>
+                Cancelar
+              </Button>
+              <Button
+                variant={handleMode === "accept" ? "default" : "destructive"}
+                onClick={confirmHandle}
+                disabled={handling}
+              >
+                {handling ? "A guardar..." : handleMode === "accept" ? "Aceitar" : "Rejeitar"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={pinsOpen} onOpenChange={setPinsOpen}>
+          <DialogContent className="sm:max-w-3xl">
+            <DialogHeader>
+              <DialogTitle>PINs</DialogTitle>
+              <DialogDescription>
+                {pinsLink ? `${pinsLink.requestingService.designacao} (${pinsLink.requestingService.codigo})` : ""}
+              </DialogDescription>
+            </DialogHeader>
+
+            {pinsLink ? (
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div className="md:col-span-2 space-y-1">
+                    <div className="text-sm font-medium">Etiqueta (opcional)</div>
+                    <Input value={pinLabel} onChange={(e) => setPinLabel(e.target.value)} placeholder="Ex: turno manhã" />
+                  </div>
+                  <div className="flex items-end">
+                    <Button className="w-full" onClick={createPin} disabled={creatingPin}>
+                      {creatingPin ? "A gerar..." : "Gerar PIN"}
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="rounded-md border overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Etiqueta</TableHead>
+                        <TableHead className="w-[120px]">Ativo</TableHead>
+                        <TableHead className="w-[180px]">Criado</TableHead>
+                        <TableHead className="w-[180px]">Último uso</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {(accessLinks.find((a) => a.id === pinsLink.id)?.pins ?? pinsLink.pins).map((p) => (
+                        <TableRow key={p.id}>
+                          <TableCell className="text-sm">{p.label || "-"}</TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              <Checkbox
+                                checked={p.isActive}
+                                onCheckedChange={(v) => setPinActive(pinsLink.id, p.id, Boolean(v))}
+                              />
+                              <Badge variant="outline">{p.isActive ? "Ativo" : "Inativo"}</Badge>
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-xs text-muted-foreground">{formatDateTimePt(p.createdAt)}</TableCell>
+                          <TableCell className="text-xs text-muted-foreground">{formatDateTimePt(p.lastUsedAt)}</TableCell>
+                        </TableRow>
+                      ))}
+
+                      {(accessLinks.find((a) => a.id === pinsLink.id)?.pins ?? pinsLink.pins).length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={4} className="text-sm text-muted-foreground">
+                            Sem PINs. Gere um novo PIN.
+                          </TableCell>
+                        </TableRow>
+                      ) : null}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+            ) : null}
+
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setPinsOpen(false)}>
+                Fechar
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={newPinOpen} onOpenChange={setNewPinOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>PIN gerado</DialogTitle>
+              <DialogDescription>Guarde este PIN agora. Por segurança, não será mostrado novamente.</DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-3">
+              <div className="rounded-md border bg-muted/30 px-4 py-3">
+                <div className="text-xs text-muted-foreground">PIN</div>
+                <div className="font-mono text-2xl tracking-wider">{newPinValue ?? ""}</div>
+              </div>
+              <Button
+                variant="outline"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(newPinValue ?? "");
+                    toast({ title: "Copiado" });
+                  } catch {
+                    toast({ title: "Erro", description: "Não foi possível copiar.", variant: "destructive" });
+                  }
+                }}
+              >
+                Copiar PIN
+              </Button>
+            </div>
+
+            <DialogFooter>
+              <Button onClick={() => setNewPinOpen(false)}>Fechar</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         <Dialog open={editOpen} onOpenChange={setEditOpen}>
           <DialogContent className="sm:max-w-[720px]">

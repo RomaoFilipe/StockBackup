@@ -20,6 +20,7 @@ import {
 } from "react-icons/fi";
 import { useAuth } from "../authContext";
 import { ModeToggle } from "./ModeToggle";
+import { RequestsNotificationsBell } from "./RequestsNotificationsBell";
 
 export default function AppHeader() {
   const { logout, user } = useAuth();
@@ -86,6 +87,7 @@ export default function AppHeader() {
 
           <div className="flex items-center gap-2">
             <ModeToggle />
+            <RequestsNotificationsBell />
             <Button
               onClick={handleLogout}
               disabled={isLoggingOut}

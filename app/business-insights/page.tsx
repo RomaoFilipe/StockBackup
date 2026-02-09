@@ -24,7 +24,7 @@ import {
   TrendingUp,
   Users,
 } from "lucide-react";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Area,
   AreaChart,
@@ -59,6 +59,13 @@ export default function BusinessInsightsPage() {
   const { allProducts } = useProductStore();
   const { user } = useAuth();
   const { toast } = useToast();
+
+  const [exporting, setExporting] = useState(false);
+  const [origin, setOrigin] = useState("");
+
+  useEffect(() => {
+    if (typeof window !== "undefined") setOrigin(window.location.origin);
+  }, []);
 
   const currencyFormatter = useMemo(
     () => new Intl.NumberFormat("pt-PT", { style: "currency", currency: "EUR" }),
@@ -280,11 +287,37 @@ export default function BusinessInsightsPage() {
     };
   }, [allProducts]);
 
-  const handleExportAnalytics = () => {
-    toast({
-      title: "Exportação",
-      description: "Funcionalidade de exportação disponível em breve.",
-    });
+  const handleExportAnalytics = async () => {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      const res = await fetch("/api/reports/business-insights/pdf", { method: "GET" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error || "Não foi possível exportar.");
+      }
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `insights-${new Date().toISOString().slice(0, 10)}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+
+      URL.revokeObjectURL(url);
+      toast({ title: "Exportado" });
+    } catch (e: any) {
+      toast({
+        title: "Erro",
+        description: e?.message || "Não foi possível exportar.",
+        variant: "destructive",
+      });
+    } finally {
+      setExporting(false);
+    }
   };
 
   if (!user) {
@@ -305,9 +338,14 @@ export default function BusinessInsightsPage() {
           title="Insights"
           description="Indicadores e gráficos para acompanhar o inventário."
           actions={
-            <Button onClick={handleExportAnalytics} variant="outline" className="h-10 gap-2 rounded-xl">
+            <Button
+              onClick={handleExportAnalytics}
+              variant="outline"
+              className="h-10 gap-2 rounded-xl"
+              disabled={exporting}
+            >
               <Download className="h-4 w-4" />
-              Exportar
+              {exporting ? "A exportar..." : "Exportar"}
             </Button>
           }
         />
@@ -685,7 +723,7 @@ export default function BusinessInsightsPage() {
             </CardHeader>
             <CardContent>
               <QRCodeComponent
-                data={`${window.location.origin}/business-insights`}
+                data={`${origin || ""}/business-insights`}
                 title="QR do dashboard"
                 size={120}
                 showDownload={false}

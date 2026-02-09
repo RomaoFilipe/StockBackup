@@ -28,6 +28,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/app/authContext";
 import { ModeToggle } from "@/app/AppHeader/ModeToggle";
+import { RequestsNotificationsBell } from "@/app/AppHeader/RequestsNotificationsBell";
 
 interface AppShellProps {
   children: React.ReactNode;
@@ -228,6 +229,7 @@ export default function AppShell({ children }: AppShellProps) {
 
               <div className="flex items-center gap-2">
                 <ModeToggle />
+                <RequestsNotificationsBell />
                 <div className="flex size-9 items-center justify-center rounded-full bg-primary/15 text-xs font-semibold text-primary">
                   {user?.name?.slice(0, 2).toUpperCase() || "ST"}
                 </div>

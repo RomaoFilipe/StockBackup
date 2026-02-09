@@ -538,6 +538,11 @@ export default function PrintRequestPage() {
           </div>
 
           <div className="field" style={{ marginBottom: 10 }}>
+            <div className="label">Fundamento do Pedido</div>
+            <div className="value" style={{ whiteSpace: "pre-wrap" }}>{request.notes?.trim() ? request.notes : "—"}</div>
+          </div>
+
+          <div className="field" style={{ marginBottom: 10 }}>
             <div className="label">Tipo de bem/serviço</div>
             <div className="value">{goodsTypesText}</div>
             <div className="muted" style={{ fontSize: 10, marginTop: 4 }}>

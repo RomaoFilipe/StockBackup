@@ -37,6 +37,9 @@ model Tenant {
   requests       Request[]
   storedFiles    StoredFile[]
   stockMovements StockMovement[]
+
+  publicRequestAccessLinks PublicRequestAccess[]
+  publicRequests           PublicRequest[]
 }
 
 model User {
@@ -82,6 +85,10 @@ model User {
   createdAllowedIps       AllowedIp[]        @relation("AllowedIpCreatedBy")
   ipAccessRequests        IpAccessRequest[]  @relation("IpAccessRequestUser")
   reviewedIpAccessRequests IpAccessRequest[] @relation("IpAccessRequestReviewedBy")
+
+  createdPublicRequestAccessLinks PublicRequestAccess[] @relation("PublicRequestAccessCreatedBy")
+  createdPublicRequestPins        PublicRequestPin[]    @relation("PublicRequestPinCreatedBy")
+  handledPublicRequests           PublicRequest[]       @relation("PublicRequestHandledBy")
 
   @@unique([tenantId, email])
   @@unique([tenantId, username])
@@ -155,6 +162,8 @@ model Product {
 
   requestItems RequestItem[]
 
+  publicRequestItems PublicRequestItem[]
+
   stockMovements StockMovement[]
 
   @@index([tenantId])
@@ -174,6 +183,12 @@ enum RequestGoodsType {
   MATERIALS_SERVICES
   WAREHOUSE_MATERIALS
   OTHER_PRODUCTS
+}
+
+enum PublicRequestStatus {
+  RECEIVED
+  ACCEPTED
+  REJECTED
 }
 
 model Request {
@@ -254,6 +269,8 @@ model Request {
 
   stockMovements StockMovement[]
 
+  acceptedFromPublicRequests PublicRequest[] @relation("PublicRequestAcceptedRequest")
+
   @@unique([tenantId, gtmiNumber])
   @@unique([tenantId, gtmiYear, gtmiSeq])
   @@index([tenantId])
@@ -301,9 +318,115 @@ model RequestingService {
   requests Request[]
   invoices ProductInvoice[]
 
+  publicRequestAccessLinks PublicRequestAccess[]
+  publicRequests           PublicRequest[]
+
   @@unique([codigo])
   @@index([ativo])
   @@map("servicos_requisitantes")
+}
+
+model PublicRequestAccess {
+  id        String   @id @default(uuid()) @db.Uuid
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  requestingServiceId Int
+  requestingService   RequestingService @relation(fields: [requestingServiceId], references: [id], onDelete: Restrict)
+
+  slug     String  @unique
+  isActive Boolean @default(true)
+
+  createdByUserId String @db.Uuid
+  createdBy       User   @relation("PublicRequestAccessCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  pins     PublicRequestPin[]
+  requests PublicRequest[]
+
+  @@index([tenantId])
+  @@index([requestingServiceId])
+  @@index([isActive])
+}
+
+model PublicRequestPin {
+  id         String   @id @default(uuid()) @db.Uuid
+  createdAt  DateTime @default(now())
+  lastUsedAt DateTime?
+
+  accessId String @db.Uuid
+  access   PublicRequestAccess @relation(fields: [accessId], references: [id], onDelete: Cascade)
+
+  label    String?
+  pinHash  String
+  isActive Boolean @default(true)
+
+  createdByUserId String @db.Uuid
+  createdBy       User   @relation("PublicRequestPinCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  @@index([accessId])
+  @@index([isActive])
+}
+
+model PublicRequest {
+  id        String             @id @default(uuid()) @db.Uuid
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @default(now()) @updatedAt
+
+  status PublicRequestStatus @default(RECEIVED)
+
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  accessId String @db.Uuid
+  access   PublicRequestAccess @relation(fields: [accessId], references: [id], onDelete: Restrict)
+
+  requestingServiceId Int
+  requestingService   RequestingService @relation(fields: [requestingServiceId], references: [id], onDelete: Restrict)
+
+  requesterName String
+  requesterIp   String?
+
+  deliveryLocation String?
+
+  title String?
+  notes String?
+
+  handledAt       DateTime?
+  handledNote     String?
+  handledByUserId String? @db.Uuid
+  handledBy       User?   @relation("PublicRequestHandledBy", fields: [handledByUserId], references: [id], onDelete: SetNull)
+
+  acceptedRequestId String? @db.Uuid
+  acceptedRequest   Request? @relation("PublicRequestAcceptedRequest", fields: [acceptedRequestId], references: [id], onDelete: SetNull)
+
+  items PublicRequestItem[]
+
+  @@index([tenantId])
+  @@index([accessId])
+  @@index([requestingServiceId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model PublicRequestItem {
+  id        String   @id @default(uuid()) @db.Uuid
+  createdAt DateTime @default(now())
+
+  publicRequestId String @db.Uuid
+  publicRequest   PublicRequest @relation(fields: [publicRequestId], references: [id], onDelete: Cascade)
+
+  productId String  @db.Uuid
+  product   Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  quantity BigInt
+  notes    String?
+  unit     String?
+
+  @@index([publicRequestId])
+  @@index([productId])
 }
 
 model ProductInvoice {
