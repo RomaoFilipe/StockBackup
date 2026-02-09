@@ -56,6 +56,12 @@ const navItemsBase: NavItem[] = [
     mobile: true,
   },
   {
+    label: "Equipamentos",
+    href: "/equipamentos",
+    icon: Boxes,
+    mobile: true,
+  },
+  {
     label: "Storage",
     href: "/storage",
     icon: Archive,
@@ -97,14 +103,18 @@ export default function AppShell({ children }: AppShellProps) {
   const navItems = useMemo(() => {
     const items = [...navItemsBase];
     if (user?.role === "ADMIN") {
-      items.splice(3, 0, {
+      const scanIndex = items.findIndex((i) => i.href === "/scan");
+      const insertDbAt = scanIndex >= 0 ? scanIndex : items.length;
+      items.splice(insertDbAt, 0, {
         label: "DB",
         href: "/DB",
         icon: Database,
         mobile: true,
       });
 
-      items.splice(5, 0, {
+      const insightsIndex = items.findIndex((i) => i.href === "/business-insights");
+      const insertUsersAt = insightsIndex >= 0 ? insightsIndex : items.length;
+      items.splice(insertUsersAt, 0, {
         label: "Pessoas",
         href: "/users",
         icon: Users,

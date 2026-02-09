@@ -2,6 +2,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { prisma } from "@/prisma/client";
 import { getSessionServer } from "@/utils/auth";
 import { buildBusinessInsightsPdfBytes } from "@/utils/businessInsightsPdf";
+import { getOperationsInsights } from "@/utils/operationsInsights";
 
 function formatDatePt(date: Date) {
   return new Intl.DateTimeFormat("pt-PT", { year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
@@ -19,6 +20,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   const tenantId = session.tenantId;
   const generatedAt = new Date();
+
+  const ops = await getOperationsInsights({ tenantId, days: 30, topLimit: 10 });
+  const unitsMap = new Map(ops.units.byStatus.map((r) => [r.status, r.count] as const));
+  const unitsInRepair = unitsMap.get("IN_REPAIR") ?? 0;
+  const unitsLost = unitsMap.get("LOST") ?? 0;
+  const unitsScrapped = unitsMap.get("SCRAPPED") ?? 0;
 
   const [totalProducts, outOfStockItems, lowStockItems] = await Promise.all([
     prisma.product.count({ where: { tenantId } }),
@@ -89,6 +96,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         name: topNameById.get(r.productId) ?? r.productId,
         quantity: Number(r._sum.quantity ?? BigInt(0)),
       })),
+    },
+    operations: {
+      windowLabel: `${ops.meta.days} dias (até ${formatDatePt(generatedAt)})`,
+      requestsPending: ops.requests.pendingCount,
+      movementsTotal: ops.movements.totalMovements,
+      outQuantity: ops.movements.outQuantity,
+      lossesQuantity: ops.movements.lossesQuantity,
+      inactive90DaysCount: ops.stock.inactive90DaysCount,
+      neverMovedCount: ops.stock.neverMovedCount,
+      unitsTotal: ops.units.totalUnits,
+      unitsInRepair,
+      unitsLost,
+      unitsScrapped,
     },
   });
 

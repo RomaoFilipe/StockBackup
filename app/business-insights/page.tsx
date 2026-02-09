@@ -9,31 +9,24 @@ import { ForecastingCard } from "@/components/ui/forecasting-card";
 import { QRCodeComponent } from "@/components/ui/qr-code";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
+import Link from "next/link";
 import {
   Activity,
   AlertTriangle,
-  BarChart3,
-  DollarSign,
   Download,
   Eye,
   Package,
   PieChart as PieChartIcon,
   QrCode,
   ShoppingCart,
-  TrendingDown,
-  TrendingUp,
   Users,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import {
-  Area,
-  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
   Cell,
-  Line,
-  LineChart,
   Pie,
   PieChart,
   ResponsiveContainer,
@@ -55,51 +48,143 @@ const COLORS = [
   "hsl(var(--chart-5))",
 ];
 
+type OperationsInsightsDto = {
+  meta: {
+    generatedAt: string;
+    days: number;
+    from: string;
+    to: string;
+  };
+  stock: {
+    totalProducts: number;
+    totalQuantity: number;
+    lowStockCount: number;
+    outOfStockCount: number;
+    inactive90DaysCount: number;
+    neverMovedCount: number;
+    inactiveTop: Array<{
+      productId: string;
+      name: string;
+      sku: string;
+      lastMovedAt: string | null;
+      daysSinceMove: number | null;
+    }>;
+  };
+  requests: {
+    totalRequests: number;
+    pendingCount: number;
+    byStatus: Array<{ status: string; count: number }>;
+    signatureCompliance: {
+      approvedOrFulfilledCount: number;
+      approvalSignatureConsideredCount: number;
+      approvedSignedCount: number;
+      approvedMissingSignatureCount: number;
+      pickupSignatureConsideredCount: number;
+      pickupSignedCount: number;
+      pickupMissingSignatureCount: number;
+    };
+    pendingApprovalSignature: Array<{
+      id: string;
+      gtmiNumber: string;
+      title: string | null;
+      status: string;
+      requestedAt: string;
+      requestingService: string | null;
+    }>;
+    pendingPickupSignature: Array<{
+      id: string;
+      gtmiNumber: string;
+      title: string | null;
+      status: string;
+      requestedAt: string;
+      requestingService: string | null;
+    }>;
+    topProducts: Array<{ productId: string; name: string; sku: string; quantity: number }>;
+  };
+  movements: {
+    totalMovements: number;
+    byType: Array<{ type: string; count: number; quantity: number }>;
+    lossesQuantity: number;
+    outQuantity: number;
+    topOutProducts: Array<{ productId: string; name: string; sku: string; quantity: number }>;
+    recent: Array<{
+      id: string;
+      createdAt: string;
+      type: string;
+      quantity: number;
+      productName: string;
+      productSku: string;
+      costCenter: string | null;
+      reason: string | null;
+      requestId: string | null;
+      invoiceId: string | null;
+    }>;
+  };
+  units: {
+    totalUnits: number;
+    byStatus: Array<{ status: string; count: number }>;
+  };
+};
+
 export default function BusinessInsightsPage() {
-  const { allProducts } = useProductStore();
+  const { allProducts, loadProducts } = useProductStore();
   const { user } = useAuth();
   const { toast } = useToast();
 
   const [exporting, setExporting] = useState(false);
   const [origin, setOrigin] = useState("");
 
+  const [ops, setOps] = useState<OperationsInsightsDto | null>(null);
+  const [opsLoading, setOpsLoading] = useState(false);
+
   useEffect(() => {
     if (typeof window !== "undefined") setOrigin(window.location.origin);
   }, []);
 
-  const currencyFormatter = useMemo(
-    () => new Intl.NumberFormat("pt-PT", { style: "currency", currency: "EUR" }),
-    []
-  );
+  useEffect(() => {
+    if (!user) return;
+    if (allProducts.length > 0) return;
+    loadProducts().catch(() => null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    setOpsLoading(true);
+    fetch("/api/insights/operations?days=30&top=10", { method: "GET" })
+      .then(async (r) => {
+        if (!r.ok) {
+          const data = await r.json().catch(() => null);
+          throw new Error(data?.error || "Não foi possível carregar os insights.");
+        }
+        return r.json();
+      })
+      .then((data: OperationsInsightsDto) => setOps(data))
+      .catch((e: any) => {
+        setOps(null);
+        toast({
+          title: "Insights",
+          description: e?.message || "Falha ao carregar indicadores operacionais.",
+          variant: "destructive",
+        });
+      })
+      .finally(() => setOpsLoading(false));
+  }, [user, toast]);
 
   // Calculate analytics data with corrected calculations
   const analyticsData = useMemo(() => {
     if (!allProducts || allProducts.length === 0) {
       return {
         totalProducts: 0,
-        totalValue: 0,
         lowStockItems: 0,
         outOfStockItems: 0,
-        averagePrice: 0,
         totalQuantity: 0,
         categoryDistribution: [],
-        statusDistribution: [],
-        priceRangeDistribution: [],
-        monthlyTrend: [],
-        topProducts: [],
         lowStockProducts: [],
-        stockUtilization: 0,
-        valueDensity: 0,
-        stockCoverage: 0,
       };
     }
 
     const totalProducts = allProducts.length;
-
-    // CORRECTED: Total value calculation - sum of (price * quantity) for each product
-    const totalValue = allProducts.reduce((sum, product) => {
-      return sum + product.price * Number(product.quantity);
-    }, 0);
 
     // CORRECTED: Low stock items - products with quantity > 0 AND quantity <= 20 (matching product table logic)
     const lowStockItems = allProducts.filter(
@@ -117,21 +202,6 @@ export default function BusinessInsightsPage() {
       return sum + Number(product.quantity);
     }, 0);
 
-    // CORRECTED: Average price calculation - total value divided by total quantity
-    const averagePrice = totalQuantity > 0 ? totalValue / totalQuantity : 0;
-
-    // CORRECTED: Stock utilization - percentage of products that are not out of stock
-    const stockUtilization =
-      totalProducts > 0
-        ? ((totalProducts - outOfStockItems) / totalProducts) * 100
-        : 0;
-
-    // CORRECTED: Value density - total value divided by total products
-    const valueDensity = totalProducts > 0 ? totalValue / totalProducts : 0;
-
-    // CORRECTED: Stock coverage - average quantity per product
-    const stockCoverage = totalProducts > 0 ? totalQuantity / totalProducts : 0;
-
     // Category distribution based on quantity (not just count)
     const categoryMap = new Map<
       string,
@@ -147,7 +217,7 @@ export default function BusinessInsightsPage() {
       categoryMap.set(category, {
         count: current.count + 1,
         quantity: current.quantity + Number(product.quantity),
-        value: current.value + product.price * Number(product.quantity),
+        value: current.value,
       });
     });
 
@@ -161,104 +231,6 @@ export default function BusinessInsightsPage() {
       })
     );
 
-    // Status distribution
-    const statusMap = new Map<string, number>();
-    allProducts.forEach((product) => {
-      const status = product.status || "Desconhecido";
-      statusMap.set(status, (statusMap.get(status) || 0) + 1);
-    });
-    const statusDistribution = Array.from(statusMap.entries()).map(
-      ([name, value]) => ({ name, value })
-    );
-
-    // Price range distribution
-    const priceRanges: Array<{
-      label: string;
-      min: number;
-      max: number;
-      maxInclusive?: boolean;
-    }> = [
-      { label: "0–100 €", min: 0, max: 100 },
-      { label: "100–500 €", min: 100, max: 500 },
-      { label: "500–1 000 €", min: 500, max: 1000 },
-      {
-        label: "1 000–2 000 €",
-        min: 1000,
-        max: 2000,
-        maxInclusive: true,
-      },
-      { label: "2 000+ €", min: 2000, max: Infinity },
-    ];
-
-    const priceRangeDistribution = priceRanges.map((range) => ({
-      name: range.label,
-      value: allProducts.filter((product) => {
-        if (range.max === Infinity) {
-          return product.price > range.min;
-        }
-        if (range.maxInclusive) {
-          return product.price >= range.min && product.price <= range.max;
-        }
-        return product.price >= range.min && product.price < range.max;
-      }).length,
-    }));
-
-    // CORRECTED: Monthly trend based on actual product creation dates
-    const monthlyTrend: Array<{
-      month: string;
-      products: number;
-      monthlyAdded: number;
-    }> = [];
-    const monthFormatter = new Intl.DateTimeFormat("pt-PT", { month: "short" });
-    const months = Array.from({ length: 12 }, (_, index) => {
-      const raw = monthFormatter.format(new Date(Date.UTC(2020, index, 1)));
-      const normalized = raw.endsWith(".") ? raw.slice(0, -1) : raw;
-      return normalized.charAt(0).toUpperCase() + normalized.slice(1);
-    });
-
-    // Group products by creation month using UTC to avoid timezone issues
-    const productsByMonth = new Map<string, number>();
-    allProducts.forEach((product) => {
-      const date = new Date(product.createdAt);
-      // Use UTC methods to ensure consistent month extraction
-      const monthKey = `${date.getUTCFullYear()}-${String(
-        date.getUTCMonth() + 1
-      ).padStart(2, "0")}`;
-      productsByMonth.set(monthKey, (productsByMonth.get(monthKey) || 0) + 1);
-    });
-
-    // Create trend data for the whole year
-    // Use the year from the first product's creation date to ensure correct year mapping
-    const dataYear =
-      allProducts.length > 0
-        ? new Date(allProducts[0].createdAt).getUTCFullYear()
-        : new Date().getUTCFullYear();
-    let cumulativeProducts = 0;
-
-    months.forEach((month, index) => {
-      const monthKey = `${dataYear}-${String(index + 1).padStart(2, "0")}`;
-      const productsThisMonth = productsByMonth.get(monthKey) || 0;
-      cumulativeProducts += productsThisMonth;
-
-      monthlyTrend.push({
-        month,
-        products: cumulativeProducts,
-        monthlyAdded: productsThisMonth,
-      });
-    });
-
-    // Top products by value
-    const topProducts = allProducts
-      .sort(
-        (a, b) => b.price * Number(b.quantity) - a.price * Number(a.quantity)
-      )
-      .slice(0, 5)
-      .map((product) => ({
-        name: product.name,
-        value: product.price * Number(product.quantity),
-        quantity: Number(product.quantity),
-      }));
-
     // Low stock products (matching product table logic: quantity > 0 AND quantity <= 20)
     const lowStockProducts = allProducts
       .filter(
@@ -270,19 +242,10 @@ export default function BusinessInsightsPage() {
 
     return {
       totalProducts,
-      totalValue,
       lowStockItems,
       outOfStockItems,
-      averagePrice,
       totalQuantity,
-      stockUtilization,
-      valueDensity,
-      stockCoverage,
       categoryDistribution,
-      statusDistribution,
-      priceRangeDistribution,
-      monthlyTrend,
-      topProducts,
       lowStockProducts,
     };
   }, [allProducts]);
@@ -336,7 +299,7 @@ export default function BusinessInsightsPage() {
       <div className="space-y-6">
         <PageHeader
           title="Insights"
-          description="Indicadores e gráficos para acompanhar o inventário."
+          description="Indicadores operacionais para controlo: stock, requisições, movimentos e alertas."
           actions={
             <Button
               onClick={handleExportAnalytics}
@@ -353,27 +316,11 @@ export default function BusinessInsightsPage() {
         {/* Key Metrics */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <AnalyticsCard
-            title="Total de produtos"
-            value={analyticsData.totalProducts}
-            icon={Package}
-            iconColor="text-chart-1"
-            description="Produtos no inventário"
-            className="rounded-2xl border-border/60 bg-card/60"
-          />
-          <AnalyticsCard
-            title="Valor total"
-            value={currencyFormatter.format(analyticsData.totalValue)}
-            icon={DollarSign}
-            iconColor="text-chart-2"
-            description="Valor total do inventário"
-            className="rounded-2xl border-border/60 bg-card/60"
-          />
-          <AnalyticsCard
             title="Stock baixo"
             value={analyticsData.lowStockItems}
             icon={AlertTriangle}
             iconColor="text-chart-4"
-            description="Itens com quantidade ≤ 20"
+            description="Quantidade > 0 e ≤ 20"
             className="rounded-2xl border-border/60 bg-card/60"
           />
           <AnalyticsCard
@@ -381,21 +328,37 @@ export default function BusinessInsightsPage() {
             value={analyticsData.outOfStockItems}
             icon={ShoppingCart}
             iconColor="text-destructive"
-            description="Itens com quantidade zero"
+            description="Quantidade igual a zero"
+            className="rounded-2xl border-border/60 bg-card/60"
+          />
+          <AnalyticsCard
+            title="Requisições a tratar"
+            value={ops?.requests.pendingCount ?? 0}
+            icon={Users}
+            iconColor="text-chart-1"
+            description={opsLoading ? "A carregar…" : "Últimos 30 dias (SUBMITTED/APPROVED)"}
+            className="rounded-2xl border-border/60 bg-card/60"
+          />
+          <AnalyticsCard
+            title="Perdas / Sucata"
+            value={ops?.movements.lossesQuantity ?? 0}
+            icon={Activity}
+            iconColor="text-destructive"
+            description={opsLoading ? "A carregar…" : "Últimos 30 dias (LOST + SCRAP)"}
             className="rounded-2xl border-border/60 bg-card/60"
           />
         </div>
 
         {/* Charts and Insights */}
-        <Tabs defaultValue="overview" className="space-y-4">
+        <Tabs defaultValue="inventory" className="space-y-4">
           <TabsList className="grid h-11 w-full grid-cols-4 rounded-2xl bg-muted/50 p-1">
-            <TabsTrigger value="overview">Visão geral</TabsTrigger>
-            <TabsTrigger value="distribution">Distribuição</TabsTrigger>
-            <TabsTrigger value="trends">Tendências</TabsTrigger>
+            <TabsTrigger value="inventory">Inventário</TabsTrigger>
+            <TabsTrigger value="requests">Requisições</TabsTrigger>
+            <TabsTrigger value="movements">Movimentos</TabsTrigger>
             <TabsTrigger value="alerts">Alertas</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="overview" className="space-y-4">
+          <TabsContent value="inventory" className="space-y-4">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {/* Category Distribution */}
               <ChartCard
@@ -438,19 +401,16 @@ export default function BusinessInsightsPage() {
                 </ResponsiveContainer>
               </ChartCard>
 
-              {/* Monthly Trend - Full Year */}
+              {/* Units status */}
               <ChartCard
-                title="Crescimento de produtos (ano)"
-                icon={TrendingUp}
+                title="Unidades por estado"
+                icon={Activity}
                 className="rounded-2xl border-border/60 bg-card/60"
               >
                 <ResponsiveContainer width="100%" height={300}>
-                  <AreaChart data={analyticsData.monthlyTrend}>
+                  <BarChart data={(ops?.units.byStatus ?? []).map((r) => ({ name: r.status, value: r.count }))}>
                     <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 3" />
-                    <XAxis
-                      dataKey="month"
-                      tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
-                    />
+                    <XAxis dataKey="name" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }} />
                     <YAxis tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }} />
                     <Tooltip
                       contentStyle={{
@@ -460,29 +420,23 @@ export default function BusinessInsightsPage() {
                         color: "hsl(var(--popover-foreground))",
                       }}
                     />
-                    <Area
-                      type="monotone"
-                      dataKey="products"
-                      stroke="hsl(var(--chart-1))"
-                      fill="hsl(var(--chart-1))"
-                      fillOpacity={0.2}
-                    />
-                  </AreaChart>
+                    <Bar dataKey="value" fill="hsl(var(--chart-2))" />
+                  </BarChart>
                 </ResponsiveContainer>
               </ChartCard>
             </div>
           </TabsContent>
 
-          <TabsContent value="distribution" className="space-y-4">
+          <TabsContent value="requests" className="space-y-4">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {/* Status Distribution */}
+              {/* Requests by status */}
               <ChartCard
-                title="Distribuição por estado"
+                title="Requisições por estado (30 dias)"
                 icon={Activity}
                 className="rounded-2xl border-border/60 bg-card/60"
               >
                 <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={analyticsData.statusDistribution}>
+                  <BarChart data={(ops?.requests.byStatus ?? []).map((r) => ({ name: r.status, value: r.count }))}>
                     <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 3" />
                     <XAxis
                       dataKey="name"
@@ -502,14 +456,14 @@ export default function BusinessInsightsPage() {
                 </ResponsiveContainer>
               </ChartCard>
 
-              {/* Price Range Distribution */}
+              {/* Top requested products */}
               <ChartCard
-                title="Distribuição por intervalo de preço"
-                icon={BarChart3}
+                title="Top produtos requisitados (30 dias)"
+                icon={Users}
                 className="rounded-2xl border-border/60 bg-card/60"
               >
                 <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={analyticsData.priceRangeDistribution}>
+                  <BarChart data={(ops?.requests.topProducts ?? []).map((r) => ({ name: r.name, value: r.quantity }))}>
                     <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 3" />
                     <XAxis
                       dataKey="name"
@@ -529,21 +483,86 @@ export default function BusinessInsightsPage() {
                 </ResponsiveContainer>
               </ChartCard>
             </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <ChartCard
+                title="Pendentes de assinatura (aprovação)"
+                icon={Users}
+                className="rounded-2xl border-border/60 bg-card/60"
+              >
+                <div className="space-y-3">
+                  {(ops?.requests.pendingApprovalSignature ?? []).length ? (
+                    (ops?.requests.pendingApprovalSignature ?? []).slice(0, 10).map((r) => (
+                      <div key={r.id} className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="text-sm font-medium truncate">
+                            {r.gtmiNumber}{r.title ? ` — ${r.title}` : ""}
+                          </div>
+                          <div className="text-xs text-muted-foreground truncate">
+                            {r.requestingService ? r.requestingService : "Sem serviço"}
+                          </div>
+                        </div>
+
+                        <Button asChild variant="outline" className="h-8 rounded-xl">
+                          <Link href={`/requests/${r.id}`}>Abrir</Link>
+                        </Button>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-center py-6">
+                      <p className="text-muted-foreground">
+                        {opsLoading ? "A carregar…" : "Sem pendentes de aprovação."}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </ChartCard>
+
+              <ChartCard
+                title="Pendentes de assinatura (levantamento)"
+                icon={Package}
+                className="rounded-2xl border-border/60 bg-card/60"
+              >
+                <div className="space-y-3">
+                  {(ops?.requests.pendingPickupSignature ?? []).length ? (
+                    (ops?.requests.pendingPickupSignature ?? []).slice(0, 10).map((r) => (
+                      <div key={r.id} className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="text-sm font-medium truncate">
+                            {r.gtmiNumber}{r.title ? ` — ${r.title}` : ""}
+                          </div>
+                          <div className="text-xs text-muted-foreground truncate">
+                            {r.requestingService ? r.requestingService : "Sem serviço"}
+                          </div>
+                        </div>
+
+                        <Button asChild variant="outline" className="h-8 rounded-xl">
+                          <Link href={`/requests/${r.id}`}>Abrir</Link>
+                        </Button>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-center py-6">
+                      <p className="text-muted-foreground">
+                        {opsLoading ? "A carregar…" : "Sem pendentes de levantamento."}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </ChartCard>
+            </div>
           </TabsContent>
 
-          <TabsContent value="trends" className="space-y-4">
+          <TabsContent value="movements" className="space-y-4">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {/* Top Products by Value */}
+              {/* Movements by type */}
               <ChartCard
-                title="Top produtos por valor"
-                icon={TrendingUp}
+                title="Movimentos por tipo (30 dias)"
+                icon={Activity}
                 className="rounded-2xl border-border/60 bg-card/60"
               >
                 <ResponsiveContainer width="100%" height={300}>
-                  <BarChart
-                    data={analyticsData.topProducts}
-                    margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
-                  >
+                  <BarChart data={(ops?.movements.byType ?? []).map((r) => ({ name: r.type, value: r.count }))}>
                     <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 3" />
                     <XAxis
                       dataKey="name"
@@ -551,11 +570,6 @@ export default function BusinessInsightsPage() {
                     />
                     <YAxis tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }} />
                     <Tooltip
-                      formatter={(value) => [
-                        currencyFormatter.format(Number(value)),
-                        "Valor",
-                      ]}
-                      labelFormatter={(label) => `Produto: ${label}`}
                       contentStyle={{
                         backgroundColor: "hsl(var(--popover))",
                         border: "1px solid hsl(var(--border))",
@@ -568,17 +582,17 @@ export default function BusinessInsightsPage() {
                 </ResponsiveContainer>
               </ChartCard>
 
-              {/* Monthly Product Addition Trend */}
+              {/* Top OUT products */}
               <ChartCard
-                title="Entradas mensais"
-                icon={TrendingDown}
+                title="Top consumo (OUT) (30 dias)"
+                icon={Package}
                 className="rounded-2xl border-border/60 bg-card/60"
               >
                 <ResponsiveContainer width="100%" height={300}>
-                  <LineChart data={analyticsData.monthlyTrend}>
+                  <BarChart data={(ops?.movements.topOutProducts ?? []).map((r) => ({ name: r.name, value: r.quantity }))}>
                     <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 3" />
                     <XAxis
-                      dataKey="month"
+                      dataKey="name"
                       tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
                     />
                     <YAxis tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }} />
@@ -590,13 +604,8 @@ export default function BusinessInsightsPage() {
                         color: "hsl(var(--popover-foreground))",
                       }}
                     />
-                    <Line
-                      type="monotone"
-                      dataKey="monthlyAdded"
-                      stroke="hsl(var(--chart-5))"
-                      strokeWidth={2}
-                    />
-                  </LineChart>
+                    <Bar dataKey="value" fill="hsl(var(--chart-5))" />
+                  </BarChart>
                 </ResponsiveContainer>
               </ChartCard>
             </div>
@@ -645,6 +654,40 @@ export default function BusinessInsightsPage() {
                 )}
               </div>
             </ChartCard>
+
+            <ChartCard
+              title="Produtos inativos (≥ 90 dias sem movimentos)"
+              icon={Eye}
+              className="rounded-2xl border-border/60 bg-card/60"
+            >
+              <div className="space-y-4">
+                {ops?.stock.inactiveTop?.length ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {ops.stock.inactiveTop.slice(0, 6).map((p) => (
+                      <Card key={p.productId} className="rounded-2xl border border-border/60 bg-card/60">
+                        <CardContent className="p-4">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="font-semibold text-sm truncate">{p.name}</div>
+                              <div className="text-xs text-muted-foreground truncate">SKU: {p.sku}</div>
+                            </div>
+                            <Badge variant="outline" className="text-xs whitespace-nowrap">
+                              {p.daysSinceMove == null ? "Sem histórico" : `${p.daysSinceMove}d`}
+                            </Badge>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-6">
+                    <p className="text-muted-foreground">
+                      {opsLoading ? "A carregar…" : "Sem produtos inativos para destacar."}
+                    </p>
+                  </div>
+                )}
+              </div>
+            </ChartCard>
           </TabsContent>
         </Tabs>
 
@@ -659,22 +702,22 @@ export default function BusinessInsightsPage() {
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="flex justify-between items-center">
-                <span className="text-sm">Preço médio</span>
-                <span className="font-semibold">
-                  {currencyFormatter.format(analyticsData.averagePrice)}
-                </span>
+                <span className="text-sm">Total de produtos</span>
+                <span className="font-semibold">{analyticsData.totalProducts.toLocaleString()}</span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-sm">Quantidade total</span>
                 <span className="font-semibold">
-                  {analyticsData.totalQuantity.toLocaleString()}
+                  {(ops?.stock.totalQuantity ?? analyticsData.totalQuantity).toLocaleString()}
                 </span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-sm">Utilização de stock</span>
-                <span className="font-semibold">
-                  {analyticsData.stockUtilization.toFixed(1)}%
-                </span>
+                <span className="text-sm">Inativos (≥ 90 dias)</span>
+                <span className="font-semibold">{ops?.stock.inactive90DaysCount ?? 0}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-sm">Nunca movidos</span>
+                <span className="font-semibold">{ops?.stock.neverMovedCount ?? 0}</span>
               </div>
             </CardContent>
           </Card>
@@ -683,33 +726,31 @@ export default function BusinessInsightsPage() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Users className="h-5 w-5" />
-                Desempenho
+                Conformidade
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="flex justify-between items-center">
-                <span className="text-sm">Saúde do inventário</span>
-                <Badge
-                  variant={
-                    analyticsData.lowStockItems > 5 ? "destructive" : "default"
-                  }
-                >
-                  {analyticsData.lowStockItems > 5
-                    ? "Precisa de atenção"
-                    : "Saudável"}
+                <span className="text-sm">Assinatura (aprovação)</span>
+                <span className="font-semibold">
+                  {ops?.requests.signatureCompliance.approvedSignedCount ?? 0}/
+                  {ops?.requests.signatureCompliance.approvalSignatureConsideredCount ?? 0}
+                </span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-sm">Assinatura (levantamento)</span>
+                <span className="font-semibold">
+                  {ops?.requests.signatureCompliance.pickupSignedCount ?? 0}/
+                  {ops?.requests.signatureCompliance.pickupSignatureConsideredCount ?? 0}
+                </span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-sm">Pendentes de assinatura</span>
+                <Badge variant={(ops?.requests.signatureCompliance.approvedMissingSignatureCount ?? 0) > 0 ? "destructive" : "default"}>
+                  {opsLoading
+                    ? "A carregar…"
+                    : `${ops?.requests.signatureCompliance.approvedMissingSignatureCount ?? 0} aprovação / ${ops?.requests.signatureCompliance.pickupMissingSignatureCount ?? 0} levantamento`}
                 </Badge>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-sm">Cobertura de stock</span>
-                <span className="font-semibold">
-                  {analyticsData.stockCoverage.toFixed(1)} unid. (média)
-                </span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-sm">Densidade de valor</span>
-                <span className="font-semibold">
-                  {currencyFormatter.format(analyticsData.valueDensity)} por produto
-                </span>
               </div>
             </CardContent>
           </Card>
