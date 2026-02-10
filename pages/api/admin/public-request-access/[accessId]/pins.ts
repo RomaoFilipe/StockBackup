@@ -11,8 +11,21 @@ const createSchema = z.object({
 
 const patchSchema = z.object({
   pinId: z.string().uuid(),
-  isActive: z.boolean(),
-});
+  isActive: z.boolean().optional(),
+  label: z.string().max(120).nullable().optional(),
+  pin: z.string().min(4).max(32).optional(),
+  regenerate: z.boolean().optional(),
+}).refine(
+  (d) => {
+    return (
+      typeof d.isActive === "boolean" ||
+      Object.prototype.hasOwnProperty.call(d, "label") ||
+      Boolean(d.pin) ||
+      Boolean(d.regenerate)
+    );
+  },
+  { message: "No changes provided" }
+);
 
 function generatePin() {
   // 6 digits
@@ -79,13 +92,28 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const parsed = patchSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Invalid body" });
 
+    const wantsPinChange = Boolean(parsed.data.regenerate) || Boolean(parsed.data.pin);
+
+    const nextPinPlain = wantsPinChange ? (parsed.data.pin || generatePin()).trim() : null;
+    const nextPinHash = wantsPinChange && nextPinPlain ? await bcrypt.hash(nextPinPlain, 10) : null;
+
+    const data: any = {};
+    if (typeof parsed.data.isActive === "boolean") data.isActive = parsed.data.isActive;
+    if (Object.prototype.hasOwnProperty.call(parsed.data, "label")) {
+      data.label = parsed.data.label === null ? null : parsed.data.label?.trim() || null;
+    }
+    if (nextPinHash) {
+      data.pinHash = nextPinHash;
+      data.isActive = true;
+    }
+
     const updated = await prisma.publicRequestPin.updateMany({
       where: { id: parsed.data.pinId, accessId },
-      data: { isActive: parsed.data.isActive },
+      data,
     });
 
     if (!updated.count) return res.status(404).json({ error: "Not found" });
-    return res.status(200).json({ ok: true });
+    return res.status(200).json({ ok: true, ...(nextPinPlain ? { pin: nextPinPlain } : {}) });
   }
 
   res.setHeader("Allow", ["GET", "POST", "PATCH"]);

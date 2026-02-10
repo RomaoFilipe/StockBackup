@@ -69,6 +69,7 @@ type PublicAccessLinkRow = {
   requestingService: { id: number; codigo: string; designacao: string; ativo: boolean };
   pins: PublicAccessPinRow[];
   pinCounts: { total: number; active: number };
+  requestsCount: number;
   publicPath: string;
 };
 
@@ -202,6 +203,13 @@ export default function AdminPage() {
 
   const [newPinOpen, setNewPinOpen] = useState(false);
   const [newPinValue, setNewPinValue] = useState<string | null>(null);
+  const [recentPinsById, setRecentPinsById] = useState<Record<string, string>>({});
+
+  const [editPinOpen, setEditPinOpen] = useState(false);
+  const [editPinId, setEditPinId] = useState<string | null>(null);
+  const [editPinLabel, setEditPinLabel] = useState("");
+  const [editPinNewValue, setEditPinNewValue] = useState("");
+  const [savingPin, setSavingPin] = useState(false);
 
   const [publicRequests, setPublicRequests] = useState<PublicRequestRow[]>([]);
   const [publicRequestsLoading, setPublicRequestsLoading] = useState(false);
@@ -418,6 +426,10 @@ export default function AdminPage() {
         label: pinLabel.trim() || undefined,
       });
       const pin = String(res.data?.pin || "");
+      const createdId = String(res.data?.id || "");
+      if (createdId && pin) {
+        setRecentPinsById((prev) => ({ ...prev, [createdId]: pin }));
+      }
       setNewPinValue(pin || null);
       setNewPinOpen(true);
       setPinLabel("");
@@ -436,6 +448,104 @@ export default function AdminPage() {
       await loadAccessLinks();
     } catch (error: any) {
       const msg = error?.response?.data?.error || "Não foi possível atualizar PIN.";
+      toast({ title: "Erro", description: msg, variant: "destructive" });
+    }
+  };
+
+  const openEditPin = (pin: PublicAccessPinRow) => {
+    setEditPinId(pin.id);
+    setEditPinLabel(pin.label || "");
+    setEditPinNewValue("");
+    setEditPinOpen(true);
+  };
+
+  const savePin = async (mode: "label" | "set" | "regen") => {
+    if (!pinsLink || !editPinId) return;
+    setSavingPin(true);
+    try {
+      const payload: any = { pinId: editPinId };
+
+      if (mode === "label") {
+        payload.label = editPinLabel.trim() || null;
+      } else if (mode === "set") {
+        const v = editPinNewValue.trim();
+        if (!v) {
+          toast({ title: "Erro", description: "Indique um PIN novo.", variant: "destructive" });
+          return;
+        }
+        payload.label = editPinLabel.trim() || null;
+        payload.pin = v;
+      } else {
+        payload.label = editPinLabel.trim() || null;
+        payload.regenerate = true;
+      }
+
+      const res = await axiosInstance.patch(`/admin/public-request-access/${pinsLink.id}/pins`, payload);
+      const pin = String(res.data?.pin || "");
+
+      if (pin) {
+        setRecentPinsById((prev) => ({ ...prev, [editPinId]: pin }));
+        setNewPinValue(pin);
+        setNewPinOpen(true);
+      }
+
+      setEditPinOpen(false);
+      setEditPinId(null);
+      setEditPinLabel("");
+      setEditPinNewValue("");
+      await loadAccessLinks();
+      toast({ title: "PIN atualizado" });
+    } catch (error: any) {
+      const msg = error?.response?.data?.error || "Não foi possível atualizar PIN.";
+      toast({ title: "Erro", description: msg, variant: "destructive" });
+    } finally {
+      setSavingPin(false);
+    }
+  };
+
+  const setAccessLinkActive = async (link: PublicAccessLinkRow, isActive: boolean) => {
+    const confirmed = window.confirm(
+      isActive
+        ? `Ativar o link público de "${link.requestingService.designacao}"?`
+        : `Desativar o link público de "${link.requestingService.designacao}"?\n\nOs pedidos já recebidos mantêm-se.`
+    );
+    if (!confirmed) return;
+
+    try {
+      await axiosInstance.patch(`/admin/public-request-access/${link.id}`, { isActive });
+      setAccessLinks((prev) => prev.map((l) => (l.id === link.id ? { ...l, isActive } : l)));
+      if (!isActive && pinsLink?.id === link.id) {
+        setPinsOpen(false);
+        setPinsLink(null);
+      }
+      toast({ title: isActive ? "Link ativado" : "Link desativado" });
+    } catch (error: any) {
+      const msg = error?.response?.data?.error || "Não foi possível atualizar.";
+      toast({ title: "Erro", description: msg, variant: "destructive" });
+    }
+  };
+
+  const hardRemoveAccessLink = async (link: PublicAccessLinkRow) => {
+    if ((link.requestsCount ?? 0) > 0) {
+      toast({
+        title: "Não é possível remover",
+        description: "Este link já tem pedidos. Desative para manter histórico.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Remover definitivamente o link público de "${link.requestingService.designacao}"?\n\nEsta ação não pode ser anulada.`
+    );
+    if (!confirmed) return;
+
+    try {
+      await axiosInstance.delete(`/admin/public-request-access/${link.id}`, { params: { hard: 1 } });
+      toast({ title: "Link removido" });
+      await loadAccessLinks();
+    } catch (error: any) {
+      const msg = error?.response?.data?.error || "Não foi possível remover o link.";
       toast({ title: "Erro", description: msg, variant: "destructive" });
     }
   };
@@ -1206,6 +1316,26 @@ export default function AdminPage() {
                               <Button size="sm" onClick={() => openPins(l)}>
                                 PINs
                               </Button>
+                              <Button
+                                size="sm"
+                                variant={l.isActive ? "destructive" : "secondary"}
+                                onClick={() => setAccessLinkActive(l, !l.isActive)}
+                              >
+                                {l.isActive ? "Desativar" : "Ativar"}
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                disabled={(l.requestsCount ?? 0) > 0}
+                                title={
+                                  (l.requestsCount ?? 0) > 0
+                                    ? "Não pode remover porque já existem pedidos (histórico)."
+                                    : "Remove definitivamente (apenas quando não há pedidos)."
+                                }
+                                onClick={() => hardRemoveAccessLink(l)}
+                              >
+                                Remover
+                              </Button>
                             </div>
                           </TableCell>
                         </TableRow>
@@ -1451,8 +1581,8 @@ export default function AdminPage() {
               <div className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   <div className="md:col-span-2 space-y-1">
-                    <div className="text-sm font-medium">Etiqueta (opcional)</div>
-                    <Input value={pinLabel} onChange={(e) => setPinLabel(e.target.value)} placeholder="Ex: turno manhã" />
+                    <div className="text-sm font-medium">Pessoa atribuída (opcional)</div>
+                    <Input value={pinLabel} onChange={(e) => setPinLabel(e.target.value)} placeholder="Ex: Ana Silva" />
                   </div>
                   <div className="flex items-end">
                     <Button className="w-full" onClick={createPin} disabled={creatingPin}>
@@ -1465,16 +1595,24 @@ export default function AdminPage() {
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>Etiqueta</TableHead>
+                        <TableHead>Pessoa / PIN (recente)</TableHead>
                         <TableHead className="w-[120px]">Ativo</TableHead>
                         <TableHead className="w-[180px]">Criado</TableHead>
                         <TableHead className="w-[180px]">Último uso</TableHead>
+                        <TableHead className="w-[200px]">Ações</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {(accessLinks.find((a) => a.id === pinsLink.id)?.pins ?? pinsLink.pins).map((p) => (
                         <TableRow key={p.id}>
-                          <TableCell className="text-sm">{p.label || "-"}</TableCell>
+                          <TableCell className="text-sm">
+                            <div className="font-medium">{p.label || "-"}</div>
+                            {recentPinsById[p.id] ? (
+                              <div className="text-xs text-muted-foreground">
+                                PIN: <span className="font-mono">{recentPinsById[p.id]}</span>
+                              </div>
+                            ) : null}
+                          </TableCell>
                           <TableCell>
                             <div className="flex items-center gap-2">
                               <Checkbox
@@ -1486,12 +1624,33 @@ export default function AdminPage() {
                           </TableCell>
                           <TableCell className="text-xs text-muted-foreground">{formatDateTimePt(p.createdAt)}</TableCell>
                           <TableCell className="text-xs text-muted-foreground">{formatDateTimePt(p.lastUsedAt)}</TableCell>
+                          <TableCell>
+                            <div className="flex flex-wrap gap-2">
+                              <Button size="sm" variant="outline" onClick={() => openEditPin(p)}>
+                                Editar
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                onClick={() => {
+                                  if (!window.confirm("Gerar um novo PIN para este registo? O PIN antigo deixará de funcionar.")) return;
+                                  setEditPinId(p.id);
+                                  setEditPinLabel(p.label || "");
+                                  setEditPinNewValue("");
+                                  setEditPinOpen(true);
+                                  // user can click regenerar dentro do modal
+                                }}
+                              >
+                                Novo PIN
+                              </Button>
+                            </div>
+                          </TableCell>
                         </TableRow>
                       ))}
 
                       {(accessLinks.find((a) => a.id === pinsLink.id)?.pins ?? pinsLink.pins).length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={4} className="text-sm text-muted-foreground">
+                          <TableCell colSpan={5} className="text-sm text-muted-foreground">
                             Sem PINs. Gere um novo PIN.
                           </TableCell>
                         </TableRow>
@@ -1539,6 +1698,51 @@ export default function AdminPage() {
 
             <DialogFooter>
               <Button onClick={() => setNewPinOpen(false)}>Fechar</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={editPinOpen} onOpenChange={setEditPinOpen}>
+          <DialogContent className="sm:max-w-lg">
+            <DialogHeader>
+              <DialogTitle>Editar PIN</DialogTitle>
+              <DialogDescription>
+                Atualize o nome atribuído e/ou defina um novo PIN. O PIN em plaintext só será mostrado uma vez.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="grid grid-cols-1 gap-3">
+              <div className="space-y-1">
+                <div className="text-sm font-medium">Pessoa atribuída</div>
+                <Input value={editPinLabel} onChange={(e) => setEditPinLabel(e.target.value)} placeholder="Ex: Ana Silva" />
+              </div>
+
+              <div className="space-y-1">
+                <div className="text-sm font-medium">Novo PIN (opcional)</div>
+                <Input
+                  value={editPinNewValue}
+                  onChange={(e) => setEditPinNewValue(e.target.value)}
+                  placeholder="Deixe vazio para não alterar"
+                />
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" onClick={() => savePin("label")} disabled={savingPin || !editPinId}>
+                  {savingPin ? "A guardar..." : "Guardar nome"}
+                </Button>
+                <Button onClick={() => savePin("set")} disabled={savingPin || !editPinId}>
+                  {savingPin ? "A guardar..." : "Guardar e definir PIN"}
+                </Button>
+                <Button variant="secondary" onClick={() => savePin("regen")} disabled={savingPin || !editPinId}>
+                  {savingPin ? "A gerar..." : "Gerar novo PIN"}
+                </Button>
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setEditPinOpen(false)} disabled={savingPin}>
+                Fechar
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

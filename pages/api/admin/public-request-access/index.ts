@@ -43,6 +43,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       include: {
         requestingService: { select: { id: true, codigo: true, designacao: true, ativo: true } },
         pins: { select: { id: true, label: true, isActive: true, createdAt: true, lastUsedAt: true } },
+        _count: { select: { requests: true } },
       },
     });
 
@@ -63,6 +64,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           total: l.pins.length,
           active: l.pins.filter((p) => p.isActive).length,
         },
+        requestsCount: l._count.requests,
         publicPath: `/r/${l.slug}`,
       }))
     );

@@ -822,6 +822,32 @@ export default function ApiDocsPage() {
           }
         },
         {
+          method: "DELETE",
+          path: "/api/admin/public-request-access/[accessId]",
+          description: "Soft-remove (deactivate) a public request link (ADMIN only). Use query ?hard=1 to permanently delete (only if no requests exist)",
+          parameters: [
+            { name: "path.accessId", type: "string", required: true, description: "PublicRequestAccess id" },
+            { name: "query.hard", type: "1|true", required: false, description: "If set, hard delete (fails with 409 if there is request history)" }
+          ],
+          response: {
+            success: { status: 204, data: "(no content)" },
+            error: { status: 409, data: "{ error: string }" }
+          }
+        },
+        {
+          method: "PATCH",
+          path: "/api/admin/public-request-access/[accessId]",
+          description: "Activate/deactivate a public request link (ADMIN only)",
+          parameters: [
+            { name: "path.accessId", type: "string", required: true, description: "PublicRequestAccess id" },
+            { name: "isActive", type: "boolean", required: true, description: "New active state" }
+          ],
+          response: {
+            success: { status: 200, data: "{ id: string, isActive: boolean }" },
+            error: { status: 400, data: "{ error: string }" }
+          }
+        },
+        {
           method: "GET",
           path: "/api/admin/public-request-access/[accessId]/pins",
           description: "List pins for a public request link (ADMIN only)",
@@ -850,14 +876,17 @@ export default function ApiDocsPage() {
         {
           method: "PATCH",
           path: "/api/admin/public-request-access/[accessId]/pins",
-          description: "Activate/deactivate a pin (ADMIN only)",
+          description: "Update a pin (activate/deactivate, rename label, or regenerate PIN) (ADMIN only)",
           parameters: [
             { name: "path.accessId", type: "string", required: true, description: "PublicRequestAccess id" },
             { name: "pinId", type: "string", required: true, description: "Pin id" },
-            { name: "isActive", type: "boolean", required: true, description: "New active state" }
+            { name: "isActive", type: "boolean", required: false, description: "New active state" },
+            { name: "label", type: "string|null", required: false, description: "Update label / assignee name" },
+            { name: "pin", type: "string", required: false, description: "Set a custom new PIN (returns plaintext once)" },
+            { name: "regenerate", type: "boolean", required: false, description: "Generate a new PIN (returns plaintext once)" }
           ],
           response: {
-            success: { status: 200, data: "{ ok: true }" },
+            success: { status: 200, data: "{ ok: true, pin?: string }" },
             error: { status: 404, data: "{ error: string }" }
           }
         },
