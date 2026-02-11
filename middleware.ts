@@ -5,12 +5,52 @@ export function middleware(request: NextRequest) {
   // Get the pathname of the request
   const path = request.nextUrl.pathname;
 
-  // Legacy route: /admin is now /DB
+  // Admin route: require session (role ADMIN) and optionally restrict by allowed IPs
   if (path === "/admin" || path.startsWith("/admin/")) {
-    const url = request.nextUrl.clone();
-    url.pathname = "/DB";
-    url.search = request.nextUrl.search;
-    return NextResponse.redirect(url);
+    // Call internal session endpoint to validate session and role.
+    try {
+      const sessionRes = await fetch(new URL("/api/auth/session", request.url), {
+        method: "GET",
+        headers: request.headers,
+        // Ensure we don't cache an auth response
+        cache: "no-store",
+      });
+
+      if (!sessionRes.ok) {
+        const loginUrl = new URL("/login", request.url);
+        loginUrl.searchParams.set("redirect", path);
+        return NextResponse.redirect(loginUrl);
+      }
+
+      const sessionData = await sessionRes.json();
+      const role = sessionData?.role;
+      if (role !== "ADMIN") {
+        // Not an admin -> send to home
+        const url = request.nextUrl.clone();
+        url.pathname = "/";
+        return NextResponse.redirect(url);
+      }
+
+      // Optional IP allowlist. Set ADMIN_ALLOWED_IPS in env as comma-separated list.
+      const allowed = process.env.ADMIN_ALLOWED_IPS || "";
+      if (allowed.trim()) {
+        const allowedList = allowed.split(",").map((s) => s.trim()).filter(Boolean);
+
+        const xff = request.headers.get("x-forwarded-for");
+        const xri = request.headers.get("x-real-ip");
+        const clientIp = xff ? xff.split(",")[0].trim() : xri || "unknown";
+
+        if (!allowedList.includes(clientIp)) {
+          const url = request.nextUrl.clone();
+          url.pathname = "/admin/ip-approval";
+          return NextResponse.redirect(url);
+        }
+      }
+    } catch (err) {
+      const loginUrl = new URL("/login", request.url);
+      loginUrl.searchParams.set("redirect", path);
+      return NextResponse.redirect(loginUrl);
+    }
   }
 
   // Define protected routes that require authentication

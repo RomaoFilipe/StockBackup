@@ -55,6 +55,11 @@ const navItemsBase: NavItem[] = [
     icon: LayoutGrid,
     mobile: true,
   },
+    {
+      label: "Estado do Pedido",
+      href: "/estado-do-pedido",
+      icon: Activity,
+    },
   {
     label: "Equipamentos",
     href: "/equipamentos",
