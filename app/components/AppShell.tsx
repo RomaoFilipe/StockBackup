@@ -15,6 +15,8 @@ import {
   Menu,
   Package,
   Users,
+  Plus,
+  FileText,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -24,8 +26,10 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
+  DialogDescription,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
+import axiosInstance from "@/utils/axiosInstance";
 import { useAuth } from "@/app/authContext";
 import { ModeToggle } from "@/app/AppHeader/ModeToggle";
 import { RequestsNotificationsBell } from "@/app/AppHeader/RequestsNotificationsBell";
@@ -92,16 +96,42 @@ const navItemsBase: NavItem[] = [
   },
 ];
 
+const navItemsUserOnly: NavItem[] = [
+  {
+    label: "Estado do Pedido",
+    href: "/requests/estado",
+    icon: FileText,
+    mobile: true,
+  },
+  {
+    label: "Novo Pedido",
+    href: "/requests/novo",
+    icon: Plus,
+    mobile: true,
+  },
+];
+
 export default function AppShell({ children }: AppShellProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const { logout, user } = useAuth();
   const { toast } = useToast();
+  const [pwOpen, setPwOpen] = React.useState(false);
+  const [newPassword, setNewPassword] = React.useState("");
+  const [confirmPassword, setConfirmPassword] = React.useState("");
+  const [changing, setChanging] = React.useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   const navItems = useMemo(() => {
+    // For USER role, hide most sections and show only request-related tabs
+    if (user?.role === "USER") {
+      return [...navItemsUserOnly];
+    }
+
+    // For ADMIN: start with all base items
     const items = [...navItemsBase];
+    
     if (user?.role === "ADMIN") {
       const scanIndex = items.findIndex((i) => i.href === "/scan");
       const insertDbAt = scanIndex >= 0 ? scanIndex : items.length;
@@ -120,6 +150,10 @@ export default function AppShell({ children }: AppShellProps) {
         icon: Users,
       });
     }
+
+    // Add the user-accessible tabs (Estado/Novo) at the end for ADMIN+
+    items.push(...navItemsUserOnly);
+
     return items;
   }, [user?.role]);
 
@@ -155,6 +189,36 @@ export default function AppShell({ children }: AppShellProps) {
       });
     } finally {
       setIsLoggingOut(false);
+    }
+  };
+
+  React.useEffect(() => {
+    if (user?.mustChangePassword) {
+      setPwOpen(true);
+    }
+  }, [user?.mustChangePassword]);
+
+  const handleChangePassword = async () => {
+    if (newPassword.length < 8) {
+      toast({ title: "Erro", description: "Password precisa ter pelo menos 8 caracteres.", variant: "destructive" });
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      toast({ title: "Erro", description: "Passwords não coincidem.", variant: "destructive" });
+      return;
+    }
+    setChanging(true);
+    try {
+      await axiosInstance.post("/users/change-password", { password: newPassword });
+      toast({ title: "Senha atualizada", description: "A sua senha foi alterada com sucesso." });
+      setPwOpen(false);
+      // Refresh the session/user state simply by reloading
+      window.location.reload();
+    } catch (error: any) {
+      const msg = error?.response?.data?.error || "Não foi possível alterar a password.";
+      toast({ title: "Erro", description: msg, variant: "destructive" });
+    } finally {
+      setChanging(false);
     }
   };
 
@@ -308,6 +372,40 @@ export default function AppShell({ children }: AppShellProps) {
           </main>
         </div>
       </div>
+
+      {/* Force-change-password modal */}
+      <Dialog open={pwOpen} onOpenChange={(o) => setPwOpen(o)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Alterar password</DialogTitle>
+            <DialogDescription>É necessário alterar a sua password temporária.</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-2">
+            <input
+              type="password"
+              placeholder="Nova password"
+              className="input w-full rounded-md border p-2"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+            />
+            <input
+              type="password"
+              placeholder="Confirmar password"
+              className="input w-full rounded-md border p-2"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+            />
+          </div>
+          <div className="mt-4 flex justify-end">
+            <Button variant="outline" onClick={() => setPwOpen(false)} disabled={changing}>
+              Cancelar
+            </Button>
+            <Button className="ml-2" onClick={handleChangePassword} disabled={changing}>
+              {changing ? "A guardar..." : "Alterar password"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-border/60 bg-background/90 backdrop-blur-xl lg:hidden">
         <div className="grid grid-cols-5 gap-1 px-2 py-2">

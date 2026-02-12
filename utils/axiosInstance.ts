@@ -9,4 +9,18 @@ const axiosInstance = axios.create({
   withCredentials: true,
 });
 
+axiosInstance.interceptors.request.use((config) => {
+  if (typeof document !== "undefined") {
+    const cookie = document.cookie
+      .split("; ")
+      .find((entry) => entry.startsWith("csrf_token="));
+    const csrfToken = cookie ? decodeURIComponent(cookie.split("=")[1] ?? "") : "";
+    if (csrfToken) {
+      config.headers = config.headers ?? {};
+      (config.headers as any)["x-csrf-token"] = csrfToken;
+    }
+  }
+  return config;
+});
+
 export default axiosInstance;

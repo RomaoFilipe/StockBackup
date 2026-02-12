@@ -20,6 +20,21 @@ export default async function handler(
     path: "/",
     maxAge: 0,
   });
+  // Clear user_role cookie as well
+  cookies.set("user_role", "", {
+    httpOnly: false,
+    secure: isSecure,
+    sameSite: "lax",
+    path: "/",
+    maxAge: 0,
+  });
+  cookies.set("csrf_token", "", {
+    httpOnly: false,
+    secure: isSecure,
+    sameSite: "lax",
+    path: "/",
+    maxAge: 0,
+  });
 
   return res.status(204).end();
 }

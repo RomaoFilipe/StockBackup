@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect } from "react";
+import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
 import axiosInstance from "@/utils/axiosInstance";
 import { getSessionClient } from "@/utils/authClient";
 
@@ -11,6 +11,8 @@ interface User {
   role?: "USER" | "ADMIN";
   tenantId?: string;
   isActive?: boolean;
+  mustChangePassword?: boolean;
+  requestingServiceId?: number | null;
 }
 
 interface AuthContextType {
@@ -29,6 +31,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [user, setUser] = useState<User | null>(null);
+
+  const clearAuthData = useCallback(() => {
+    setIsLoggedIn(false);
+    setUser(null);
+    // Clear attributes from local storage
+    localStorage.setItem("isAuth", "false");
+    localStorage.setItem("isLoggedIn", "false");
+    localStorage.setItem("getSession", "");
+  }, []);
+
+  const forceLogout = useCallback(async () => {
+    try {
+      await axiosInstance.post("/auth/logout");
+    } catch {
+      // best effort
+    }
+    clearAuthData();
+    if (typeof window !== "undefined" && window.location.pathname !== "/login") {
+      window.location.assign("/login");
+    }
+  }, [clearAuthData]);
 
   useEffect(() => {
     // Initialize local storage with default values if not already set
@@ -65,6 +88,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
             name: session.name ?? undefined,
             email: session.email,
             role: session.role,
+            tenantId: (session as any).tenantId,
+            isActive: (session as any).isActive,
+            mustChangePassword: (session as any).mustChangePassword ?? false,
+            requestingServiceId: (session as any).requestingServiceId ?? null,
           });
           localStorage.setItem("isAuth", "true");
           localStorage.setItem("isLoggedIn", "true");
@@ -79,7 +106,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     };
 
     checkSession();
-  }, []);
+  }, [clearAuthData]);
+
+  useEffect(() => {
+    if (!isLoggedIn || !user?.id) return;
+
+    const es = new EventSource("/api/realtime/stream");
+    const onForceLogout = (ev: MessageEvent) => {
+      try {
+        const data = JSON.parse(ev.data) as { userId?: string };
+        if (data?.userId && data.userId !== user.id) return;
+      } catch {
+        // ignore malformed payload and force logout anyway
+      }
+      void forceLogout();
+    };
+
+    es.addEventListener("auth.force_logout", onForceLogout);
+    return () => {
+      es.removeEventListener("auth.force_logout", onForceLogout);
+      es.close();
+    };
+  }, [forceLogout, isLoggedIn, user?.id]);
 
   const login = async (email: string, password: string) => {
     try {
@@ -101,6 +149,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         role: session.role,
         tenantId: (session as any).tenantId,
         isActive: (session as any).isActive,
+        mustChangePassword: (session as any).mustChangePassword ?? false,
+        requestingServiceId: (session as any).requestingServiceId ?? null,
       });
 
       localStorage.setItem("isAuth", "true");
@@ -124,15 +174,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       console.error("Error logging out:", error);
       throw error;
     }
-  };
-
-  const clearAuthData = () => {
-    setIsLoggedIn(false);
-    setUser(null);
-    // Clear attributes from local storage
-    localStorage.setItem("isAuth", "false");
-    localStorage.setItem("isLoggedIn", "false");
-    localStorage.setItem("getSession", "");
   };
 
   return (

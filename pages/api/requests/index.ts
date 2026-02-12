@@ -2,6 +2,8 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { z } from "zod";
 import { prisma } from "@/prisma/client";
 import { getSessionServer } from "@/utils/auth";
+import { createRequestStatusAudit, notifyAdmin, notifyUser } from "@/utils/notifications";
+import { publishRealtimeEvent } from "@/utils/realtime";
 
 const goodsTypeSchema = z.enum(["MATERIALS_SERVICES", "WAREHOUSE_MATERIALS", "OTHER_PRODUCTS"]);
 
@@ -16,6 +18,8 @@ const createRequestSchema = z.object({
   title: z.string().min(1).max(120).optional(),
   notes: z.string().max(1000).optional(),
   requestedAt: dateLikeString.optional(),
+  priority: z.enum(["LOW", "NORMAL", "HIGH", "URGENT"]).optional(),
+  dueAt: dateLikeString.optional(),
 
   requestingServiceId: z.number().int(),
   requesterName: z.string().max(120).optional(),
@@ -72,6 +76,8 @@ async function createRequestWithGtmiSeq(args: {
   title?: string;
   notes?: string;
   requestedAt: Date;
+  priority?: "LOW" | "NORMAL" | "HIGH" | "URGENT";
+  dueAt?: Date;
   requestingService?: string;
   requestingServiceId?: number;
   requesterName?: string;
@@ -121,6 +127,8 @@ async function createRequestWithGtmiSeq(args: {
             gtmiSeq: nextSeq,
             gtmiNumber,
             requestedAt: args.requestedAt,
+            priority: args.priority ?? "NORMAL",
+            dueAt: args.dueAt ?? null,
 
             requestingService: args.requestingService,
             requestingServiceId: typeof args.requestingServiceId === "number" ? args.requestingServiceId : null,
@@ -352,6 +360,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const asUserIdFromQuery = typeof req.query.asUserId === "string" ? req.query.asUserId : undefined;
   const mineFlag = typeof req.query.mine === "string" ? req.query.mine : undefined;
   const mine = mineFlag === "1" || mineFlag === "true";
+  const paged = String(req.query.paged ?? "") === "1" || String(req.query.paged ?? "") === "true";
 
   // By default, requests are tenant-wide (visible to all users in the tenant).
   // Optional filters:
@@ -361,37 +370,70 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   if (req.method === "GET") {
     try {
-      const requests = await prisma.request.findMany({
-        where: {
-          tenantId,
-          ...(userIdFilter ? { userId: userIdFilter } : {}),
-        },
-        orderBy: { requestedAt: "desc" },
-        include: {
-          user: { select: { id: true, name: true, email: true } },
-          createdBy: { select: { id: true, name: true, email: true } },
-          signedBy: { select: { id: true, name: true, email: true } },
-          requestingServiceRef: { select: { id: true, codigo: true, designacao: true, ativo: true } },
-          invoices: {
-            select: {
-              id: true,
-              invoiceNumber: true,
-              issuedAt: true,
-              productId: true,
-            },
-            orderBy: { issuedAt: "desc" },
-          },
-          items: {
-            include: {
-              product: { select: { id: true, name: true, sku: true } },
-            },
-            orderBy: { createdAt: "asc" },
-          },
-        },
-      });
+      const page = Math.max(1, Number(req.query.page || 1) || 1);
+      const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize || 20) || 20));
+      const statusParam = typeof req.query.status === "string" ? req.query.status.trim() : "";
+      const priorityParam = typeof req.query.priority === "string" ? req.query.priority.trim() : "";
+      const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
+      const dateFrom = typeof req.query.dateFrom === "string" && req.query.dateFrom ? new Date(req.query.dateFrom) : null;
+      const dateTo = typeof req.query.dateTo === "string" && req.query.dateTo ? new Date(req.query.dateTo) : null;
 
-      return res.status(200).json(
-        requests.map((r) => {
+      const where: any = {
+        tenantId,
+        ...(userIdFilter ? { userId: userIdFilter } : {}),
+        ...(statusParam ? { status: statusParam } : {}),
+        ...(priorityParam ? { priority: priorityParam } : {}),
+        ...(q
+          ? {
+              OR: [
+                { gtmiNumber: { contains: q, mode: "insensitive" as const } },
+                { title: { contains: q, mode: "insensitive" as const } },
+                { requesterName: { contains: q, mode: "insensitive" as const } },
+                { requestingService: { contains: q, mode: "insensitive" as const } },
+              ],
+            }
+          : {}),
+        ...(dateFrom || dateTo
+          ? {
+              requestedAt: {
+                ...(dateFrom && !Number.isNaN(dateFrom.getTime()) ? { gte: dateFrom } : {}),
+                ...(dateTo && !Number.isNaN(dateTo.getTime()) ? { lte: dateTo } : {}),
+              },
+            }
+          : {}),
+      };
+
+      const [requests, total] = await Promise.all([
+        prisma.request.findMany({
+          where,
+          orderBy: { requestedAt: "desc" },
+          include: {
+            user: { select: { id: true, name: true, email: true } },
+            createdBy: { select: { id: true, name: true, email: true } },
+            signedBy: { select: { id: true, name: true, email: true } },
+            requestingServiceRef: { select: { id: true, codigo: true, designacao: true, ativo: true } },
+            invoices: {
+              select: {
+                id: true,
+                invoiceNumber: true,
+                issuedAt: true,
+                productId: true,
+              },
+              orderBy: { issuedAt: "desc" },
+            },
+            items: {
+              include: {
+                product: { select: { id: true, name: true, sku: true } },
+              },
+              orderBy: { createdAt: "asc" },
+            },
+          },
+          ...(paged ? { skip: (page - 1) * pageSize, take: pageSize } : {}),
+        }),
+        paged ? prisma.request.count({ where }) : Promise.resolve(0),
+      ]);
+
+      const mapped = requests.map((r) => {
           const { pickupSignatureDataUrl: _pickupSignatureDataUrl, ...rest } = r as any;
           return {
             ...rest,
@@ -404,6 +446,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             signedVoidedAt: (r as any).signedVoidedAt ? (r as any).signedVoidedAt.toISOString() : null,
             pickupSignedAt: r.pickupSignedAt ? r.pickupSignedAt.toISOString() : null,
             pickupVoidedAt: (r as any).pickupVoidedAt ? (r as any).pickupVoidedAt.toISOString() : null,
+            dueAt: (r as any).dueAt ? (r as any).dueAt.toISOString() : null,
             invoices: r.invoices.map((inv) => ({
               ...inv,
               issuedAt: inv.issuedAt.toISOString(),
@@ -415,8 +458,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
               updatedAt: it.updatedAt.toISOString(),
             })),
           };
-        })
-      );
+        });
+
+      if (paged) {
+        return res.status(200).json({
+          items: mapped,
+          page,
+          pageSize,
+          total,
+          totalPages: Math.max(1, Math.ceil(total / pageSize)),
+        });
+      }
+
+      return res.status(200).json(mapped);
     } catch (error) {
       console.error("GET /api/requests error:", error);
       return res.status(500).json({ error: "Failed to fetch requests" });
@@ -434,6 +488,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       title,
       notes,
       requestedAt,
+      priority,
+      dueAt,
       requestingServiceId,
       requesterName,
       requesterEmployeeNo,
@@ -482,6 +538,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         title,
         notes,
         requestedAt: effectiveRequestedAt,
+        priority: priority ?? "NORMAL",
+        dueAt,
         requestingService: normalizedRequestingService,
         requestingServiceId,
         requesterName,
@@ -496,6 +554,63 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         items,
       });
 
+      try {
+        await createRequestStatusAudit({
+          tenantId,
+          requestId: created.id,
+          fromStatus: null,
+          toStatus: "SUBMITTED",
+          changedByUserId: session.id,
+          source: "api/requests:POST",
+        });
+
+        await notifyAdmin({
+          tenantId,
+          kind: "REQUEST_CREATED",
+          title: `Nova requisição ${created.gtmiNumber}`,
+          message: `${created.requesterName || created.user?.name || "Utilizador"} submeteu um pedido.`,
+          requestId: created.id,
+          data: {
+            requestId: created.id,
+            gtmiNumber: created.gtmiNumber,
+            status: created.status,
+            ownerUserId: created.userId,
+          },
+        });
+
+        if (created.userId) {
+          await notifyUser({
+            tenantId,
+            recipientUserId: created.userId,
+            kind: "REQUEST_CREATED",
+            title: `Pedido criado: ${created.gtmiNumber}`,
+            message: "A tua requisição foi criada com sucesso.",
+            requestId: created.id,
+            data: {
+              requestId: created.id,
+              gtmiNumber: created.gtmiNumber,
+              status: created.status,
+            },
+          });
+        }
+
+        publishRealtimeEvent({
+          type: "request.created",
+          tenantId,
+          audience: "ALL",
+          userId: created.userId,
+          payload: {
+            id: created.id,
+            gtmiNumber: created.gtmiNumber,
+            status: created.status,
+            requestedAt: created.requestedAt.toISOString(),
+            ownerUserId: created.userId,
+          },
+        });
+      } catch (notifyError) {
+        console.error("POST /api/requests notify/audit error:", notifyError);
+      }
+
       return res.status(201).json({
         ...created,
         createdAt: created.createdAt.toISOString(),
@@ -503,6 +618,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         requestedAt: created.requestedAt.toISOString(),
         expectedDeliveryFrom: created.expectedDeliveryFrom ? created.expectedDeliveryFrom.toISOString() : null,
         expectedDeliveryTo: created.expectedDeliveryTo ? created.expectedDeliveryTo.toISOString() : null,
+        dueAt: created.dueAt ? created.dueAt.toISOString() : null,
         items: created.items.map((it) => ({
           ...it,
           quantity: Number(it.quantity),

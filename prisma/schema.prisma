@@ -28,6 +28,7 @@ model Tenant {
   users            User[]
   allowedIps       AllowedIp[]
   ipAccessRequests IpAccessRequest[]
+  userAdminAudits  UserAdminAudit[]
 
   categories     Category[]
   suppliers      Supplier[]
@@ -35,10 +36,11 @@ model Tenant {
   productInvoices ProductInvoice[]
   units          ProductUnit[]
   requests       Request[]
+  requestStatusAudits RequestStatusAudit[]
+  notifications Notification[]
   storedFiles    StoredFile[]
   stockMovements StockMovement[]
 
-  publicRequestAccessLinks PublicRequestAccess[]
   publicRequests           PublicRequest[]
 }
 
@@ -57,6 +59,13 @@ model User {
 
   isActive Boolean @default(true)
 
+  // If true the user must change their password at next login
+  mustChangePassword Boolean @default(false)
+
+  // Optional association to a requesting service (serviços requisitantes)
+  requestingServiceId Int?
+  requestingService   RequestingService? @relation(fields: [requestingServiceId], references: [id], onDelete: SetNull)
+
   createdByUserId String? @db.Uuid
   createdBy       User?   @relation("UserCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   createdUsers    User[]  @relation("UserCreatedBy")
@@ -70,6 +79,8 @@ model User {
   requests Request[]
 
   createdRequests Request[] @relation("RequestCreatedBy")
+  changedRequestStatusAudits RequestStatusAudit[] @relation("RequestStatusAuditChangedBy")
+  notifications Notification[] @relation("NotificationRecipientUser")
 
   signedRequests Request[] @relation("RequestSignedBy")
 
@@ -85,14 +96,17 @@ model User {
   createdAllowedIps       AllowedIp[]        @relation("AllowedIpCreatedBy")
   ipAccessRequests        IpAccessRequest[]  @relation("IpAccessRequestUser")
   reviewedIpAccessRequests IpAccessRequest[] @relation("IpAccessRequestReviewedBy")
+  adminActions       UserAdminAudit[] @relation("UserAdminAuditActor")
+  adminActionTargets UserAdminAudit[] @relation("UserAdminAuditTarget")
 
-  createdPublicRequestAccessLinks PublicRequestAccess[] @relation("PublicRequestAccessCreatedBy")
-  createdPublicRequestPins        PublicRequestPin[]    @relation("PublicRequestPinCreatedBy")
+  submittedPublicRequests PublicRequest[] @relation("PublicRequestRequesterUser")
   handledPublicRequests           PublicRequest[]       @relation("PublicRequestHandledBy")
 
   @@unique([tenantId, email])
   @@unique([tenantId, username])
   @@index([tenantId])
+  @@index([tenantId, createdAt(sort: Desc)])
+  @@index([requestingServiceId])
 }
 
 model Category {
@@ -179,6 +193,13 @@ enum RequestStatus {
   FULFILLED
 }
 
+enum RequestPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
 enum RequestGoodsType {
   MATERIALS_SERVICES
   WAREHOUSE_MATERIALS
@@ -201,6 +222,8 @@ model Request {
   gtmiNumber String
 
   requestedAt DateTime @default(now())
+  priority    RequestPriority @default(NORMAL)
+  dueAt       DateTime?
 
   requestingService    String?
   requestingServiceId  Int?
@@ -270,6 +293,8 @@ model Request {
   stockMovements StockMovement[]
 
   acceptedFromPublicRequests PublicRequest[] @relation("PublicRequestAcceptedRequest")
+  statusAudits RequestStatusAudit[]
+  notifications Notification[]
 
   @@unique([tenantId, gtmiNumber])
   @@unique([tenantId, gtmiYear, gtmiSeq])
@@ -287,6 +312,8 @@ model Request {
   @@index([pickupVoidedAt])
   @@index([pickupVoidedByUserId])
   @@index([requestingServiceId])
+  @@index([priority])
+  @@index([dueAt])
 }
 
 model RequestItem {
@@ -315,59 +342,17 @@ model RequestingService {
   designacao String
   ativo      Boolean @default(true)
 
+  // Users optionally belong to a requesting service
+  users User[]
+
   requests Request[]
   invoices ProductInvoice[]
 
-  publicRequestAccessLinks PublicRequestAccess[]
   publicRequests           PublicRequest[]
 
   @@unique([codigo])
   @@index([ativo])
   @@map("servicos_requisitantes")
-}
-
-model PublicRequestAccess {
-  id        String   @id @default(uuid()) @db.Uuid
-  createdAt DateTime @default(now())
-  updatedAt DateTime @default(now()) @updatedAt
-
-  tenantId String @db.Uuid
-  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-
-  requestingServiceId Int
-  requestingService   RequestingService @relation(fields: [requestingServiceId], references: [id], onDelete: Restrict)
-
-  slug     String  @unique
-  isActive Boolean @default(true)
-
-  createdByUserId String @db.Uuid
-  createdBy       User   @relation("PublicRequestAccessCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
-
-  pins     PublicRequestPin[]
-  requests PublicRequest[]
-
-  @@index([tenantId])
-  @@index([requestingServiceId])
-  @@index([isActive])
-}
-
-model PublicRequestPin {
-  id         String   @id @default(uuid()) @db.Uuid
-  createdAt  DateTime @default(now())
-  lastUsedAt DateTime?
-
-  accessId String @db.Uuid
-  access   PublicRequestAccess @relation(fields: [accessId], references: [id], onDelete: Cascade)
-
-  label    String?
-  pinHash  String
-  isActive Boolean @default(true)
-
-  createdByUserId String @db.Uuid
-  createdBy       User   @relation("PublicRequestPinCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
-
-  @@index([accessId])
-  @@index([isActive])
 }
 
 model PublicRequest {
@@ -380,13 +365,12 @@ model PublicRequest {
   tenantId String @db.Uuid
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  accessId String @db.Uuid
-  access   PublicRequestAccess @relation(fields: [accessId], references: [id], onDelete: Restrict)
-
   requestingServiceId Int
   requestingService   RequestingService @relation(fields: [requestingServiceId], references: [id], onDelete: Restrict)
 
   requesterName String
+  requesterUserId String? @db.Uuid
+  requesterUser   User? @relation("PublicRequestRequesterUser", fields: [requesterUserId], references: [id], onDelete: SetNull)
   requesterIp   String?
 
   deliveryLocation String?
@@ -405,8 +389,8 @@ model PublicRequest {
   items PublicRequestItem[]
 
   @@index([tenantId])
-  @@index([accessId])
   @@index([requestingServiceId])
+  @@index([requesterUserId])
   @@index([status])
   @@index([createdAt])
 }
@@ -619,6 +603,7 @@ model AllowedIp {
   ipOrCidr String
   isActive Boolean @default(true)
   note     String?
+  expiresAt DateTime?
 
   createdAt       DateTime @default(now())
   createdByUserId String?  @db.Uuid
@@ -626,6 +611,7 @@ model AllowedIp {
 
   @@index([tenantId])
   @@index([isActive])
+  @@index([expiresAt])
 }
 
 model IpAccessRequest {
@@ -654,4 +640,112 @@ model IpAccessRequest {
   @@index([status])
   @@index([createdAt])
   @@index([reviewedAt])
+}
+
+model UserAdminAudit {
+  id        String   @id @default(uuid()) @db.Uuid
+  action    String   @db.VarChar(80)
+  targetType String  @db.VarChar(40) @default("USER")
+  note      String?
+  payload   Json?
+  createdAt DateTime @default(now())
+
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  actorUserId String? @db.Uuid
+  actor       User?   @relation("UserAdminAuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  targetUserId String? @db.Uuid
+  targetUser   User?   @relation("UserAdminAuditTarget", fields: [targetUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([createdAt])
+  @@index([action])
+  @@index([actorUserId])
+  @@index([targetUserId])
+}
+
+enum NotificationKind {
+  REQUEST_CREATED
+  REQUEST_STATUS_CHANGED
+  REQUEST_UPDATED
+  PUBLIC_REQUEST_RECEIVED
+  PUBLIC_REQUEST_ACCEPTED
+  PUBLIC_REQUEST_REJECTED
+  SECURITY_ALERT
+  STORAGE_ALERT
+}
+
+model Notification {
+  id        String   @id @default(uuid()) @db.Uuid
+  kind      NotificationKind
+  title     String
+  message   String
+  data      Json?
+  createdAt DateTime @default(now())
+  readAt    DateTime?
+
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  recipientRole   UserRole?
+  recipientUserId String? @db.Uuid
+  recipientUser   User?   @relation("NotificationRecipientUser", fields: [recipientUserId], references: [id], onDelete: Cascade)
+
+  requestId String? @db.Uuid
+  request   Request? @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([createdAt])
+  @@index([readAt])
+  @@index([recipientRole])
+  @@index([recipientUserId])
+  @@index([requestId])
+}
+
+model RequestStatusAudit {
+  id             String        @id @default(uuid()) @db.Uuid
+  fromStatus     RequestStatus?
+  toStatus       RequestStatus
+  note           String?
+  source         String?
+  createdAt      DateTime      @default(now())
+
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  requestId String  @db.Uuid
+  request   Request @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  changedByUserId String? @db.Uuid
+  changedBy       User?   @relation("RequestStatusAuditChangedBy", fields: [changedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([requestId])
+  @@index([createdAt])
+  @@index([toStatus])
+  @@index([changedByUserId])
+}
+
+model RateLimitBucket {
+  key     String   @id
+  count   Int
+  resetAt DateTime
+
+  @@index([resetAt])
+}
+
+model AuthLockout {
+  key          String   @id
+  tenantId     String   @db.Uuid
+  email        String
+  ip           String
+  failureCount Int
+  lastFailedAt DateTime @default(now())
+  lockedUntil  DateTime?
+
+  @@index([tenantId])
+  @@index([email])
+  @@index([lockedUntil])
 }

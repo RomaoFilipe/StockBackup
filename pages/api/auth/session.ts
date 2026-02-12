@@ -1,5 +1,7 @@
 import { NextApiRequest, NextApiResponse } from "next";
 import { getSessionServer } from "@/utils/auth";
+import Cookies from "cookies";
+import crypto from "crypto";
 
 export default async function handler(
   req: NextApiRequest,
@@ -11,9 +13,50 @@ export default async function handler(
 
   try {
     const user = await getSessionServer(req, res);
+    const forwardedProto = String(req.headers["x-forwarded-proto"] ?? "");
+    const isSecure = forwardedProto === "https" || Boolean((req.socket as any)?.encrypted);
+    const cookies = new Cookies(req, res, { secure: isSecure });
     
     if (!user) {
+      cookies.set("session_id", "", {
+        httpOnly: true,
+        secure: isSecure,
+        sameSite: isSecure ? "none" : "lax",
+        path: "/",
+        maxAge: 0,
+      });
+      cookies.set("user_role", "", {
+        httpOnly: false,
+        secure: isSecure,
+        sameSite: isSecure ? "none" : "lax",
+        path: "/",
+        maxAge: 0,
+      });
+      cookies.set("csrf_token", "", {
+        httpOnly: false,
+        secure: isSecure,
+        sameSite: isSecure ? "none" : "lax",
+        path: "/",
+        maxAge: 0,
+      });
       return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    cookies.set("user_role", user.role ?? "", {
+      httpOnly: false,
+      secure: isSecure,
+      sameSite: isSecure ? "none" : "lax",
+      path: "/",
+      maxAge: 60 * 60 * 1000,
+    });
+    if (!req.cookies["csrf_token"]) {
+      cookies.set("csrf_token", crypto.randomBytes(32).toString("base64url"), {
+        httpOnly: false,
+        secure: isSecure,
+        sameSite: isSecure ? "none" : "lax",
+        path: "/",
+        maxAge: 60 * 60 * 1000,
+      });
     }
 
     // Return user data without sensitive information
@@ -24,6 +67,8 @@ export default async function handler(
       email: user.email,
       role: user.role,
       isActive: (user as any).isActive,
+      mustChangePassword: (user as any).mustChangePassword || false,
+      requestingServiceId: (user as any).requestingServiceId || null,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
     });

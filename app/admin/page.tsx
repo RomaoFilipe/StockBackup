@@ -136,7 +136,7 @@ export default function AdminPage() {
     if (typeof window !== "undefined") setOrigin(window.location.origin);
   }, []);
 
-  const [tab, setTab] = useState<"services" | "categories" | "suppliers" | "publicLinks" | "received">("services");
+  const [tab, setTab] = useState<"services" | "categories" | "suppliers" | "received">("services");
 
   useEffect(() => {
     const tabParam = searchParams?.get("tab");
@@ -224,6 +224,7 @@ export default function AdminPage() {
   const [handleRow, setHandleRow] = useState<PublicRequestRow | null>(null);
   const [handleNote, setHandleNote] = useState("");
   const [handling, setHandling] = useState(false);
+  const [backfillRunning, setBackfillRunning] = useState(false);
 
   const loadServices = async () => {
     setServicesLoading(true);
@@ -363,53 +364,40 @@ export default function AdminPage() {
     }
   };
 
-  const loadAccessLinks = async () => {
-    setAccessLinksLoading(true);
+  const runBackfillOwners = async (apply: boolean) => {
+    if (apply) {
+      const ok = window.confirm(
+        "Isto vai corrigir o dono (userId) de pedidos antigos já aceites. Continuar?"
+      );
+      if (!ok) return;
+    }
+
+    setBackfillRunning(true);
     try {
-      const res = await axiosInstance.get("/admin/public-request-access");
-      setAccessLinks(Array.isArray(res.data) ? (res.data as PublicAccessLinkRow[]) : []);
-      setAccessLinksLoadedOnce(true);
+      const res = await axiosInstance.post("/admin/public-requests/backfill-owners", { apply });
+      const summary = res.data?.summary;
+      toast({
+        title: apply ? "Correção aplicada" : "Simulação concluída",
+        description: summary
+          ? `Analisados: ${summary.checked} · Corrigidos: ${summary.fixed} · Já OK: ${summary.alreadyOk} · Não resolvidos: ${summary.unresolved}`
+          : undefined,
+      });
+      if (apply) {
+        await loadPublicRequests();
+      }
     } catch (error: any) {
-      const msg = error?.response?.data?.error || "Não foi possível carregar links públicos.";
+      const msg = error?.response?.data?.error || "Não foi possível executar correção de donos.";
       toast({ title: "Erro", description: msg, variant: "destructive" });
-      setAccessLinks([]);
     } finally {
-      setAccessLinksLoading(false);
+      setBackfillRunning(false);
     }
   };
 
-  useEffect(() => {
-    if (isAuthLoading) return;
-    if (!isLoggedIn || !isAdmin) return;
-    if (tab !== "publicLinks") return;
-    loadAccessLinks();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, isAuthLoading, isLoggedIn, isAdmin]);
-
   const createAccessLink = async () => {
-    const requestingServiceId = Number(createAccessServiceId);
-    if (!Number.isFinite(requestingServiceId) || requestingServiceId <= 0) {
-      toast({ title: "Erro", description: "Selecione um serviço requisitante.", variant: "destructive" });
-      return;
-    }
-
-    setCreatingAccess(true);
-    try {
-      const res = await axiosInstance.post("/admin/public-request-access", {
-        requestingServiceId,
-        slug: createAccessSlug.trim() || undefined,
-      });
-
-      const publicPath = String(res.data?.publicPath || "");
-      toast({ title: "Link pronto", description: publicPath ? `URL: ${publicPath}` : undefined });
-      setCreateAccessSlug("");
-      await loadAccessLinks();
-    } catch (error: any) {
-      const msg = error?.response?.data?.error || "Não foi possível criar o link.";
-      toast({ title: "Erro", description: msg, variant: "destructive" });
-    } finally {
-      setCreatingAccess(false);
-    }
+    toast({
+      title: "Funcionalidade removida",
+      description: "Links públicos/PIN foram descontinuados. Use Estado do Pedido > + Novo Pedido.",
+    });
   };
 
   const openPins = (link: PublicAccessLinkRow) => {
@@ -419,37 +407,20 @@ export default function AdminPage() {
   };
 
   const createPin = async () => {
-    if (!pinsLink) return;
-    setCreatingPin(true);
-    try {
-      const res = await axiosInstance.post(`/admin/public-request-access/${pinsLink.id}/pins`, {
-        label: pinLabel.trim() || undefined,
-      });
-      const pin = String(res.data?.pin || "");
-      const createdId = String(res.data?.id || "");
-      if (createdId && pin) {
-        setRecentPinsById((prev) => ({ ...prev, [createdId]: pin }));
-      }
-      setNewPinValue(pin || null);
-      setNewPinOpen(true);
-      setPinLabel("");
-      await loadAccessLinks();
-    } catch (error: any) {
-      const msg = error?.response?.data?.error || "Não foi possível gerar PIN.";
-      toast({ title: "Erro", description: msg, variant: "destructive" });
-    } finally {
-      setCreatingPin(false);
-    }
+    toast({
+      title: "Funcionalidade removida",
+      description: "PIN não é mais necessário no novo fluxo interno.",
+    });
   };
 
   const setPinActive = async (accessId: string, pinId: string, isActive: boolean) => {
-    try {
-      await axiosInstance.patch(`/admin/public-request-access/${accessId}/pins`, { pinId, isActive });
-      await loadAccessLinks();
-    } catch (error: any) {
-      const msg = error?.response?.data?.error || "Não foi possível atualizar PIN.";
-      toast({ title: "Erro", description: msg, variant: "destructive" });
-    }
+    void accessId;
+    void pinId;
+    void isActive;
+    toast({
+      title: "Funcionalidade removida",
+      description: "PIN não é mais necessário no novo fluxo interno.",
+    });
   };
 
   const openEditPin = (pin: PublicAccessPinRow) => {
@@ -460,94 +431,32 @@ export default function AdminPage() {
   };
 
   const savePin = async (mode: "label" | "set" | "regen") => {
-    if (!pinsLink || !editPinId) return;
-    setSavingPin(true);
-    try {
-      const payload: any = { pinId: editPinId };
-
-      if (mode === "label") {
-        payload.label = editPinLabel.trim() || null;
-      } else if (mode === "set") {
-        const v = editPinNewValue.trim();
-        if (!v) {
-          toast({ title: "Erro", description: "Indique um PIN novo.", variant: "destructive" });
-          return;
-        }
-        payload.label = editPinLabel.trim() || null;
-        payload.pin = v;
-      } else {
-        payload.label = editPinLabel.trim() || null;
-        payload.regenerate = true;
-      }
-
-      const res = await axiosInstance.patch(`/admin/public-request-access/${pinsLink.id}/pins`, payload);
-      const pin = String(res.data?.pin || "");
-
-      if (pin) {
-        setRecentPinsById((prev) => ({ ...prev, [editPinId]: pin }));
-        setNewPinValue(pin);
-        setNewPinOpen(true);
-      }
-
-      setEditPinOpen(false);
-      setEditPinId(null);
-      setEditPinLabel("");
-      setEditPinNewValue("");
-      await loadAccessLinks();
-      toast({ title: "PIN atualizado" });
-    } catch (error: any) {
-      const msg = error?.response?.data?.error || "Não foi possível atualizar PIN.";
-      toast({ title: "Erro", description: msg, variant: "destructive" });
-    } finally {
-      setSavingPin(false);
-    }
+    void mode;
+    setEditPinOpen(false);
+    setEditPinId(null);
+    setEditPinLabel("");
+    setEditPinNewValue("");
+    toast({
+      title: "Funcionalidade removida",
+      description: "PIN não é mais necessário no novo fluxo interno.",
+    });
   };
 
   const setAccessLinkActive = async (link: PublicAccessLinkRow, isActive: boolean) => {
-    const confirmed = window.confirm(
-      isActive
-        ? `Ativar o link público de "${link.requestingService.designacao}"?`
-        : `Desativar o link público de "${link.requestingService.designacao}"?\n\nOs pedidos já recebidos mantêm-se.`
-    );
-    if (!confirmed) return;
-
-    try {
-      await axiosInstance.patch(`/admin/public-request-access/${link.id}`, { isActive });
-      setAccessLinks((prev) => prev.map((l) => (l.id === link.id ? { ...l, isActive } : l)));
-      if (!isActive && pinsLink?.id === link.id) {
-        setPinsOpen(false);
-        setPinsLink(null);
-      }
-      toast({ title: isActive ? "Link ativado" : "Link desativado" });
-    } catch (error: any) {
-      const msg = error?.response?.data?.error || "Não foi possível atualizar.";
-      toast({ title: "Erro", description: msg, variant: "destructive" });
-    }
+    void link;
+    void isActive;
+    toast({
+      title: "Funcionalidade removida",
+      description: "Links públicos foram descontinuados.",
+    });
   };
 
   const hardRemoveAccessLink = async (link: PublicAccessLinkRow) => {
-    if ((link.requestsCount ?? 0) > 0) {
-      toast({
-        title: "Não é possível remover",
-        description: "Este link já tem pedidos. Desative para manter histórico.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    const confirmed = window.confirm(
-      `Remover definitivamente o link público de "${link.requestingService.designacao}"?\n\nEsta ação não pode ser anulada.`
-    );
-    if (!confirmed) return;
-
-    try {
-      await axiosInstance.delete(`/admin/public-request-access/${link.id}`, { params: { hard: 1 } });
-      toast({ title: "Link removido" });
-      await loadAccessLinks();
-    } catch (error: any) {
-      const msg = error?.response?.data?.error || "Não foi possível remover o link.";
-      toast({ title: "Erro", description: msg, variant: "destructive" });
-    }
+    void link;
+    toast({
+      title: "Funcionalidade removida",
+      description: "Links públicos foram descontinuados.",
+    });
   };
 
   const filteredServices = useMemo(() => {
@@ -923,7 +832,6 @@ export default function AdminPage() {
             <TabsTrigger value="services">Serviços requisitantes</TabsTrigger>
             <TabsTrigger value="categories">Categorias</TabsTrigger>
             <TabsTrigger value="suppliers">Fornecedores</TabsTrigger>
-            <TabsTrigger value="publicLinks">Links públicos</TabsTrigger>
             <TabsTrigger value="received">Recebidos</TabsTrigger>
           </TabsList>
 
@@ -1217,144 +1125,6 @@ export default function AdminPage() {
             </SectionCard>
           </TabsContent>
 
-          <TabsContent value="publicLinks" className="space-y-4">
-            <SectionCard
-              title="Links públicos (PIN)"
-              description="Crie um link por serviço requisitante e gere PINs. O PIN é mostrado apenas uma vez no momento da criação."
-            >
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                <div className="space-y-1 md:col-span-2">
-                  <div className="text-sm font-medium">Serviço requisitante</div>
-                  <select
-                    className="h-9 w-full rounded-md border bg-background px-3 text-sm"
-                    value={createAccessServiceId}
-                    onChange={(e) => setCreateAccessServiceId(e.target.value)}
-                  >
-                    <option value="">Selecionar...</option>
-                    {services
-                      .slice()
-                      .sort((a, b) => (a.designacao || "").localeCompare(b.designacao || ""))
-                      .map((s) => (
-                        <option key={s.id} value={String(s.id)}>
-                          {s.designacao} {s.codigo ? `(${s.codigo})` : ""}
-                        </option>
-                      ))}
-                  </select>
-                </div>
-
-                <div className="space-y-1">
-                  <div className="text-sm font-medium">Slug (opcional)</div>
-                  <Input
-                    value={createAccessSlug}
-                    onChange={(e) => setCreateAccessSlug(e.target.value)}
-                    placeholder="Ex: r-informatica"
-                  />
-                </div>
-
-                <div className="flex items-end">
-                  <Button className="w-full" onClick={createAccessLink} disabled={creatingAccess}>
-                    {creatingAccess ? "A criar..." : "Criar/obter link"}
-                  </Button>
-                </div>
-              </div>
-
-              <div className="mt-4 flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
-                <div className="text-sm text-muted-foreground">
-                  Total: {accessLinks.length} {accessLinks.length === 1 ? "link" : "links"}
-                </div>
-                <Button variant="outline" onClick={loadAccessLinks} disabled={accessLinksLoading}>
-                  {accessLinksLoading ? "A carregar..." : "Recarregar"}
-                </Button>
-              </div>
-
-              <div className="mt-4 overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Serviço</TableHead>
-                      <TableHead className="w-[280px]">URL</TableHead>
-                      <TableHead className="w-[140px]">PINs</TableHead>
-                      <TableHead className="w-[160px]">Criado</TableHead>
-                      <TableHead className="w-[160px]">Ações</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {accessLinks.map((l) => {
-                      const fullUrl = origin ? `${origin}${l.publicPath}` : l.publicPath;
-                      return (
-                        <TableRow key={l.id} className={!l.isActive ? "opacity-70" : undefined}>
-                          <TableCell>
-                            <div className="text-sm font-medium">{l.requestingService.designacao}</div>
-                            <div className="text-xs text-muted-foreground">{l.requestingService.codigo}</div>
-                          </TableCell>
-                          <TableCell>
-                            <div className="text-xs text-muted-foreground break-all">{fullUrl}</div>
-                            <div className="text-xs text-muted-foreground">Slug: {l.slug}</div>
-                          </TableCell>
-                          <TableCell>
-                            <div className="text-sm">
-                              {l.pinCounts.active}/{l.pinCounts.total} ativos
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-xs text-muted-foreground">{formatDateTimePt(l.createdAt)}</TableCell>
-                          <TableCell>
-                            <div className="flex flex-wrap gap-2">
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={async () => {
-                                  try {
-                                    await navigator.clipboard.writeText(fullUrl);
-                                    toast({ title: "Copiado" });
-                                  } catch {
-                                    toast({ title: "Erro", description: "Não foi possível copiar.", variant: "destructive" });
-                                  }
-                                }}
-                              >
-                                Copiar URL
-                              </Button>
-                              <Button size="sm" onClick={() => openPins(l)}>
-                                PINs
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant={l.isActive ? "destructive" : "secondary"}
-                                onClick={() => setAccessLinkActive(l, !l.isActive)}
-                              >
-                                {l.isActive ? "Desativar" : "Ativar"}
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="destructive"
-                                disabled={(l.requestsCount ?? 0) > 0}
-                                title={
-                                  (l.requestsCount ?? 0) > 0
-                                    ? "Não pode remover porque já existem pedidos (histórico)."
-                                    : "Remove definitivamente (apenas quando não há pedidos)."
-                                }
-                                onClick={() => hardRemoveAccessLink(l)}
-                              >
-                                Remover
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-
-                    {!accessLinksLoading && accessLinksLoadedOnce && accessLinks.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={5} className="text-sm text-muted-foreground">
-                          Sem links.
-                        </TableCell>
-                      </TableRow>
-                    ) : null}
-                  </TableBody>
-                </Table>
-              </div>
-            </SectionCard>
-          </TabsContent>
-
           <TabsContent value="received" className="space-y-4">
             <SectionCard
               title="Recebidos"
@@ -1373,9 +1143,25 @@ export default function AdminPage() {
                     <option value="REJECTED">Rejeitados</option>
                   </select>
                 </div>
-                <Button variant="outline" onClick={loadPublicRequests} disabled={publicRequestsLoading}>
-                  {publicRequestsLoading ? "A carregar..." : "Recarregar"}
-                </Button>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => runBackfillOwners(false)}
+                    disabled={backfillRunning}
+                  >
+                    {backfillRunning ? "A executar..." : "Simular correção"}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => runBackfillOwners(true)}
+                    disabled={backfillRunning}
+                  >
+                    {backfillRunning ? "A aplicar..." : "Aplicar correção"}
+                  </Button>
+                  <Button variant="outline" onClick={loadPublicRequests} disabled={publicRequestsLoading}>
+                    {publicRequestsLoading ? "A carregar..." : "Recarregar"}
+                  </Button>
+                </div>
               </div>
 
               <div className="mt-4 overflow-x-auto">

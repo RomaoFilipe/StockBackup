@@ -196,12 +196,6 @@ export default function RequestDetailsPage() {
     return map;
   }, [request?.invoices, request?.latestInvoices]);
 
-  const canMutate = useMemo(() => {
-    if (!request) return false;
-    if (isAdmin) return true;
-    return request.userId === user?.id;
-  }, [isAdmin, request, user?.id]);
-
   useEffect(() => {
     if (isAuthLoading) return;
     if (isLoggedIn) return;
@@ -260,6 +254,7 @@ export default function RequestDetailsPage() {
   const [signTitle, setSignTitle] = useState("");
 
   const openSign = () => {
+    if (!isAdmin) return;
     setSignName((request?.signedByName || user?.name || "").trim());
     setSignTitle((request?.signedByTitle || "").trim());
     setSignOpen(true);
@@ -295,6 +290,7 @@ export default function RequestDetailsPage() {
   const pickupPadRef = useRef<SignaturePadHandle | null>(null);
 
   const openPickupSign = () => {
+    if (!isAdmin) return;
     setPickupName((request?.pickupSignedByName || "").trim());
     setPickupTitle((request?.pickupSignedByTitle || "").trim());
     setPickupOpen(true);
@@ -416,24 +412,28 @@ export default function RequestDetailsPage() {
               Imprimir
             </Button>
 
-            <Button
-              variant={request?.pickupSignedAt ? "outline" : "default"}
-              onClick={openPickupSign}
-              disabled={!request || Boolean(request.pickupSignedAt) || !canMutate}
-              title={!canMutate ? "Sem permissões" : request?.pickupSignedAt ? "Levantamento já assinado" : "Assinar levantamento"}
-            >
-              <PenLine className="h-4 w-4 mr-2" />
-              {request?.pickupSignedAt ? "Levantamento assinado" : "Assinar levantamento"}
-            </Button>
+            {isAdmin ? (
+              <>
+                <Button
+                  variant={request?.pickupSignedAt ? "outline" : "default"}
+                  onClick={openPickupSign}
+                  disabled={!request || Boolean(request.pickupSignedAt)}
+                  title={request?.pickupSignedAt ? "Levantamento já assinado" : "Assinar levantamento"}
+                >
+                  <PenLine className="h-4 w-4 mr-2" />
+                  {request?.pickupSignedAt ? "Levantamento assinado" : "Assinar levantamento"}
+                </Button>
 
-            <Button
-              onClick={openSign}
-              disabled={!request || Boolean(request.signedAt) || !canMutate}
-              title={!canMutate ? "Sem permissões" : request?.signedAt ? "Já assinada" : "Assinar"}
-            >
-              <PenLine className="h-4 w-4 mr-2" />
-              {request?.signedAt ? "Assinada" : "Assinar"}
-            </Button>
+                <Button
+                  onClick={openSign}
+                  disabled={!request || Boolean(request.signedAt)}
+                  title={request?.signedAt ? "Já assinada" : "Assinar"}
+                >
+                  <PenLine className="h-4 w-4 mr-2" />
+                  {request?.signedAt ? "Assinada" : "Assinar"}
+                </Button>
+              </>
+            ) : null}
 
             {isAdmin && request?.pickupSignedAt ? (
               <Button

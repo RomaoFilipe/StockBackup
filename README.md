@@ -64,6 +64,13 @@ TRUST_PROXY="false"
 # Evita lockout inicial do ADMIN quando a allowlist de IPs está vazia (usar temporariamente)
 ALLOWLIST_BOOTSTRAP_ADMIN="false"
 
+# Rate limit distribuído (recomendado em produção com múltiplas instâncias)
+# Use "db" para guardar contadores na base de dados.
+# RATE_LIMIT_STORE="db"
+
+# Logging estruturado (opcional)
+# LOG_LEVEL="info"
+
 # Base URL da API no browser (normalmente deixa "/api")
 NEXT_PUBLIC_API_BASE_URL="/api"
 
@@ -92,6 +99,9 @@ docker compose down -v
 
 ```bash
 npm run prisma:deploy
+
+# (Opcional) validar tipagem localmente
+npm run typecheck
 ```
 
 - Criar nova migration (dev):

@@ -2,6 +2,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { z } from "zod";
 import { prisma } from "@/prisma/client";
 import { getSessionServer } from "@/utils/auth";
+import { publishRealtimeEvent } from "@/utils/realtime";
 
 const updateUserSchema = z.object({
   name: z.string().min(1).max(100).optional(),
@@ -54,6 +55,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     try {
+      const existing = await prisma.user.findFirst({
+        where: { id, tenantId: session.tenantId },
+        select: { id: true, role: true, isActive: true },
+      });
+      if (!existing) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
       const updateResult = await prisma.user.updateMany({
         where: { id, tenantId: session.tenantId },
         data: {
@@ -85,6 +94,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         return res.status(404).json({ error: "User not found" });
       }
 
+      const roleChanged = existing.role !== user.role;
+      const deactivated = existing.isActive && !user.isActive;
+      if (roleChanged || deactivated) {
+        publishRealtimeEvent({
+          type: "auth.force_logout",
+          tenantId: session.tenantId,
+          audience: "USER",
+          userId: user.id,
+          payload: {
+            reason: roleChanged ? "role_changed" : "deactivated",
+            changedByUserId: session.id,
+          },
+        });
+      }
+
       return res.status(200).json({
         ...user,
         createdAt: user.createdAt.toISOString(),
@@ -110,6 +134,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (updated.count === 0) {
         return res.status(404).json({ error: "User not found" });
       }
+
+      publishRealtimeEvent({
+        type: "auth.force_logout",
+        tenantId: session.tenantId,
+        audience: "USER",
+        userId: id,
+        payload: {
+          reason: "deactivated",
+          changedByUserId: session.id,
+        },
+      });
       return res.status(204).end();
     } catch (error) {
       console.error("DELETE /api/users/[id] error:", error);

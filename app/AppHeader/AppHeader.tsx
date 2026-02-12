@@ -18,6 +18,7 @@ import {
   FiRepeat,
   FiUsers,
 } from "react-icons/fi";
+import { Plus } from "lucide-react";
 import { useAuth } from "../authContext";
 import { ModeToggle } from "./ModeToggle";
 import { RequestsNotificationsBell } from "./RequestsNotificationsBell";
@@ -61,6 +62,7 @@ export default function AppHeader() {
   const isActive = (path: string) => pathname === path || pathname?.startsWith(`${path}/`);
 
   const isAdmin = user?.role === "ADMIN";
+  const isUser = user?.role === "USER";
 
   return (
     <div className="rounded-t-lg border-b bg-card text-card-foreground">
@@ -101,22 +103,54 @@ export default function AppHeader() {
         {/* Navigation */}
         <div className="flex flex-col gap-2">
           <div className="flex flex-wrap items-center gap-2">
+            {!isUser ? (
+              <>
+                <Button
+                  variant={isActive("/") ? "secondary" : "ghost"}
+                  size="sm"
+                  onClick={() => handleNavigation("/")}
+                >
+                  <FiPackage className="mr-2 h-4 w-4" />
+                  Produtos
+                </Button>
+
+                <Button
+                  variant={isActive("/requests") ? "secondary" : "ghost"}
+                  size="sm"
+                  onClick={() => handleNavigation("/requests")}
+                >
+                  <FiFileText className="mr-2 h-4 w-4" />
+                  Requisições
+                </Button>
+
+                <Button
+                  variant={isActive("/equipamentos") ? "secondary" : "ghost"}
+                  size="sm"
+                  onClick={() => handleNavigation("/equipamentos")}
+                >
+                  <FiArchive className="mr-2 h-4 w-4" />
+                  Equipamentos
+                </Button>
+              </>
+            ) : null}
+
+            {/* Estado / Novo pedidos: visible to all roles (menu definitive) */}
             <Button
-              variant={isActive("/") ? "secondary" : "ghost"}
+              variant={isActive("/requests/estado") ? "secondary" : "ghost"}
               size="sm"
-              onClick={() => handleNavigation("/")}
+              onClick={() => handleNavigation("/requests/estado")}
             >
-              <FiPackage className="mr-2 h-4 w-4" />
-              Produtos
+              <FiFileText className="mr-2 h-4 w-4" />
+              Estado do Pedido
             </Button>
 
             <Button
-              variant={isActive("/requests") ? "secondary" : "ghost"}
+              variant={isActive("/requests/novo") ? "secondary" : "ghost"}
               size="sm"
-              onClick={() => handleNavigation("/requests")}
+              onClick={() => handleNavigation("/requests/novo")}
             >
-              <FiFileText className="mr-2 h-4 w-4" />
-              Requisições
+              <Plus className="mr-2 h-4 w-4" />
+              Novo Pedido
             </Button>
 
             <Button

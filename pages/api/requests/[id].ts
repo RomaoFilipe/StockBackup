@@ -5,6 +5,8 @@ import path from "path";
 import crypto from "crypto";
 import { prisma } from "@/prisma/client";
 import { getSessionServer } from "@/utils/auth";
+import { createRequestStatusAudit, notifyAdmin, notifyUser } from "@/utils/notifications";
+import { publishRealtimeEvent } from "@/utils/realtime";
 import { buildSignedRequestPdfBuffer } from "@/utils/requestPdf";
 import {
   buildRequestFolderName,
@@ -227,6 +229,17 @@ const updateSchema = z.object({
     .refine((v) => !Number.isNaN(new Date(v).getTime()), "Invalid date")
     .transform((v) => new Date(v))
     .optional(),
+  priority: z.enum(["LOW", "NORMAL", "HIGH", "URGENT"]).optional(),
+  dueAt: z
+    .union([
+      z
+        .string()
+        .min(1)
+        .refine((v) => !Number.isNaN(new Date(v).getTime()), "Invalid date")
+        .transform((v) => new Date(v)),
+      z.null(),
+    ])
+    .optional(),
 
   requestingServiceId: z.number().int().optional(),
   requesterName: z.string().max(120).nullable().optional(),
@@ -432,6 +445,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           ? request.expectedDeliveryFrom.toISOString()
           : null,
         expectedDeliveryTo: request.expectedDeliveryTo ? request.expectedDeliveryTo.toISOString() : null,
+        dueAt: (request as any).dueAt ? (request as any).dueAt.toISOString() : null,
         signedAt: request.signedAt ? request.signedAt.toISOString() : null,
         signedVoidedAt: request.signedVoidedAt ? request.signedVoidedAt.toISOString() : null,
         pickupSignedAt: request.pickupSignedAt ? request.pickupSignedAt.toISOString() : null,
@@ -469,6 +483,23 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     try {
       const { sign, pickupSign, voidSign, voidPickupSign, items, replaceItems, ...rest } = parsed.data;
       const updateData: any = { ...rest };
+      const existingBefore = await prisma.request.findFirst({
+        where: { id, tenantId },
+        select: { status: true, userId: true, gtmiNumber: true },
+      });
+      if (!existingBefore) {
+        return res.status(404).json({ error: "Request not found" });
+      }
+
+      const hasAdminOnlyMutation =
+        Boolean(sign) ||
+        Boolean(pickupSign) ||
+        Boolean(voidSign) ||
+        Boolean(voidPickupSign) ||
+        Object.prototype.hasOwnProperty.call(updateData, "status");
+      if (hasAdminOnlyMutation && !isAdmin) {
+        return res.status(403).json({ error: "Apenas ADMIN pode assinar ou alterar estado." });
+      }
 
       const hasNonSignatureUpdates = Object.keys(rest).length > 0 || Boolean(items?.length) || Boolean(replaceItems);
       if (hasNonSignatureUpdates) {
@@ -1049,6 +1080,85 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         pdfErrorApproval = typeof e?.message === "string" ? e.message : "Failed to generate approval PDF";
       }
 
+      try {
+        const fromStatus = existingBefore.status;
+        const toStatus = request.status;
+        const statusChanged = fromStatus !== toStatus;
+
+        if (statusChanged) {
+          await createRequestStatusAudit({
+            tenantId,
+            requestId: request.id,
+            fromStatus,
+            toStatus,
+            changedByUserId: session.id,
+            source: "api/requests/[id]:PATCH",
+            note:
+              typeof parsed.data.notes === "string" && parsed.data.notes.trim()
+                ? parsed.data.notes.trim()
+                : voidSign?.reason || voidPickupSign?.reason || null,
+          });
+
+          await notifyAdmin({
+            tenantId,
+            kind: "REQUEST_STATUS_CHANGED",
+            title: `Estado alterado: ${request.gtmiNumber}`,
+            message: `${fromStatus} -> ${toStatus}`,
+            requestId: request.id,
+            data: { fromStatus, toStatus, requestId: request.id, gtmiNumber: request.gtmiNumber },
+          });
+
+          if (request.userId) {
+            await notifyUser({
+              tenantId,
+              recipientUserId: request.userId,
+              kind: "REQUEST_STATUS_CHANGED",
+              title: `Atualização do pedido ${request.gtmiNumber}`,
+              message: `O estado mudou para ${toStatus}.`,
+              requestId: request.id,
+              data: { fromStatus, toStatus, requestId: request.id, gtmiNumber: request.gtmiNumber },
+            });
+          }
+
+          publishRealtimeEvent({
+            type: "request.status_changed",
+            tenantId,
+            audience: "ALL",
+            userId: request.userId,
+            payload: {
+              requestId: request.id,
+              gtmiNumber: request.gtmiNumber,
+              fromStatus,
+              toStatus,
+              at: new Date().toISOString(),
+            },
+          });
+        } else if (Object.keys(updateData).length > 0 || Boolean(items?.length) || Boolean(replaceItems)) {
+          await notifyAdmin({
+            tenantId,
+            kind: "REQUEST_UPDATED",
+            title: `Pedido atualizado: ${request.gtmiNumber}`,
+            message: "Foi aplicada uma atualização na requisição.",
+            requestId: request.id,
+            data: { requestId: request.id, gtmiNumber: request.gtmiNumber },
+          });
+          publishRealtimeEvent({
+            type: "request.updated",
+            tenantId,
+            audience: "ALL",
+            userId: request.userId,
+            payload: {
+              requestId: request.id,
+              gtmiNumber: request.gtmiNumber,
+              status: request.status,
+              at: new Date().toISOString(),
+            },
+          });
+        }
+      } catch (notifyError) {
+        console.error("PATCH /api/requests/[id] notify/audit error:", notifyError);
+      }
+
       return res.status(200).json({
         ...request,
         pdfGeneratedPickup,
@@ -1062,6 +1172,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           ? request.expectedDeliveryFrom.toISOString()
           : null,
         expectedDeliveryTo: request.expectedDeliveryTo ? request.expectedDeliveryTo.toISOString() : null,
+        dueAt: (request as any).dueAt ? (request as any).dueAt.toISOString() : null,
         signedAt: request.signedAt ? request.signedAt.toISOString() : null,
         signedVoidedAt: request.signedVoidedAt ? request.signedVoidedAt.toISOString() : null,
         pickupSignedAt: request.pickupSignedAt ? request.pickupSignedAt.toISOString() : null,

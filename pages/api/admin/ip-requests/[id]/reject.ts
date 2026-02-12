@@ -2,6 +2,8 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { z } from "zod";
 import { prisma } from "@/prisma/client";
 import { requireAdmin } from "../../_admin";
+import { applyRateLimit } from "@/utils/rateLimit";
+import { logUserAdminAction } from "@/utils/adminAudit";
 
 const bodySchema = z.object({
   note: z.string().max(300).optional(),
@@ -10,6 +12,15 @@ const bodySchema = z.object({
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const session = await requireAdmin(req, res);
   if (!session) return;
+
+  const rl = await applyRateLimit(req, res, {
+    windowMs: 60_000,
+    max: 120,
+    keyPrefix: "admin-ip-reject",
+  });
+  if (!rl.ok) {
+    return res.status(429).json({ error: "Too many requests. Please try again later." });
+  }
 
   const id = req.query.id;
   if (typeof id !== "string") {
@@ -48,6 +59,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         reviewedByUserId: session.id,
         note: parsed.data.note?.trim() || null,
       },
+    });
+
+    await logUserAdminAction({
+      tenantId: session.tenantId,
+      actorUserId: session.id,
+      action: "IP_REQUEST_REJECT",
+      note: `Rejected IP request ${id}`,
+      payload: { ipRequestId: id, note: parsed.data.note?.trim() || null },
     });
 
     return res.status(204).end();

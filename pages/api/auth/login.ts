@@ -1,10 +1,14 @@
 import { NextApiRequest, NextApiResponse } from "next";
 import { prisma } from "@/prisma/client";
 import bcrypt from "bcryptjs";
+import crypto from "crypto";
 import { generateToken } from "../../../utils/auth";
 import Cookies from "cookies";
 import { applyRateLimit } from "@/utils/rateLimit";
 import { getClientIp, ipMatches } from "@/utils/ip";
+import { notifyAdmin } from "@/utils/notifications";
+import { checkLoginLockout, clearLoginFailures, registerLoginFailure } from "@/utils/loginLockout";
+import { logError, logInfo, logWarn } from "@/utils/logger";
 
 function resolveTenantSlug(req: NextApiRequest): string {
   const header = req.headers["x-tenant-slug"];
@@ -73,7 +77,7 @@ export default async function login(req: NextApiRequest, res: NextApiResponse) {
 
   // Basic brute-force protection (in-memory per instance).
   // Note: In serverless this may not be shared across instances.
-  const rl = applyRateLimit(req, res, {
+  const rl = await applyRateLimit(req, res, {
     windowMs: 15 * 60 * 1000,
     max: 20,
     keyPrefix: "login",
@@ -108,7 +112,19 @@ export default async function login(req: NextApiRequest, res: NextApiResponse) {
     const tenant = await prisma.tenant.findUnique({ where: { slug: tenantSlug } });
     if (!tenant) {
       // Avoid tenant/account enumeration.
+      logWarn("Login denied: tenant not found", { tenantSlug }, req);
       return res.status(401).json({ error: "Invalid email or password" });
+    }
+
+    const clientIp = getClientIp(req) || "unknown";
+    const lockoutSeconds = await checkLoginLockout(tenant.id, email, clientIp);
+    if (lockoutSeconds) {
+      res.setHeader("Retry-After", String(lockoutSeconds));
+      logWarn("Login temporarily blocked", { tenantId: tenant.id, email, clientIp, lockoutSeconds }, req);
+      return res.status(429).json({
+        error: "Too many failed login attempts. Try again later.",
+        retryAfterSeconds: lockoutSeconds,
+      });
     }
 
     const user = await prisma.user.findUnique({
@@ -121,25 +137,27 @@ export default async function login(req: NextApiRequest, res: NextApiResponse) {
     });
 
     if (!user || !user.isActive) {
+      const retryAfter = await registerLoginFailure(tenant.id, email, clientIp);
+      if (retryAfter) res.setHeader("Retry-After", String(retryAfter));
+      logWarn("Login denied: invalid user or inactive", { tenantId: tenant.id, email, clientIp }, req);
       return res.status(401).json({ error: "Invalid email or password" });
     }
 
     const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
     if (!isPasswordValid) {
+      const retryAfter = await registerLoginFailure(tenant.id, email, clientIp);
+      if (retryAfter) res.setHeader("Retry-After", String(retryAfter));
+      logWarn("Login denied: invalid password", { tenantId: tenant.id, userId: user.id, clientIp }, req);
       return res.status(401).json({ error: "Invalid email or password" });
     }
 
-    const clientIp = getClientIp(req);
-    if (!clientIp) {
-      return res.status(403).json({
-        code: "IP_NOT_ALLOWED",
-        message: "IP não autorizado. Pedido enviado para aprovação.",
-      });
-    }
-
     const allowed = await prisma.allowedIp.findMany({
-      where: { tenantId: tenant.id, isActive: true },
-      select: { id: true, ipOrCidr: true },
+      where: {
+        tenantId: tenant.id,
+        isActive: true,
+        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+      },
+      select: { id: true, ipOrCidr: true, expiresAt: true },
       orderBy: { createdAt: "desc" },
     });
 
@@ -166,52 +184,86 @@ export default async function login(req: NextApiRequest, res: NextApiResponse) {
       }
     }
 
-    const ipAllowed =
-      (allowBootstrap && allowed.length === 0 && user.role === "ADMIN") ||
-      allowed.some((a) => ipMatches(a.ipOrCidr, clientIp));
-    if (!ipAllowed) {
-      const userAgent = typeof req.headers["user-agent"] === "string" ? req.headers["user-agent"] : null;
-      const since = new Date(Date.now() - 15 * 60 * 1000);
+    // Skip IP allowlist check for normal USER role (they can login from any IP).
+    if (user.role !== "USER") {
+      const ipAllowed =
+        (allowBootstrap && allowed.length === 0 && user.role === "ADMIN") ||
+        allowed.some((a) => ipMatches(a.ipOrCidr, clientIp));
+      if (!ipAllowed) {
+        const userAgent = typeof req.headers["user-agent"] === "string" ? req.headers["user-agent"] : null;
+        const since = new Date(Date.now() - 15 * 60 * 1000);
 
-      const recent = await prisma.ipAccessRequest.findFirst({
-        where: {
-          tenantId: tenant.id,
-          email,
-          ip: clientIp,
-          status: "PENDING",
-          createdAt: { gte: since },
-        },
-        select: { id: true },
-      });
-
-      if (!recent) {
-        await prisma.ipAccessRequest.create({
-          data: {
+        const recent = await prisma.ipAccessRequest.findFirst({
+          where: {
             tenantId: tenant.id,
-            userId: user.id,
             email,
             ip: clientIp,
-            userAgent,
             status: "PENDING",
+            createdAt: { gte: since },
           },
+          select: { id: true },
+        });
+
+        if (!recent) {
+          await prisma.ipAccessRequest.create({
+            data: {
+              tenantId: tenant.id,
+              userId: user.id,
+              email,
+              ip: clientIp,
+              userAgent,
+              status: "PENDING",
+            },
+          });
+
+          try {
+            const sinceAlert = new Date(Date.now() - 15 * 60 * 1000);
+            const pendingCount = await prisma.ipAccessRequest.count({
+              where: {
+                tenantId: tenant.id,
+                status: "PENDING",
+                createdAt: { gte: sinceAlert },
+              },
+            });
+            if (pendingCount >= 5) {
+              await notifyAdmin({
+                tenantId: tenant.id,
+                kind: "SECURITY_ALERT",
+                title: "Alerta de segurança: múltiplos pedidos de IP",
+                message: `${pendingCount} pedidos pendentes de IP nos últimos 15 minutos.`,
+                data: {
+                  type: "ip_requests_spike",
+                  pendingCount,
+                  windowMinutes: 15,
+                  latestIp: clientIp,
+                  latestEmail: email,
+                },
+              });
+            }
+          } catch (alertError) {
+            console.warn("Security alert notification failed:", alertError);
+          }
+        }
+
+        logWarn("Login denied: IP not allowed", { tenantId: tenant.id, userId: user.id, clientIp }, req);
+        return res.status(403).json({
+          code: "IP_NOT_ALLOWED",
+          message: "IP não autorizado. Pedido enviado para aprovação.",
         });
       }
-
-      return res.status(403).json({
-        code: "IP_NOT_ALLOWED",
-        message: "IP não autorizado. Pedido enviado para aprovação.",
-      });
     }
 
     if (!user.id) {
-      console.error("User found but id is missing in DB for email:", email);
+      logError("Login error: user missing id", { email }, req);
       return res.status(500).json({ error: "User data corrupted: id missing" });
     }
 
-    const token = generateToken(user.id);
+    await clearLoginFailures(tenant.id, email, clientIp);
+
+    const token = generateToken(user.id, user.role, user.updatedAt.getTime());
 
     if (!token) {
-      console.error("Failed to generate JWT token for user id:", user.id);
+      logError("Login error: failed generating token", { userId: user.id }, req);
       return res
         .status(500)
         .json({ error: "Failed to generate session token" });
@@ -230,14 +282,34 @@ export default async function login(req: NextApiRequest, res: NextApiResponse) {
       path: "/",
       maxAge: 60 * 60 * 1000, // 1 hour
     });
+    // Also expose a non-httpOnly cookie with the user's role so middleware can enforce route-level access
+    try {
+      cookies.set("user_role", user.role ?? "", {
+        httpOnly: false,
+        secure: isSecure,
+        sameSite: isSecure ? "none" : "lax",
+        path: "/",
+        maxAge: 60 * 60 * 1000,
+      });
+      cookies.set("csrf_token", crypto.randomBytes(32).toString("base64url"), {
+        httpOnly: false,
+        secure: isSecure,
+        sameSite: isSecure ? "none" : "lax",
+        path: "/",
+        maxAge: 60 * 60 * 1000,
+      });
+    } catch (e) {
+      // ignore cookie set failures
+    }
 
     res.status(200).json({
       userId: user.id,
       userName: user.name,
       userEmail: user.email,
     });
+    logInfo("Login success", { tenantId: tenant.id, userId: user.id, clientIp }, req);
   } catch (error) {
-    console.error("Login error:", error);
+    logError("Login error", { error: error instanceof Error ? error.message : String(error) }, req);
     res.status(500).json({ error: "Internal server error" });
   }
 }

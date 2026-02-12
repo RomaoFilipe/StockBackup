@@ -1,7 +1,7 @@
 "use client";
 
 import AuthenticatedLayout from "@/app/components/AuthenticatedLayout";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/app/authContext";
 import { useProductStore } from "@/app/useProductStore";
@@ -31,8 +31,9 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import AttachmentsDialog from "@/app/components/AttachmentsDialog";
-import { Paperclip, PenLine, Plus, Printer, QrCode, RefreshCcw, Trash2 } from "lucide-react";
+import { CheckCircle2, Clock3, PackageCheck, Paperclip, PenLine, Plus, Printer, QrCode, RefreshCcw, XCircle, Trash2 } from "lucide-react";
 import type { Product } from "@/app/types";
+import Papa from "papaparse";
 type AvailableUnitDto = { id: string; code: string };
 
 type RequestItemDto = {
@@ -66,6 +67,8 @@ type RequestDto = {
   gtmiYear: number;
   gtmiSeq: number;
   gtmiNumber: string;
+  priority?: "LOW" | "NORMAL" | "HIGH" | "URGENT";
+  dueAt?: string | null;
   requestedAt: string;
   requestingService?: string | null;
   requestingServiceId?: number | null;
@@ -118,10 +121,70 @@ const formatStatus = (status: RequestDto["status"]) => {
   }
 };
 
+const workflowMeta = (status: RequestDto["status"]) => {
+  switch (status) {
+    case "DRAFT":
+      return {
+        label: "Por submeter",
+        icon: PenLine,
+        className: "bg-muted/50 text-muted-foreground border-border/60",
+        iconClassName: "",
+      };
+    case "SUBMITTED":
+      return {
+        label: "Em aprovação",
+        icon: Clock3,
+        className: "bg-amber-500/10 text-amber-700 border-amber-500/20",
+        iconClassName: "motion-safe:animate-pulse",
+      };
+    case "APPROVED":
+      return {
+        label: "Pronto para levantar",
+        icon: PackageCheck,
+        className: "bg-emerald-500/10 text-emerald-700 border-emerald-500/20",
+        iconClassName: "motion-safe:animate-pulse",
+      };
+    case "FULFILLED":
+      return {
+        label: "Levantado / concluído",
+        icon: CheckCircle2,
+        className: "bg-emerald-600/10 text-emerald-800 border-emerald-600/20",
+        iconClassName: "",
+      };
+    case "REJECTED":
+      return {
+        label: "Rejeitado",
+        icon: XCircle,
+        className: "bg-rose-500/10 text-rose-700 border-rose-500/20",
+        iconClassName: "",
+      };
+    default:
+      return {
+        label: status,
+        icon: Clock3,
+        className: "bg-muted/50 text-muted-foreground border-border/60",
+        iconClassName: "",
+      };
+  }
+};
+
 const goodsTypeLabels: Record<GoodsType, string> = {
   MATERIALS_SERVICES: "Material de consumo / Serviços",
   WAREHOUSE_MATERIALS: "Material de armazém",
   OTHER_PRODUCTS: "Outros produtos",
+};
+
+const priorityMeta = (p?: "LOW" | "NORMAL" | "HIGH" | "URGENT") => {
+  switch (p) {
+    case "LOW":
+      return { label: "Baixa", className: "bg-slate-500/10 text-slate-700 border-slate-500/20" };
+    case "HIGH":
+      return { label: "Alta", className: "bg-orange-500/10 text-orange-700 border-orange-500/20" };
+    case "URGENT":
+      return { label: "Urgente", className: "bg-rose-500/10 text-rose-700 border-rose-500/20" };
+    default:
+      return { label: "Normal", className: "bg-blue-500/10 text-blue-700 border-blue-500/20" };
+  }
 };
 
 function toDatetimeLocalValue(d: Date) {
@@ -176,6 +239,8 @@ export default function RequestsPage() {
   const [requests, setRequests] = useState<RequestDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"ALL" | RequestDto["status"]>("ALL");
 
   const [qrOpen, setQrOpen] = useState(false);
   const [qrRequest, setQrRequest] = useState<RequestDto | null>(null);
@@ -183,7 +248,18 @@ export default function RequestsPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [editRequestId, setEditRequestId] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (!searchParams) return;
+    const open = searchParams.get("openCreate");
+    if (open === "1" || open === "true") {
+      setCreateOpen(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
   const [requestedAt, setRequestedAt] = useState(() => toDatetimeLocalValue(new Date()));
+  const [priority, setPriority] = useState<"LOW" | "NORMAL" | "HIGH" | "URGENT">("NORMAL");
+  const [dueAt, setDueAt] = useState<string>("");
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
 
@@ -214,10 +290,12 @@ export default function RequestsPage() {
 
   const resetForm = () => {
     setRequestedAt(toDatetimeLocalValue(new Date()));
+    setPriority("NORMAL");
+    setDueAt("");
     setTitle("");
     setNotes("");
-    setRequestingServiceId("");
-    setRequesterName("");
+    setRequestingServiceId(user?.requestingServiceId ? String(user.requestingServiceId) : "");
+    setRequesterName(user?.name ?? "");
     setRequesterEmployeeNo("");
     setDeliveryLocation("");
     setExpectedDeliveryFrom("");
@@ -245,6 +323,8 @@ export default function RequestsPage() {
     setEditRequestId(r.id);
 
     setRequestedAt(toDatetimeLocalValue(new Date(r.requestedAt)));
+    setPriority(r.priority || "NORMAL");
+    setDueAt(r.dueAt ? String(r.dueAt).slice(0, 10) : "");
     setTitle(r.title ?? "");
     setNotes(r.notes ?? "");
     setRequestingServiceId(r.requestingServiceId ? String(r.requestingServiceId) : "");
@@ -449,7 +529,7 @@ export default function RequestsPage() {
     return hasAtLeastOneItem && allValid && hasRequestingService;
   }, [items, requestingServiceId]);
 
-  const loadAll = async () => {
+  const loadAll = useCallback(async () => {
     if (!isLoggedIn) return;
 
     setLoading(true);
@@ -465,6 +545,20 @@ export default function RequestsPage() {
       });
     } finally {
       setLoading(false);
+    }
+  }, [isLoggedIn, loadProducts, toast]);
+
+  const changeRequestStatus = async (
+    requestId: string,
+    nextStatus: RequestDto["status"]
+  ) => {
+    try {
+      const res = await axiosInstance.patch(`/requests/${requestId}`, { status: nextStatus });
+      setRequests((prev) => prev.map((r) => (r.id === requestId ? res.data : r)));
+      toast({ title: "Estado atualizado" });
+    } catch (error: any) {
+      const msg = error?.response?.data?.error || "Não foi possível atualizar o estado.";
+      toast({ title: "Erro", description: msg, variant: "destructive" });
     }
   };
 
@@ -504,16 +598,35 @@ export default function RequestsPage() {
       }
     })();
 
-    loadAll();
+    void loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAuthLoading, isLoggedIn, isAdmin]);
+  }, [isAuthLoading, isLoggedIn, isAdmin, loadAll]);
 
   useEffect(() => {
     if (isAdmin && asUserId) {
-      loadAll();
+      void loadAll();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [asUserId]);
+  }, [asUserId, isAdmin, loadAll]);
+
+  useEffect(() => {
+    if (isAuthLoading || !isLoggedIn) return;
+    const es = new EventSource("/api/realtime/stream");
+    const reload = () => {
+      void loadAll();
+    };
+    es.addEventListener("request.created", reload);
+    es.addEventListener("request.updated", reload);
+    es.addEventListener("request.status_changed", reload);
+    es.addEventListener("public-request.accepted", reload);
+    return () => {
+      es.removeEventListener("request.created", reload);
+      es.removeEventListener("request.updated", reload);
+      es.removeEventListener("request.status_changed", reload);
+      es.removeEventListener("public-request.accepted", reload);
+      es.close();
+    };
+  }, [isAuthLoading, isLoggedIn, loadAll]);
 
   const createRequest = async () => {
     if (!canCreate) return;
@@ -570,6 +683,8 @@ export default function RequestsPage() {
       const payload = {
         asUserId: effectiveAsUserId,
         requestedAt: requestedAtIso,
+        priority,
+        dueAt: dueAt ? new Date(dueAt).toISOString() : undefined,
         title: title.trim() ? title.trim() : undefined,
         notes: notes.trim() ? notes.trim() : undefined,
         requestingServiceId: requestingServiceId ? Number(requestingServiceId) : undefined,
@@ -595,6 +710,8 @@ export default function RequestsPage() {
       setRequests((prev) => [res.data, ...prev]);
 
       setRequestedAt(toDatetimeLocalValue(new Date()));
+      setPriority("NORMAL");
+      setDueAt("");
       setTitle("");
       setNotes("");
       setRequestingServiceId("");
@@ -694,6 +811,8 @@ export default function RequestsPage() {
       const payload = {
         requestedAt: requestedAtDate.toISOString(),
         requestingServiceId: serviceId,
+        priority,
+        dueAt: dueAt ? new Date(dueAt).toISOString() : null,
         title: title.trim() ? title.trim() : null,
         notes: notes.trim() ? notes.trim() : null,
         requesterName: requesterName.trim() ? requesterName.trim() : null,
@@ -751,6 +870,47 @@ export default function RequestsPage() {
     setQrOpen(true);
   };
 
+  const visibleRequests = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return requests.filter((r) => {
+      if (statusFilter !== "ALL" && r.status !== statusFilter) return false;
+      if (!q) return true;
+      const haystack = [
+        r.gtmiNumber,
+        r.title || "",
+        r.requesterName || "",
+        r.requestingService || "",
+        r.user?.name || "",
+      ]
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(q);
+    });
+  }, [requests, search, statusFilter]);
+
+  const exportCsv = () => {
+    const rows = requests.map((r) => ({
+      gtmi: r.gtmiNumber,
+      estado: r.status,
+      pedido: r.title || "",
+      servico: r.requestingService || "",
+      requerente: r.requesterName || "",
+      prioridade: (r as any).priority || "NORMAL",
+      prazo: (r as any).dueAt || "",
+      dataPedido: r.requestedAt,
+    }));
+    const csv = Papa.unparse(rows);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", `requests-${new Date().toISOString().slice(0, 10)}.csv`);
+    link.style.visibility = "hidden";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
 
   return (
     <AuthenticatedLayout>
@@ -767,6 +927,10 @@ export default function RequestsPage() {
               <Plus className="h-4 w-4 sm:mr-2" />
               <span className="hidden sm:inline">Nova requisição</span>
             </Button>
+            <Button variant="outline" onClick={exportCsv} disabled={loading || requests.length === 0}>
+              <span className="hidden sm:inline">Exportar CSV</span>
+              <span className="sm:hidden">CSV</span>
+            </Button>
             <Button variant="outline" onClick={() => loadAll()} disabled={loading}>
               <RefreshCcw className="h-4 w-4 sm:mr-2" />
               <span className="hidden sm:inline">{loading ? "A carregar..." : "Atualizar"}</span>
@@ -781,17 +945,38 @@ export default function RequestsPage() {
               <CardDescription>
                 Lista do tenant (visível para todos os utilizadores).
               </CardDescription>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <Input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Pesquisar por GTMI, pedido, serviço ou requerente"
+                  className="max-w-md"
+                />
+                <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as any)}>
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue placeholder="Estado" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ALL">Todos os estados</SelectItem>
+                    <SelectItem value="SUBMITTED">Submetida</SelectItem>
+                    <SelectItem value="APPROVED">Aprovada</SelectItem>
+                    <SelectItem value="REJECTED">Rejeitada</SelectItem>
+                    <SelectItem value="FULFILLED">Cumprida</SelectItem>
+                    <SelectItem value="DRAFT">Rascunho</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </CardHeader>
             <CardContent>
               {loading ? (
                 <p className="text-sm text-muted-foreground">A carregar...</p>
-              ) : requests.length === 0 ? (
+              ) : visibleRequests.length === 0 ? (
                 <p className="text-sm text-muted-foreground">Sem requisições ainda.</p>
               ) : (
                 <>
                   {/* Mobile cards */}
-                  <div className="space-y-3 md:hidden">
-                    {requests.map((r) => (
+	                  <div className="space-y-3 md:hidden">
+	                    {visibleRequests.map((r) => (
                       <div
                         key={r.id}
                         className={
@@ -814,12 +999,45 @@ export default function RequestsPage() {
                             </div>
                           </div>
 
-                          <Badge variant="outline" className={formatStatus(r.status).className}>
-                            {formatStatus(r.status).label}
-                          </Badge>
-                        </div>
+	                          <Badge variant="outline" className={formatStatus(r.status).className}>
+	                            {formatStatus(r.status).label}
+	                          </Badge>
+	                        </div>
 
-                        <div className="mt-3 grid grid-cols-2 gap-2">
+                          <div className="mt-2">
+                            {(() => {
+                              const wf = workflowMeta(r.status);
+                              const WfIcon = wf.icon;
+                              return (
+                                <Badge variant="outline" className={wf.className}>
+                                  <WfIcon className={`mr-1 h-3.5 w-3.5 ${wf.iconClassName}`} />
+                                  {wf.label}
+                                </Badge>
+                              );
+                            })()}
+                          </div>
+
+                          {isAdmin ? (
+                            <div className="mt-2">
+                              <Select
+                                value={r.status}
+                                onValueChange={(v) => changeRequestStatus(r.id, v as RequestDto["status"])}
+                              >
+                                <SelectTrigger className="h-8">
+                                  <SelectValue placeholder="Alterar estado" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="DRAFT">Rascunho</SelectItem>
+                                  <SelectItem value="SUBMITTED">Submetida</SelectItem>
+                                  <SelectItem value="APPROVED">Aprovada</SelectItem>
+                                  <SelectItem value="REJECTED">Rejeitada</SelectItem>
+                                  <SelectItem value="FULFILLED">Cumprida</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          ) : null}
+
+	                        <div className="mt-3 grid grid-cols-2 gap-2">
                           <div>
                             <div className="text-xs text-muted-foreground">Pedido</div>
                             <div className="text-sm">{new Date(r.requestedAt).toLocaleString()}</div>
@@ -827,6 +1045,14 @@ export default function RequestsPage() {
                           <div>
                             <div className="text-xs text-muted-foreground">Itens</div>
                             <div className="text-sm">{r.items?.length || 0}</div>
+                          </div>
+                          <div>
+                            <div className="text-xs text-muted-foreground">Prioridade</div>
+                            <div className="text-sm">{priorityMeta(r.priority).label}</div>
+                          </div>
+                          <div>
+                            <div className="text-xs text-muted-foreground">Prazo</div>
+                            <div className="text-sm">{r.dueAt ? new Date(r.dueAt).toLocaleDateString("pt-PT") : "—"}</div>
                           </div>
                           <div className="col-span-2">
                             <div className="text-xs text-muted-foreground">Previsto</div>
@@ -903,12 +1129,15 @@ export default function RequestsPage() {
                   {/* Desktop table */}
                   <div className="hidden md:block w-full overflow-x-auto">
                     <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead className="whitespace-nowrap">Nº</TableHead>
-                          <TableHead>Status</TableHead>
-                          {isAdmin ? <TableHead className="hidden lg:table-cell">Pessoa</TableHead> : null}
-                          <TableHead className="max-w-[220px]">Serviço</TableHead>
+	                      <TableHeader>
+	                        <TableRow>
+	                          <TableHead className="whitespace-nowrap">Nº</TableHead>
+	                          <TableHead>Status</TableHead>
+                              <TableHead>Situação</TableHead>
+                              <TableHead>Prioridade</TableHead>
+                              <TableHead>Prazo</TableHead>
+	                          {isAdmin ? <TableHead className="hidden lg:table-cell">Pessoa</TableHead> : null}
+	                          <TableHead className="max-w-[220px]">Serviço</TableHead>
                           <TableHead className="hidden md:table-cell">Pedido</TableHead>
                           <TableHead className="hidden lg:table-cell">Previsto</TableHead>
                           <TableHead className="whitespace-nowrap">Itens</TableHead>
@@ -917,7 +1146,7 @@ export default function RequestsPage() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {requests.map((r) => (
+                        {visibleRequests.map((r) => (
                           <TableRow
                             key={r.id}
                             className={focusId && focusId === r.id ? "bg-muted/30" : ""}
@@ -931,12 +1160,50 @@ export default function RequestsPage() {
                                 {r.gtmiNumber}
                               </Button>
                             </TableCell>
+	                            <TableCell className="py-2 px-3">
+	                              <Badge variant="outline" className={formatStatus(r.status).className}>
+	                                {formatStatus(r.status).label}
+	                              </Badge>
+	                            </TableCell>
+                                <TableCell className="py-2 px-3">
+                                  {isAdmin ? (
+                                    <Select
+                                      value={r.status}
+                                      onValueChange={(v) => changeRequestStatus(r.id, v as RequestDto["status"])}
+                                    >
+                                      <SelectTrigger className="h-8 w-[210px]">
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="DRAFT">Rascunho</SelectItem>
+                                        <SelectItem value="SUBMITTED">Submetida</SelectItem>
+                                        <SelectItem value="APPROVED">Aprovada</SelectItem>
+                                        <SelectItem value="REJECTED">Rejeitada</SelectItem>
+                                        <SelectItem value="FULFILLED">Cumprida</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                  ) : (
+                                    (() => {
+                                      const wf = workflowMeta(r.status);
+                                      const WfIcon = wf.icon;
+                                      return (
+                                        <Badge variant="outline" className={wf.className}>
+                                          <WfIcon className={`mr-1 h-3.5 w-3.5 ${wf.iconClassName}`} />
+                                          {wf.label}
+                                        </Badge>
+                                      );
+                                    })()
+                                  )}
+                                </TableCell>
                             <TableCell className="py-2 px-3">
-                              <Badge variant="outline" className={formatStatus(r.status).className}>
-                                {formatStatus(r.status).label}
+                              <Badge variant="outline" className={priorityMeta(r.priority).className}>
+                                {priorityMeta(r.priority).label}
                               </Badge>
                             </TableCell>
-                            {isAdmin ? (
+                            <TableCell className="py-2 px-3 whitespace-nowrap">
+                              {r.dueAt ? new Date(r.dueAt).toLocaleDateString("pt-PT") : "—"}
+                            </TableCell>
+	                            {isAdmin ? (
                               <TableCell className="hidden lg:table-cell py-2 px-3">
                                 {r.user ? (
                                   <span className="text-sm">{r.user.name}</span>
@@ -1103,6 +1370,27 @@ export default function RequestsPage() {
                   {requestingServices.length === 0 ? (
                     <div className="text-xs text-muted-foreground">Lista de serviços indisponível.</div>
                   ) : null}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <div className="text-sm font-medium">Prioridade</div>
+                  <Select value={priority} onValueChange={(v) => setPriority(v as any)}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Prioridade" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="LOW">Baixa</SelectItem>
+                      <SelectItem value="NORMAL">Normal</SelectItem>
+                      <SelectItem value="HIGH">Alta</SelectItem>
+                      <SelectItem value="URGENT">Urgente</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <div className="text-sm font-medium">Prazo (SLA)</div>
+                  <Input type="date" value={dueAt} onChange={(e) => setDueAt(e.target.value)} />
                 </div>
               </div>
 

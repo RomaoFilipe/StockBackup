@@ -29,16 +29,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   try {
     const requests = await prisma.request.findMany({
-      where: { tenantId: session.tenantId },
-      orderBy: { createdAt: "desc" },
+      where: {
+        tenantId: session.tenantId,
+        ...(session.role === "USER" ? { userId: session.id } : {}),
+      },
+      orderBy: { updatedAt: "desc" },
       take: limit,
       select: {
         id: true,
         gtmiNumber: true,
+        status: true,
         title: true,
         requesterName: true,
         deliveryLocation: true,
         createdAt: true,
+        updatedAt: true,
         requestedAt: true,
         requestingServiceRef: {
           select: { id: true, codigo: true, designacao: true },
@@ -51,6 +56,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       requests.map((r) => ({
         ...r,
         createdAt: r.createdAt.toISOString(),
+        updatedAt: r.updatedAt.toISOString(),
         requestedAt: r.requestedAt.toISOString(),
       }))
     );

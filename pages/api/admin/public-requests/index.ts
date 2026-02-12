@@ -32,7 +32,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     take,
     include: {
       requestingService: { select: { id: true, codigo: true, designacao: true } },
-      access: { select: { slug: true } },
       handledBy: { select: { id: true, name: true, email: true } },
       items: {
         orderBy: { createdAt: "asc" },
@@ -57,7 +56,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       handledNote: r.handledNote,
       handledBy: r.handledBy,
       requestingService: r.requestingService,
-      access: r.access,
       acceptedRequest: r.acceptedRequest,
       items: r.items.map((it) => ({
         id: it.id,

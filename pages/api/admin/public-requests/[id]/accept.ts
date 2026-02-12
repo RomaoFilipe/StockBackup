@@ -2,6 +2,8 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { z } from "zod";
 import { prisma } from "@/prisma/client";
 import { requireAdmin } from "../../_admin";
+import { createRequestStatusAudit, notifyAdmin, notifyUser } from "@/utils/notifications";
+import { publishRealtimeEvent } from "@/utils/realtime";
 
 const bodySchema = z.object({
   note: z.string().max(500).optional(),
@@ -55,6 +57,51 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const requestedAt = publicReq.createdAt;
   const tenantId = session.tenantId;
   const adminUserId = session.id;
+  let requestOwnerUserId: string = publicReq.requesterUserId ?? adminUserId;
+
+  // Backward compatibility for older public requests created before requesterUserId existed.
+  if (!publicReq.requesterUserId) {
+    const byName = await prisma.user.findMany({
+      where: {
+        tenantId,
+        role: "USER",
+        name: publicReq.requesterName,
+      },
+      select: { id: true },
+      take: 2,
+    });
+
+    if (byName.length === 1) {
+      requestOwnerUserId = byName[0].id;
+    } else if (publicReq.requesterName?.includes("@")) {
+      const byEmail = await prisma.user.findMany({
+        where: {
+          tenantId,
+          role: "USER",
+          email: publicReq.requesterName,
+        },
+        select: { id: true },
+        take: 2,
+      });
+      if (byEmail.length === 1) {
+        requestOwnerUserId = byEmail[0].id;
+      }
+    } else {
+      const byService = await prisma.user.findMany({
+        where: {
+          tenantId,
+          role: "USER",
+          requestingServiceId: publicReq.requestingServiceId,
+          isActive: true,
+        },
+        select: { id: true },
+        take: 2,
+      });
+      if (byService.length === 1) {
+        requestOwnerUserId = byService[0].id;
+      }
+    }
+  }
 
   const gtmiYear = requestedAt.getFullYear();
 
@@ -71,7 +118,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const created = await tx.request.create({
         data: {
           tenantId,
-          userId: adminUserId,
+          userId: requestOwnerUserId,
           createdByUserId: adminUserId,
           status: "SUBMITTED",
           title: publicReq.title,
@@ -155,7 +202,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
               status: "ACQUIRED",
               acquiredAt: new Date(),
               acquiredByUserId: adminUserId,
-              assignedToUserId: adminUserId,
+              assignedToUserId: requestOwnerUserId,
               acquiredReason: stockReason,
             },
           });
@@ -178,7 +225,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
               invoiceId: unit.invoiceId ?? null,
               requestId: created.id,
               performedByUserId: adminUserId,
-              assignedToUserId: adminUserId,
+              assignedToUserId: requestOwnerUserId,
               reason: stockReason,
             },
             select: { id: true },
@@ -216,7 +263,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
               productId,
               requestId: created.id,
               performedByUserId: adminUserId,
-              assignedToUserId: adminUserId,
+              assignedToUserId: requestOwnerUserId,
               reason: stockReason,
             },
             select: { id: true },
@@ -248,6 +295,61 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         acceptedRequestId: createdRequest.id,
       },
     });
+
+    try {
+      await createRequestStatusAudit({
+        tenantId,
+        requestId: createdRequest.id,
+        fromStatus: null,
+        toStatus: "SUBMITTED",
+        changedByUserId: session.id,
+        source: "api/admin/public-requests/[id]/accept",
+      });
+
+      await notifyAdmin({
+        tenantId,
+        kind: "PUBLIC_REQUEST_ACCEPTED",
+        title: "Pedido recebido aceite",
+        message: `Foi criada a requisição ${createdRequest.gtmiNumber}.`,
+        requestId: createdRequest.id,
+        data: {
+          publicRequestId: publicReq.id,
+          requestId: createdRequest.id,
+          gtmiNumber: createdRequest.gtmiNumber,
+        },
+      });
+
+      if (requestOwnerUserId) {
+        await notifyUser({
+          tenantId,
+          recipientUserId: requestOwnerUserId,
+          kind: "PUBLIC_REQUEST_ACCEPTED",
+          title: `Pedido aceite: ${createdRequest.gtmiNumber}`,
+          message: "O teu pedido foi aceite e convertido em requisição.",
+          requestId: createdRequest.id,
+          data: {
+            publicRequestId: publicReq.id,
+            requestId: createdRequest.id,
+            gtmiNumber: createdRequest.gtmiNumber,
+          },
+        });
+      }
+
+      publishRealtimeEvent({
+        type: "public-request.accepted",
+        tenantId,
+        audience: "ALL",
+        userId: requestOwnerUserId ?? null,
+        payload: {
+          publicRequestId: publicReq.id,
+          requestId: createdRequest.id,
+          gtmiNumber: createdRequest.gtmiNumber,
+          at: new Date().toISOString(),
+        },
+      });
+    } catch (notifyError) {
+      console.error("POST /api/admin/public-requests/[id]/accept notify/audit error:", notifyError);
+    }
 
     return res.status(200).json({ ok: true, requestId: createdRequest.id });
   } catch (error: any) {

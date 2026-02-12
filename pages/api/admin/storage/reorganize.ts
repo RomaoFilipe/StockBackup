@@ -4,6 +4,9 @@ import fs from "fs";
 import path from "path";
 import { prisma } from "@/prisma/client";
 import { requireAdmin } from "../_admin";
+import { applyRateLimit } from "@/utils/rateLimit";
+import { notifyAdmin } from "@/utils/notifications";
+import { publishRealtimeEvent } from "@/utils/realtime";
 import {
   buildInvoiceFolderName,
   buildProductFolderName,
@@ -44,6 +47,15 @@ function isSubPath(parentDir: string, candidate: string) {
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const session = await requireAdmin(req, res);
   if (!session) return;
+
+  const rl = await applyRateLimit(req, res, {
+    windowMs: 60_000,
+    max: 20,
+    keyPrefix: "admin-storage-reorganize",
+  });
+  if (!rl.ok) {
+    return res.status(429).json({ error: "Too many requests. Please try again later." });
+  }
 
   if (req.method !== "POST") {
     res.setHeader("Allow", ["POST"]);
@@ -349,7 +361,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }
 
-    return res.status(200).json({
+    const response = {
       dryRun,
       tenantId,
       processed: files.length,
@@ -361,7 +373,30 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       note: dryRun
         ? "This was a dry-run. Re-run with { dryRun: false } to apply changes."
         : "Reorganization applied.",
+    };
+
+    if (!dryRun && (errored > 0 || missing > 10)) {
+      try {
+        await notifyAdmin({
+          tenantId,
+          kind: "STORAGE_ALERT",
+          title: "Alerta de storage após reorganização",
+          message: `Erros: ${errored}, em falta: ${missing}, movidos: ${moved}.`,
+          data: { processed: files.length, moved, skipped, missing, errored },
+        });
+      } catch (alertError) {
+        console.warn("Storage alert notification failed:", alertError);
+      }
+    }
+
+    publishRealtimeEvent({
+      type: "storage.reorg.done",
+      tenantId,
+      audience: "ADMIN",
+      payload: response,
     });
+
+    return res.status(200).json(response);
   } catch (error: any) {
     console.error("POST /api/admin/storage/reorganize error:", error);
     const message = typeof error?.message === "string" ? error.message : "Failed to reorganize storage";

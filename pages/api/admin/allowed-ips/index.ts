@@ -2,15 +2,30 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { z } from "zod";
 import { prisma } from "@/prisma/client";
 import { requireAdmin } from "../_admin";
+import { applyRateLimit } from "@/utils/rateLimit";
+import { logUserAdminAction } from "@/utils/adminAudit";
 
 const createSchema = z.object({
   ipOrCidr: z.string().min(1).max(100),
   note: z.string().max(300).optional(),
+  expiresAt: z
+    .string()
+    .optional()
+    .refine((v) => !v || !Number.isNaN(new Date(v).getTime()), "Invalid date"),
 });
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const session = await requireAdmin(req, res);
   if (!session) return;
+
+  const rl = await applyRateLimit(req, res, {
+    windowMs: 60_000,
+    max: 80,
+    keyPrefix: "admin-allowed-ips",
+  });
+  if (!rl.ok) {
+    return res.status(429).json({ error: "Too many requests. Please try again later." });
+  }
 
   if (req.method === "GET") {
     try {
@@ -22,6 +37,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           ipOrCidr: true,
           isActive: true,
           note: true,
+          expiresAt: true,
           createdAt: true,
           createdByUserId: true,
         },
@@ -31,6 +47,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         rows.map((r) => ({
           ...r,
           createdAt: r.createdAt.toISOString(),
+          expiresAt: r.expiresAt ? r.expiresAt.toISOString() : null,
         }))
       );
     } catch (error) {
@@ -52,6 +69,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           ipOrCidr: parsed.data.ipOrCidr.trim(),
           isActive: true,
           note: parsed.data.note?.trim() || null,
+          expiresAt: parsed.data.expiresAt ? new Date(parsed.data.expiresAt) : null,
           createdByUserId: session.id,
         },
         select: {
@@ -59,13 +77,23 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           ipOrCidr: true,
           isActive: true,
           note: true,
+          expiresAt: true,
           createdAt: true,
         },
+      });
+
+      await logUserAdminAction({
+        tenantId: session.tenantId,
+        actorUserId: session.id,
+        action: "ALLOWLIST_CREATE",
+        note: `Allowlist created for ${created.ipOrCidr}`,
+        payload: { allowedIpId: created.id, ipOrCidr: created.ipOrCidr, expiresAt: created.expiresAt },
       });
 
       return res.status(201).json({
         ...created,
         createdAt: created.createdAt.toISOString(),
+        expiresAt: created.expiresAt ? created.expiresAt.toISOString() : null,
       });
     } catch (error) {
       console.error("POST /api/admin/allowed-ips error:", error);

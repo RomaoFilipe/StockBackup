@@ -353,6 +353,30 @@ export default function ApiDocsPage() {
             success: { status: 200, data: "Array" },
             error: { status: 401, data: "{ error: string }" }
           }
+        },
+        {
+          method: "GET",
+          path: "/api/requests/user-intake",
+          description: "Get prefilled metadata for the internal USER intake form",
+          parameters: [],
+          response: {
+            success: { status: 200, data: "{ requestingService, requesterName, requestedAt }" },
+            error: { status: 403, data: "{ error: string }" }
+          }
+        },
+        {
+          method: "POST",
+          path: "/api/requests/user-intake",
+          description: "Submit internal intake request (USER, no PIN)",
+          parameters: [
+            { name: "title", type: "string", required: false, description: "Optional title" },
+            { name: "deliveryLocation", type: "string", required: true, description: "Delivery location" },
+            { name: "notes", type: "string", required: true, description: "Request justification" }
+          ],
+          response: {
+            success: { status: 201, data: "{ ok: true, id: string }" },
+            error: { status: 400, data: "{ error: string }" }
+          }
         }
       ]
     },
@@ -800,98 +824,6 @@ export default function ApiDocsPage() {
         },
         {
           method: "GET",
-          path: "/api/admin/public-request-access",
-          description: "List public request links and their pins (ADMIN only)",
-          parameters: [],
-          response: {
-            success: { status: 200, data: "PublicRequestAccess[]" },
-            error: { status: 403, data: "{ error: string }" }
-          }
-        },
-        {
-          method: "POST",
-          path: "/api/admin/public-request-access",
-          description: "Create (or reuse) a public request link for a requesting service (ADMIN only)",
-          parameters: [
-            { name: "requestingServiceId", type: "number", required: true, description: "Requesting service id" },
-            { name: "slug", type: "string", required: false, description: "Optional custom slug" }
-          ],
-          response: {
-            success: { status: 201, data: "{ id: string, slug: string, publicPath: string }" },
-            error: { status: 400, data: "{ error: string }" }
-          }
-        },
-        {
-          method: "DELETE",
-          path: "/api/admin/public-request-access/[accessId]",
-          description: "Soft-remove (deactivate) a public request link (ADMIN only). Use query ?hard=1 to permanently delete (only if no requests exist)",
-          parameters: [
-            { name: "path.accessId", type: "string", required: true, description: "PublicRequestAccess id" },
-            { name: "query.hard", type: "1|true", required: false, description: "If set, hard delete (fails with 409 if there is request history)" }
-          ],
-          response: {
-            success: { status: 204, data: "(no content)" },
-            error: { status: 409, data: "{ error: string }" }
-          }
-        },
-        {
-          method: "PATCH",
-          path: "/api/admin/public-request-access/[accessId]",
-          description: "Activate/deactivate a public request link (ADMIN only)",
-          parameters: [
-            { name: "path.accessId", type: "string", required: true, description: "PublicRequestAccess id" },
-            { name: "isActive", type: "boolean", required: true, description: "New active state" }
-          ],
-          response: {
-            success: { status: 200, data: "{ id: string, isActive: boolean }" },
-            error: { status: 400, data: "{ error: string }" }
-          }
-        },
-        {
-          method: "GET",
-          path: "/api/admin/public-request-access/[accessId]/pins",
-          description: "List pins for a public request link (ADMIN only)",
-          parameters: [
-            { name: "path.accessId", type: "string", required: true, description: "PublicRequestAccess id" }
-          ],
-          response: {
-            success: { status: 200, data: "PublicRequestPin[]" },
-            error: { status: 404, data: "{ error: string }" }
-          }
-        },
-        {
-          method: "POST",
-          path: "/api/admin/public-request-access/[accessId]/pins",
-          description: "Create a pin for a public link (returns plaintext pin once) (ADMIN only)",
-          parameters: [
-            { name: "path.accessId", type: "string", required: true, description: "PublicRequestAccess id" },
-            { name: "label", type: "string", required: false, description: "Optional label" },
-            { name: "pin", type: "string", required: false, description: "Optional custom pin (otherwise generated)" }
-          ],
-          response: {
-            success: { status: 201, data: "{ id: string, label: string|null, isActive: boolean, pin: string }" },
-            error: { status: 400, data: "{ error: string }" }
-          }
-        },
-        {
-          method: "PATCH",
-          path: "/api/admin/public-request-access/[accessId]/pins",
-          description: "Update a pin (activate/deactivate, rename label, or regenerate PIN) (ADMIN only)",
-          parameters: [
-            { name: "path.accessId", type: "string", required: true, description: "PublicRequestAccess id" },
-            { name: "pinId", type: "string", required: true, description: "Pin id" },
-            { name: "isActive", type: "boolean", required: false, description: "New active state" },
-            { name: "label", type: "string|null", required: false, description: "Update label / assignee name" },
-            { name: "pin", type: "string", required: false, description: "Set a custom new PIN (returns plaintext once)" },
-            { name: "regenerate", type: "boolean", required: false, description: "Generate a new PIN (returns plaintext once)" }
-          ],
-          response: {
-            success: { status: 200, data: "{ ok: true, pin?: string }" },
-            error: { status: 404, data: "{ error: string }" }
-          }
-        },
-        {
-          method: "GET",
           path: "/api/admin/public-requests",
           description: "List public requests (ADMIN only)",
           parameters: [
@@ -956,52 +888,6 @@ export default function ApiDocsPage() {
           response: {
             success: { status: 200, data: "{ ok: true, dryRun: boolean, summary: any, results: any[] }" },
             error: { status: 400, data: "{ error: string }" }
-          }
-        }
-      ]
-    },
-    {
-      name: "Public (Anonymous)",
-      icon: FiCode,
-      endpoints: [
-        {
-          method: "GET",
-          path: "/api/public/request-links/[slug]",
-          description: "Get public request link metadata",
-          parameters: [
-            { name: "path.slug", type: "string", required: true, description: "Public link slug" }
-          ],
-          response: {
-            success: { status: 200, data: "{ access: { id: string, slug: string, isActive: boolean }, requestingService: RequestingService }" },
-            error: { status: 404, data: "{ error: string }" }
-          }
-        },
-        {
-          method: "POST",
-          path: "/api/public/request-links/[slug]/products",
-          description: "Validate PIN and list products available to request",
-          parameters: [
-            { name: "path.slug", type: "string", required: true, description: "Public link slug" },
-            { name: "pin", type: "string", required: true, description: "PIN" }
-          ],
-          response: {
-            success: { status: 200, data: "{ products: Array<{ id: string, name: string, sku: string, status: string }> }" },
-            error: { status: 401, data: "{ error: string }" }
-          }
-        },
-        {
-          method: "POST",
-          path: "/api/public/request-links/[slug]/submit",
-          description: "Submit a public request (anonymous) using PIN",
-          parameters: [
-            { name: "path.slug", type: "string", required: true, description: "Public link slug" },
-            { name: "pin", type: "string", required: true, description: "PIN" },
-            { name: "requesterName", type: "string", required: true, description: "Requester name" },
-            { name: "items", type: "Array", required: false, description: "[{ productId, quantity, notes?, unit? }]" }
-          ],
-          response: {
-            success: { status: 201, data: "{ ok: true, id: string }" },
-            error: { status: 401, data: "{ error: string }" }
           }
         }
       ]

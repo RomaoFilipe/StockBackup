@@ -20,6 +20,7 @@ export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false); // Add loading state
+  const [lockedForSeconds, setLockedForSeconds] = useState(0);
   const { login, isLoggedIn, isAuthLoading } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -33,8 +34,17 @@ export default function Login() {
     router.replace(redirect && redirect.startsWith("/") ? redirect : "/");
   }, [isAuthLoading, isLoggedIn, router, searchParams]);
 
+  useEffect(() => {
+    if (lockedForSeconds <= 0) return;
+    const t = window.setInterval(() => {
+      setLockedForSeconds((v) => (v > 0 ? v - 1 : 0));
+    }, 1000);
+    return () => window.clearInterval(t);
+  }, [lockedForSeconds]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (lockedForSeconds > 0) return;
     setIsLoading(true); // Start loading
 
     try {
@@ -59,6 +69,10 @@ export default function Login() {
         (typeof error?.response?.data === "string" ? error.response.data : null);
 
       const code = error?.response?.data?.code;
+      const retryAfter = Number(error?.response?.data?.retryAfterSeconds || 0);
+      if (Number.isFinite(retryAfter) && retryAfter > 0) {
+        setLockedForSeconds(Math.trunc(retryAfter));
+      }
 
       toast({
         title: "Login Failed",
@@ -121,10 +135,10 @@ export default function Login() {
               <Button
                 type="submit"
                 className="w-full"
-                disabled={isAuthLoading}
+                disabled={isAuthLoading || lockedForSeconds > 0}
                 isLoading={isLoading}
               >
-                {isLoading ? "A entrar..." : "Login"}
+                {isLoading ? "A entrar..." : lockedForSeconds > 0 ? `Bloqueado (${lockedForSeconds}s)` : "Login"}
               </Button>
             </form>
           </CardContent>
