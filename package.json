@@ -19,6 +19,7 @@
     "create-admin": "node scripts/create-admin.js",
     "test:user-intake": "bash scripts/test-user-intake.sh",
     "test:admin-workflows": "bash scripts/test-admin-workflows.sh",
+    "test:scan-workflow": "bash scripts/test-scan-workflow.sh",
     "backfill:request-owners": "node scripts/backfill-request-owners.js"
   },
   "dependencies": {

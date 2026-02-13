@@ -3,6 +3,17 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -75,6 +86,32 @@ type StockMovement = {
   assignedTo?: { id: string; name: string; email: string } | null;
 };
 
+type UnitActionConfig = {
+  endpoint: "/api/units/return" | "/api/units/repair-out" | "/api/units/repair-in" | "/api/units/scrap" | "/api/units/lost";
+  pendingSetter: (value: boolean) => void;
+  successTitle: string;
+  successDescription: (productName: string) => string;
+  defaultError: string;
+};
+
+type DestructiveActionType = "SCRAP" | "LOST" | null;
+
+const STATUS_LABEL: Record<UnitLookup["status"], string> = {
+  IN_STOCK: "Em stock",
+  ACQUIRED: "Adquirida",
+  IN_REPAIR: "Em reparação",
+  SCRAPPED: "Abatida",
+  LOST: "Perdida",
+};
+
+const STATUS_BADGE_CLASS: Record<UnitLookup["status"], string> = {
+  IN_STOCK: "border-emerald-200 bg-emerald-100 text-emerald-800",
+  ACQUIRED: "border-sky-200 bg-sky-100 text-sky-800",
+  IN_REPAIR: "border-amber-200 bg-amber-100 text-amber-800",
+  SCRAPPED: "border-zinc-200 bg-zinc-100 text-zinc-800",
+  LOST: "border-rose-200 bg-rose-100 text-rose-800",
+};
+
 export default function ScanUnitPage() {
   const params = useParams<{ code: string }>();
   const router = useRouter();
@@ -98,6 +135,8 @@ export default function ScanUnitPage() {
   const [reason, setReason] = useState<string>("");
   const [costCenter, setCostCenter] = useState<string>("");
   const [notes, setNotes] = useState<string>("");
+  const [destructiveAction, setDestructiveAction] = useState<DestructiveActionType>(null);
+  const [destructiveConfirmText, setDestructiveConfirmText] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -202,6 +241,56 @@ export default function ScanUnitPage() {
     };
   }, [unit?.id]);
 
+  const refreshUnitAndMovements = async (unitId: string, unitCode: string) => {
+    const lookupRes = await fetch(`/api/units/lookup?code=${encodeURIComponent(unitCode)}`);
+    if (lookupRes.ok) {
+      const refreshed = (await lookupRes.json()) as UnitLookup;
+      setUnit(refreshed);
+    }
+
+    const movementsRes = await fetch(`/api/stock-movements?unitId=${encodeURIComponent(unitId)}&limit=10`);
+    if (movementsRes.ok) {
+      const data = (await movementsRes.json()) as { items?: StockMovement[] };
+      setMovements(data.items ?? []);
+    }
+  };
+
+  const runUnitAction = async (config: UnitActionConfig) => {
+    if (!unit) return;
+
+    config.pendingSetter(true);
+    try {
+      const res = await fetch(config.endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          code: unit.code,
+          reason: reason ? reason : null,
+          costCenter: costCenter ? costCenter : null,
+          notes: notes ? notes : null,
+        }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || config.defaultError);
+
+      toast({
+        title: config.successTitle,
+        description: config.successDescription(unit.product.name),
+      });
+
+      await refreshUnitAndMovements(unit.id, unit.code);
+    } catch (error: any) {
+      toast({
+        title: "Erro",
+        description: error?.message || config.defaultError,
+        variant: "destructive",
+      });
+    } finally {
+      config.pendingSetter(false);
+    }
+  };
+
   const handleAcquire = async () => {
     if (!unit) return;
     setIsAcquiring(true);
@@ -219,28 +308,14 @@ export default function ScanUnitPage() {
       });
 
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error(data?.error || "Falha ao registar aquisição");
-      }
+      if (!res.ok) throw new Error(data?.error || "Falha ao registar aquisição");
 
       toast({
         title: "Aquisição registada",
         description: `Unidade marcada como adquirida: ${unit.product.name}`,
       });
 
-      // Refresh
-      const lookupRes = await fetch(`/api/units/lookup?code=${encodeURIComponent(unit.code)}`);
-      if (lookupRes.ok) {
-        const refreshed = (await lookupRes.json()) as UnitLookup;
-        setUnit(refreshed);
-      }
-
-      // Refresh movements
-      const movementsRes = await fetch(`/api/stock-movements?unitId=${encodeURIComponent(unit.id)}&limit=10`);
-      if (movementsRes.ok) {
-        const data = (await movementsRes.json()) as { items?: StockMovement[] };
-        setMovements(data.items ?? []);
-      }
+      await refreshUnitAndMovements(unit.id, unit.code);
     } catch (error: any) {
       toast({
         title: "Erro",
@@ -252,200 +327,73 @@ export default function ScanUnitPage() {
     }
   };
 
-  const refreshUnitAndMovements = async (unitId: string, unitCode: string) => {
-    const lookupRes = await fetch(`/api/units/lookup?code=${encodeURIComponent(unitCode)}`);
-    if (lookupRes.ok) {
-      const refreshed = (await lookupRes.json()) as UnitLookup;
-      setUnit(refreshed);
-    }
-
-    const movementsRes = await fetch(`/api/stock-movements?unitId=${encodeURIComponent(unitId)}&limit=10`);
-    if (movementsRes.ok) {
-      const data = (await movementsRes.json()) as { items?: StockMovement[] };
-      setMovements(data.items ?? []);
-    }
-  };
-
-  const handleScrap = async () => {
-    if (!unit) return;
-    const confirmed = window.confirm("Confirmar abate desta unidade?");
-    if (!confirmed) return;
-
-    setIsScrapping(true);
-    try {
-      const res = await fetch("/api/units/scrap", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          code: unit.code,
-          reason: reason ? reason : null,
-          costCenter: costCenter ? costCenter : null,
-          notes: notes ? notes : null,
-        }),
-      });
-
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data?.error || "Falha ao abater");
-
-      toast({
-        title: "Abate registado",
-        description: `Unidade abatida: ${unit.product.name}`,
-      });
-
-      await refreshUnitAndMovements(unit.id, unit.code);
-    } catch (error: any) {
-      toast({
-        title: "Erro",
-        description: error?.message || "Não foi possível abater a unidade.",
-        variant: "destructive",
-      });
-    } finally {
-      setIsScrapping(false);
-    }
-  };
-
-  const handleLost = async () => {
-    if (!unit) return;
-    const confirmed = window.confirm("Confirmar marcar como perdido?");
-    if (!confirmed) return;
-
-    setIsMarkingLost(true);
-    try {
-      const res = await fetch("/api/units/lost", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          code: unit.code,
-          reason: reason ? reason : null,
-          costCenter: costCenter ? costCenter : null,
-          notes: notes ? notes : null,
-        }),
-      });
-
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data?.error || "Falha ao marcar como perdido");
-
-      toast({
-        title: "Marcado como perdido",
-        description: `Unidade marcada como perdida: ${unit.product.name}`,
-      });
-
-      await refreshUnitAndMovements(unit.id, unit.code);
-    } catch (error: any) {
-      toast({
-        title: "Erro",
-        description: error?.message || "Não foi possível marcar como perdido.",
-        variant: "destructive",
-      });
-    } finally {
-      setIsMarkingLost(false);
-    }
-  };
-
-  const handleReturn = async () => {
-    if (!unit) return;
-    setIsReturning(true);
-    try {
-      const res = await fetch("/api/units/return", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          code: unit.code,
-          reason: reason ? reason : null,
-          costCenter: costCenter ? costCenter : null,
-          notes: notes ? notes : null,
-        }),
-      });
-
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data?.error || "Falha ao devolver");
-
-      toast({
-        title: "Devolução registada",
-        description: `Unidade devolvida ao stock: ${unit.product.name}`,
-      });
-
-      await refreshUnitAndMovements(unit.id, unit.code);
-    } catch (error: any) {
-      toast({
-        title: "Erro",
-        description: error?.message || "Não foi possível devolver a unidade.",
-        variant: "destructive",
-      });
-    } finally {
-      setIsReturning(false);
-    }
-  };
+  const handleReturn = async () =>
+    runUnitAction({
+      endpoint: "/api/units/return",
+      pendingSetter: setIsReturning,
+      successTitle: "Devolução registada",
+      successDescription: (name) => `Unidade devolvida ao stock: ${name}`,
+      defaultError: "Não foi possível devolver a unidade.",
+    });
 
   const handleRepairOut = async () => {
-    if (!unit) return;
-    setIsRepairOut(true);
-    try {
-      const res = await fetch("/api/units/repair-out", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          code: unit.code,
-          reason: reason ? reason : null,
-          costCenter: costCenter ? costCenter : null,
-          notes: notes ? notes : null,
-        }),
-      });
-
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data?.error || "Falha ao enviar para reparação");
-
-      toast({
-        title: "Enviado para reparação",
-        description: `Unidade marcada como em reparação: ${unit.product.name}`,
-      });
-
-      await refreshUnitAndMovements(unit.id, unit.code);
-    } catch (error: any) {
-      toast({
-        title: "Erro",
-        description: error?.message || "Não foi possível enviar para reparação.",
-        variant: "destructive",
-      });
-    } finally {
-      setIsRepairOut(false);
-    }
+    await runUnitAction({
+      endpoint: "/api/units/repair-out",
+      pendingSetter: setIsRepairOut,
+      successTitle: "Enviado para reparação",
+      successDescription: (name) => `Unidade marcada como em reparação: ${name}`,
+      defaultError: "Não foi possível enviar para reparação.",
+    });
   };
 
   const handleRepairIn = async () => {
-    if (!unit) return;
-    setIsRepairIn(true);
-    try {
-      const res = await fetch("/api/units/repair-in", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          code: unit.code,
-          reason: reason ? reason : null,
-          costCenter: costCenter ? costCenter : null,
-          notes: notes ? notes : null,
-        }),
-      });
+    await runUnitAction({
+      endpoint: "/api/units/repair-in",
+      pendingSetter: setIsRepairIn,
+      successTitle: "Reparação concluída",
+      successDescription: (name) => `Unidade recebida de reparação e voltou ao stock: ${name}`,
+      defaultError: "Não foi possível receber de reparação.",
+    });
+  };
 
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data?.error || "Falha ao receber de reparação");
+  const handleScrap = () => setDestructiveAction("SCRAP");
 
-      toast({
-        title: "Reparação concluída",
-        description: `Unidade recebida de reparação e voltou ao stock: ${unit.product.name}`,
-      });
+  const handleLost = () => setDestructiveAction("LOST");
 
-      await refreshUnitAndMovements(unit.id, unit.code);
-    } catch (error: any) {
-      toast({
-        title: "Erro",
-        description: error?.message || "Não foi possível receber de reparação.",
-        variant: "destructive",
+  const resetDestructiveDialog = () => {
+    setDestructiveAction(null);
+    setDestructiveConfirmText("");
+  };
+
+  const handleConfirmDestructive = async () => {
+    if (destructiveAction === "SCRAP") {
+      await runUnitAction({
+        endpoint: "/api/units/scrap",
+        pendingSetter: setIsScrapping,
+        successTitle: "Abate registado",
+        successDescription: (name) => `Unidade abatida: ${name}`,
+        defaultError: "Não foi possível abater a unidade.",
       });
-    } finally {
-      setIsRepairIn(false);
+      resetDestructiveDialog();
+      return;
+    }
+    if (destructiveAction === "LOST") {
+      await runUnitAction({
+        endpoint: "/api/units/lost",
+        pendingSetter: setIsMarkingLost,
+        successTitle: "Marcado como perdido",
+        successDescription: (name) => `Unidade marcada como perdida: ${name}`,
+        defaultError: "Não foi possível marcar como perdido.",
+      });
+      resetDestructiveDialog();
     }
   };
+
+  const isAdmin = session?.role === "ADMIN";
+  const isBusy = isAcquiring || isReturning || isRepairOut || isRepairIn || isScrapping || isMarkingLost;
+  const latestMovement = movements[0] ?? null;
+  const destructiveKeyword = destructiveAction === "SCRAP" ? "ABATER" : destructiveAction === "LOST" ? "PERDIDO" : "";
+  const destructiveReady = destructiveKeyword.length > 0 && destructiveConfirmText.trim().toUpperCase() === destructiveKeyword;
 
   return (
     <div className="mx-auto w-full max-w-3xl space-y-4 p-4">
@@ -484,126 +432,75 @@ export default function ScanUnitPage() {
                 </div>
               )}
 
-              <div className="flex items-center justify-between rounded-lg border border-border/60 p-3">
-                <div>
-                  <p className="text-sm font-medium">Estado</p>
-                  <p className="text-sm text-muted-foreground">
-                    {unit.status === "IN_STOCK"
-                      ? "Em stock"
-                      : unit.status === "ACQUIRED"
-                        ? "Adquirida"
-                        : unit.status === "IN_REPAIR"
-                          ? "Em reparação"
-                          : unit.status === "SCRAPPED"
-                            ? "Abatida"
-                            : "Perdida"}
+              <div className="rounded-lg border border-border/60 p-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium">Estado</p>
+                    <div className="mt-1 flex items-center gap-2">
+                      <Badge variant="outline" className={STATUS_BADGE_CLASS[unit.status]}>
+                        {STATUS_LABEL[unit.status]}
+                      </Badge>
+                    </div>
+                    {latestMovement ? (
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        Última ação: {latestMovement.type} por {latestMovement.performedBy?.name ?? "utilizador"} em{" "}
+                        {new Date(latestMovement.createdAt).toLocaleString("pt-PT")}
+                      </p>
+                    ) : null}
+                  </div>
+
+                  <div className="flex flex-wrap justify-end gap-2">
+                    {unit.status === "IN_STOCK" ? (
+                      <Button onClick={handleAcquire} disabled={isBusy} isLoading={isAcquiring}>
+                        Aquisição
+                      </Button>
+                    ) : null}
+
+                    {unit.status === "ACQUIRED" ? (
+                      <Button variant="outline" onClick={handleReturn} disabled={isBusy} isLoading={isReturning}>
+                        Devolver
+                      </Button>
+                    ) : null}
+
+                    {(unit.status === "IN_STOCK" || unit.status === "ACQUIRED") ? (
+                      <Button variant="outline" onClick={handleRepairOut} disabled={isBusy} isLoading={isRepairOut}>
+                        Reparação (envio)
+                      </Button>
+                    ) : null}
+
+                    {unit.status === "IN_REPAIR" ? (
+                      <Button variant="outline" onClick={handleRepairIn} disabled={isBusy} isLoading={isRepairIn}>
+                        Reparação (receção)
+                      </Button>
+                    ) : null}
+
+                    {unit.status !== "SCRAPPED" && unit.status !== "LOST" && isAdmin ? (
+                      <>
+                        <Button variant="destructive" onClick={handleScrap} disabled={isBusy} isLoading={isScrapping}>
+                          Abate
+                        </Button>
+                        <Button
+                          variant="destructive"
+                          onClick={handleLost}
+                          disabled={isBusy}
+                          isLoading={isMarkingLost}
+                        >
+                          Perdido
+                        </Button>
+                      </>
+                    ) : null}
+                  </div>
+                </div>
+                {!isAdmin && unit.status !== "SCRAPPED" && unit.status !== "LOST" ? (
+                  <p className="mt-3 text-xs text-muted-foreground">
+                    Abate e Perdido estão disponíveis apenas para ADMIN.
                   </p>
-                </div>
-
-                <div className="flex flex-wrap justify-end gap-2">
-                  <Button
-                    onClick={handleAcquire}
-                    disabled={
-                      isAcquiring ||
-                      isReturning ||
-                      isRepairOut ||
-                      isRepairIn ||
-                      isScrapping ||
-                      isMarkingLost ||
-                      unit.status !== "IN_STOCK"
-                    }
-                    isLoading={isAcquiring}
-                  >
-                    Aquisição
-                  </Button>
-
-                  <Button
-                    variant="outline"
-                    onClick={handleReturn}
-                    disabled={
-                      isAcquiring ||
-                      isReturning ||
-                      isRepairOut ||
-                      isRepairIn ||
-                      isScrapping ||
-                      isMarkingLost ||
-                      unit.status !== "ACQUIRED"
-                    }
-                    isLoading={isReturning}
-                  >
-                    Devolver
-                  </Button>
-
-                  <Button
-                    variant="outline"
-                    onClick={handleRepairOut}
-                    disabled={
-                      isAcquiring ||
-                      isReturning ||
-                      isRepairOut ||
-                      isRepairIn ||
-                      isScrapping ||
-                      isMarkingLost ||
-                      (unit.status !== "IN_STOCK" && unit.status !== "ACQUIRED")
-                    }
-                    isLoading={isRepairOut}
-                  >
-                    Reparação (envio)
-                  </Button>
-
-                  <Button
-                    variant="outline"
-                    onClick={handleRepairIn}
-                    disabled={
-                      isAcquiring ||
-                      isReturning ||
-                      isRepairOut ||
-                      isRepairIn ||
-                      isScrapping ||
-                      isMarkingLost ||
-                      unit.status !== "IN_REPAIR"
-                    }
-                    isLoading={isRepairIn}
-                  >
-                    Reparação (receção)
-                  </Button>
-
-                  <Button
-                    variant="destructive"
-                    onClick={handleScrap}
-                    disabled={
-                      isAcquiring ||
-                      isReturning ||
-                      isRepairOut ||
-                      isRepairIn ||
-                      isScrapping ||
-                      isMarkingLost ||
-                      unit.status === "SCRAPPED" ||
-                      unit.status === "LOST"
-                    }
-                    isLoading={isScrapping}
-                  >
-                    Abate
-                  </Button>
-
-                  <Button
-                    variant="destructive"
-                    onClick={handleLost}
-                    disabled={
-                      isAcquiring ||
-                      isReturning ||
-                      isRepairOut ||
-                      isRepairIn ||
-                      isScrapping ||
-                      isMarkingLost ||
-                      unit.status === "SCRAPPED" ||
-                      unit.status === "LOST"
-                    }
-                    isLoading={isMarkingLost}
-                  >
-                    Perdido
-                  </Button>
-                </div>
+                ) : null}
+                {(unit.status === "SCRAPPED" || unit.status === "LOST") ? (
+                  <p className="mt-3 text-xs text-muted-foreground">
+                    Unidade em estado final; não há operações disponíveis.
+                  </p>
+                ) : null}
               </div>
 
               <div className="rounded-lg border border-border/60 p-3">
@@ -616,7 +513,7 @@ export default function ScanUnitPage() {
                       <Select
                         value={assignedToUserId || ""}
                         onValueChange={(value) => setAssignedToUserId(value === "__none__" ? "" : value)}
-                        disabled={unit.status !== "IN_STOCK"}
+                        disabled={unit.status !== "IN_STOCK" || isBusy}
                       >
                         <SelectTrigger>
                           <SelectValue placeholder="(Opcional)" />
@@ -645,12 +542,7 @@ export default function ScanUnitPage() {
                       onChange={(e) => setReason(e.target.value)}
                       placeholder="Ex: Entrega, substituição, etc."
                       disabled={
-                        isAcquiring ||
-                        isReturning ||
-                        isRepairOut ||
-                        isRepairIn ||
-                        isScrapping ||
-                        isMarkingLost
+                        isBusy
                       }
                     />
                   </div>
@@ -662,12 +554,7 @@ export default function ScanUnitPage() {
                       onChange={(e) => setCostCenter(e.target.value)}
                       placeholder="Ex: TI / 2026 / Projeto X"
                       disabled={
-                        isAcquiring ||
-                        isReturning ||
-                        isRepairOut ||
-                        isRepairIn ||
-                        isScrapping ||
-                        isMarkingLost
+                        isBusy
                       }
                     />
                   </div>
@@ -679,12 +566,7 @@ export default function ScanUnitPage() {
                       onChange={(e) => setNotes(e.target.value)}
                       placeholder="(Opcional)"
                       disabled={
-                        isAcquiring ||
-                        isReturning ||
-                        isRepairOut ||
-                        isRepairIn ||
-                        isScrapping ||
-                        isMarkingLost
+                        isBusy
                       }
                       className="min-h-[90px]"
                     />
@@ -755,6 +637,38 @@ export default function ScanUnitPage() {
           )}
         </CardContent>
       </Card>
+      <AlertDialog open={destructiveAction !== null} onOpenChange={(open) => (!open ? resetDestructiveDialog() : null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {destructiveAction === "SCRAP" ? "Confirmar abate da unidade" : "Confirmar unidade como perdida"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta ação é destrutiva. Para confirmar, escreve <span className="font-semibold">{destructiveKeyword}</span>.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <Input
+            value={destructiveConfirmText}
+            onChange={(e) => setDestructiveConfirmText(e.target.value)}
+            placeholder={`Escreve ${destructiveKeyword}`}
+            disabled={isBusy}
+          />
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={resetDestructiveDialog}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={!destructiveReady || isBusy}
+              onClick={(e) => {
+                e.preventDefault();
+                if (!destructiveReady || isBusy) return;
+                void handleConfirmDestructive();
+              }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Confirmar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

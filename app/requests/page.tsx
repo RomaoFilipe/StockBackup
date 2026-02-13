@@ -7,7 +7,6 @@ import { useAuth } from "@/app/authContext";
 import { useProductStore } from "@/app/useProductStore";
 import axiosInstance from "@/utils/axiosInstance";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { QRCodeComponent } from "@/components/ui/qr-code";
@@ -31,9 +30,36 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import AttachmentsDialog from "@/app/components/AttachmentsDialog";
-import { CheckCircle2, Clock3, PackageCheck, Paperclip, PenLine, Plus, Printer, QrCode, RefreshCcw, XCircle, Trash2 } from "lucide-react";
+import {
+  Bell,
+  CalendarRange,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Filter,
+  LayoutGrid,
+  Paperclip,
+  PenLine,
+  Plus,
+  Printer,
+  QrCode,
+  RefreshCcw,
+  Search,
+  SlidersHorizontal,
+  Table2,
+  Trash2,
+  UserRound,
+  WandSparkles,
+} from "lucide-react";
 import type { Product } from "@/app/types";
 import Papa from "papaparse";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 type AvailableUnitDto = { id: string; code: string };
 
 type RequestItemDto = {
@@ -121,53 +147,6 @@ const formatStatus = (status: RequestDto["status"]) => {
   }
 };
 
-const workflowMeta = (status: RequestDto["status"]) => {
-  switch (status) {
-    case "DRAFT":
-      return {
-        label: "Por submeter",
-        icon: PenLine,
-        className: "bg-muted/50 text-muted-foreground border-border/60",
-        iconClassName: "",
-      };
-    case "SUBMITTED":
-      return {
-        label: "Em aprovação",
-        icon: Clock3,
-        className: "bg-amber-500/10 text-amber-700 border-amber-500/20",
-        iconClassName: "motion-safe:animate-pulse",
-      };
-    case "APPROVED":
-      return {
-        label: "Pronto para levantar",
-        icon: PackageCheck,
-        className: "bg-emerald-500/10 text-emerald-700 border-emerald-500/20",
-        iconClassName: "motion-safe:animate-pulse",
-      };
-    case "FULFILLED":
-      return {
-        label: "Levantado / concluído",
-        icon: CheckCircle2,
-        className: "bg-emerald-600/10 text-emerald-800 border-emerald-600/20",
-        iconClassName: "",
-      };
-    case "REJECTED":
-      return {
-        label: "Rejeitado",
-        icon: XCircle,
-        className: "bg-rose-500/10 text-rose-700 border-rose-500/20",
-        iconClassName: "",
-      };
-    default:
-      return {
-        label: status,
-        icon: Clock3,
-        className: "bg-muted/50 text-muted-foreground border-border/60",
-        iconClassName: "",
-      };
-  }
-};
-
 const goodsTypeLabels: Record<GoodsType, string> = {
   MATERIALS_SERVICES: "Material de consumo / Serviços",
   WAREHOUSE_MATERIALS: "Material de armazém",
@@ -241,12 +220,42 @@ export default function RequestsPage() {
   const [creating, setCreating] = useState(false);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"ALL" | RequestDto["status"]>("ALL");
+  const [priorityFilter, setPriorityFilter] = useState<"ALL" | "LOW" | "NORMAL" | "HIGH" | "URGENT">("ALL");
+  const [personFilter, setPersonFilter] = useState<string>("ALL");
+  const [serviceFilter, setServiceFilter] = useState<string>("ALL");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  const [filterSheetOpen, setFilterSheetOpen] = useState(false);
+  const [viewMode, setViewMode] = useState<"table" | "cards">("table");
+  const [isMobile, setIsMobile] = useState(false);
+  const [selectedRequestIds, setSelectedRequestIds] = useState<string[]>([]);
+  const [pageIndex, setPageIndex] = useState(0);
+  const [pageSize, setPageSize] = useState(10);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const update = () => {
+      const mobile = window.innerWidth < 768;
+      setIsMobile(mobile);
+      if (mobile) {
+        setViewMode("cards");
+      }
+    };
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
 
   const [qrOpen, setQrOpen] = useState(false);
   const [qrRequest, setQrRequest] = useState<RequestDto | null>(null);
 
   const [createOpen, setCreateOpen] = useState(false);
   const [editRequestId, setEditRequestId] = useState<string | null>(null);
+  const [wizardStep, setWizardStep] = useState<1 | 2 | 3 | 4>(1);
+  const [wizardSubmitted, setWizardSubmitted] = useState(false);
+  const [wizardSuccess, setWizardSuccess] = useState(false);
+  const [productSearchByRow, setProductSearchByRow] = useState<Record<number, string>>({});
 
   useEffect(() => {
     if (!searchParams) return;
@@ -310,11 +319,16 @@ export default function RequestsPage() {
     setInvoiceLoadingByProductId({});
     setUnitHintByProductId({});
     setUnitLoadingByRow({});
+    setProductSearchByRow({});
+    setWizardStep(1);
+    setWizardSubmitted(false);
+    setWizardSuccess(false);
   };
 
   const openCreateModal = () => {
     setEditRequestId(null);
     resetForm();
+    setWizardStep(1);
     setCreateOpen(true);
   };
 
@@ -349,6 +363,10 @@ export default function RequestsPage() {
         notes: it.notes ?? "",
       }))
     );
+    setProductSearchByRow({});
+    setWizardStep(1);
+    setWizardSubmitted(false);
+    setWizardSuccess(false);
 
     // Clear caches; they will repopulate based on selected items.
     setInvoiceByProductId({});
@@ -528,6 +546,66 @@ export default function RequestsPage() {
     const hasRequestingService = Boolean(requestingServiceId);
     return hasAtLeastOneItem && allValid && hasRequestingService;
   }, [items, requestingServiceId]);
+
+  const wizardSteps = [
+    { id: 1 as const, label: "Informação Básica" },
+    { id: 2 as const, label: "Detalhes" },
+    { id: 3 as const, label: "Itens" },
+    { id: 4 as const, label: "Rever" },
+  ];
+
+  const productOptions = useMemo(
+    () => allProducts.slice().sort((a, b) => a.name.localeCompare(b.name)),
+    [allProducts]
+  );
+
+  const deliverySuggestions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          requests
+            .map((r) => (r.deliveryLocation || "").trim())
+            .filter((v) => Boolean(v))
+        )
+      ).slice(0, 12),
+    [requests]
+  );
+
+  const isWizardStepValid = (step: 1 | 2 | 3 | 4) => {
+    if (step === 1) {
+      const requestedAtDate = requestedAt ? new Date(requestedAt) : new Date();
+      return Boolean(requestingServiceId) && !Number.isNaN(requestedAtDate.getTime());
+    }
+    if (step === 2) {
+      return Boolean(requesterName.trim());
+    }
+    if (step === 3) {
+      return items.length > 0 && items.every((it) => Boolean(it.productId) && Number(it.quantity) > 0);
+    }
+    return true;
+  };
+
+  const goNextStep = () => {
+    setWizardSubmitted(true);
+    if (!isWizardStepValid(wizardStep)) return;
+    setWizardSubmitted(false);
+    setWizardStep((prev) => {
+      if (prev === 1) return 2;
+      if (prev === 2) return 3;
+      if (prev === 3) return 4;
+      return 4;
+    });
+  };
+
+  const goPrevStep = () => {
+    setWizardSubmitted(false);
+    setWizardStep((prev) => {
+      if (prev === 4) return 3;
+      if (prev === 3) return 2;
+      if (prev === 2) return 1;
+      return 1;
+    });
+  };
 
   const loadAll = useCallback(async () => {
     if (!isLoggedIn) return;
@@ -729,8 +807,12 @@ export default function RequestsPage() {
       setInvoiceByProductId({});
       setInvoiceLoadingByProductId({});
 
-      setCreateOpen(false);
-      setEditRequestId(null);
+      setWizardSuccess(true);
+      setTimeout(() => {
+        setCreateOpen(false);
+        setEditRequestId(null);
+        setWizardSuccess(false);
+      }, 900);
 
       toast({
         title: "Requisição criada",
@@ -836,9 +918,13 @@ export default function RequestsPage() {
 
       await axiosInstance.patch(`/requests/${editRequestId}`, payload);
 
-      setCreateOpen(false);
-      setEditRequestId(null);
-      resetForm();
+      setWizardSuccess(true);
+      setTimeout(() => {
+        setCreateOpen(false);
+        setEditRequestId(null);
+        resetForm();
+        setWizardSuccess(false);
+      }, 900);
       await loadAll();
 
       toast({
@@ -870,10 +956,45 @@ export default function RequestsPage() {
     setQrOpen(true);
   };
 
-  const visibleRequests = useMemo(() => {
+  const personOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const r of requests) {
+      const person = r.requesterName || r.user?.name;
+      if (person) {
+        map.set(person, person);
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => a.localeCompare(b, "pt"));
+  }, [requests]);
+
+  const serviceOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const r of requests) {
+      if (r.requestingService) {
+        map.set(r.requestingService, r.requestingService);
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => a.localeCompare(b, "pt"));
+  }, [requests]);
+
+  const filteredRequests = useMemo(() => {
     const q = search.trim().toLowerCase();
     return requests.filter((r) => {
       if (statusFilter !== "ALL" && r.status !== statusFilter) return false;
+      if (priorityFilter !== "ALL" && (r.priority || "NORMAL") !== priorityFilter) return false;
+      if (personFilter !== "ALL" && (r.requesterName || r.user?.name || "") !== personFilter) return false;
+      if (serviceFilter !== "ALL" && (r.requestingService || "") !== serviceFilter) return false;
+
+      const requestedDate = new Date(r.requestedAt);
+      if (dateFrom) {
+        const from = new Date(`${dateFrom}T00:00:00`);
+        if (requestedDate < from) return false;
+      }
+      if (dateTo) {
+        const to = new Date(`${dateTo}T23:59:59`);
+        if (requestedDate > to) return false;
+      }
+
       if (!q) return true;
       const haystack = [
         r.gtmiNumber,
@@ -886,10 +1007,39 @@ export default function RequestsPage() {
         .toLowerCase();
       return haystack.includes(q);
     });
-  }, [requests, search, statusFilter]);
+  }, [
+    requests,
+    search,
+    statusFilter,
+    priorityFilter,
+    personFilter,
+    serviceFilter,
+    dateFrom,
+    dateTo,
+  ]);
+
+  useEffect(() => {
+    setPageIndex(0);
+  }, [search, statusFilter, priorityFilter, personFilter, serviceFilter, dateFrom, dateTo, pageSize]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredRequests.length / pageSize));
+  const safePageIndex = Math.min(pageIndex, totalPages - 1);
+  const pageStart = safePageIndex * pageSize;
+  const visibleRequests = filteredRequests.slice(pageStart, pageStart + pageSize);
+
+  useEffect(() => {
+    if (pageIndex !== safePageIndex) {
+      setPageIndex(safePageIndex);
+    }
+  }, [pageIndex, safePageIndex]);
+
+  useEffect(() => {
+    const allowed = new Set(filteredRequests.map((r) => r.id));
+    setSelectedRequestIds((prev) => prev.filter((id) => allowed.has(id)));
+  }, [filteredRequests]);
 
   const exportCsv = () => {
-    const rows = requests.map((r) => ({
+    const rows = filteredRequests.map((r) => ({
       gtmi: r.gtmiNumber,
       estado: r.status,
       pedido: r.title || "",
@@ -911,1117 +1061,903 @@ export default function RequestsPage() {
     document.body.removeChild(link);
   };
 
+  const metrics = useMemo(() => {
+    const total = requests.length;
+    const pending = requests.filter((r) => r.status === "DRAFT" || r.status === "SUBMITTED").length;
+    const approved = requests.filter((r) => r.status === "APPROVED").length;
+    const fulfilled = requests.filter((r) => r.status === "FULFILLED").length;
+    return { total, pending, approved, fulfilled };
+  }, [requests]);
+
+  const activeFiltersCount = useMemo(() => {
+    return Number(statusFilter !== "ALL")
+      + Number(priorityFilter !== "ALL")
+      + Number(personFilter !== "ALL")
+      + Number(serviceFilter !== "ALL")
+      + Number(Boolean(dateFrom || dateTo));
+  }, [statusFilter, priorityFilter, personFilter, serviceFilter, dateFrom, dateTo]);
+
+  const clearAdvancedFilters = () => {
+    setStatusFilter("ALL");
+    setPriorityFilter("ALL");
+    setPersonFilter("ALL");
+    setServiceFilter("ALL");
+    setDateFrom("");
+    setDateTo("");
+  };
+
+  const selectedSet = useMemo(() => new Set(selectedRequestIds), [selectedRequestIds]);
+  const allPageSelected =
+    visibleRequests.length > 0 && visibleRequests.every((r) => selectedSet.has(r.id));
+
+  const toggleSelectAllPage = (checked: boolean) => {
+    if (!checked) {
+      const pageIds = new Set(visibleRequests.map((r) => r.id));
+      setSelectedRequestIds((prev) => prev.filter((id) => !pageIds.has(id)));
+      return;
+    }
+    setSelectedRequestIds((prev) => Array.from(new Set([...prev, ...visibleRequests.map((r) => r.id)])));
+  };
+
+  const toggleSelectOne = (id: string, checked: boolean) => {
+    setSelectedRequestIds((prev) =>
+      checked ? Array.from(new Set([...prev, id])) : prev.filter((x) => x !== id)
+    );
+  };
+
+  const exportSelectedCsv = () => {
+    const selectedRows = filteredRequests.filter((r) => selectedSet.has(r.id));
+    const rows = selectedRows.map((r) => ({
+      gtmi: r.gtmiNumber,
+      estado: r.status,
+      pedido: r.title || "",
+      servico: r.requestingService || "",
+      requerente: r.requesterName || "",
+      prioridade: (r as any).priority || "NORMAL",
+      prazo: (r as any).dueAt || "",
+      dataPedido: r.requestedAt,
+    }));
+    const csv = Papa.unparse(rows);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", `requests-selected-${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const pageWindow = useMemo(() => {
+    const current = safePageIndex + 1;
+    const from = Math.max(1, current - 2);
+    const to = Math.min(totalPages, current + 2);
+    const arr: number[] = [];
+    for (let i = from; i <= to; i += 1) arr.push(i);
+    return arr;
+  }, [safePageIndex, totalPages]);
+
 
   return (
     <AuthenticatedLayout>
-      <div className="p-4">
-        <div className="flex items-center justify-between gap-3 mb-4">
-          <div>
-            <h1 className="text-2xl font-bold">Requisições</h1>
-            <p className="text-sm text-muted-foreground">
-              Crie requisições de reposição/compra ligadas aos produtos.
-            </p>
-          </div>
+      <div className="space-y-5">
+        <div className="glass-panel sticky top-3 z-30 rounded-2xl p-3">
           <div className="flex items-center gap-2">
-            <Button onClick={openCreateModal}>
-              <Plus className="h-4 w-4 sm:mr-2" />
-              <span className="hidden sm:inline">Nova requisição</span>
+            <div className="hidden min-w-[180px] items-center gap-2 rounded-full border border-border/70 bg-[hsl(var(--surface-2)/0.7)] px-3 py-1 text-xs text-muted-foreground sm:inline-flex">
+              <WandSparkles className="h-3.5 w-3.5 text-primary" />
+              Requests Hub
+            </div>
+            <div className="flex flex-1 items-center gap-2 rounded-xl border border-border/70 bg-[hsl(var(--surface-1)/0.85)] px-3">
+              <Search className="h-4 w-4 text-muted-foreground" />
+              <Input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Pesquisa global: GTMI, pessoa, serviço..."
+                className="border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
+              />
+            </div>
+            <Button variant="ghost" size="icon" className="rounded-full">
+              <Bell className="h-4 w-4" />
             </Button>
-            <Button variant="outline" onClick={exportCsv} disabled={loading || requests.length === 0}>
-              <span className="hidden sm:inline">Exportar CSV</span>
-              <span className="sm:hidden">CSV</span>
-            </Button>
-            <Button variant="outline" onClick={() => loadAll()} disabled={loading}>
-              <RefreshCcw className="h-4 w-4 sm:mr-2" />
-              <span className="hidden sm:inline">{loading ? "A carregar..." : "Atualizar"}</span>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" className="rounded-full px-2.5">
+                  <div className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/15 text-primary">
+                    <UserRound className="h-4 w-4" />
+                  </div>
+                  <span className="hidden sm:inline">{user?.name || "Conta"}</span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="glass-panel">
+                <DropdownMenuLabel>Conta</DropdownMenuLabel>
+                <DropdownMenuItem onClick={() => router.push("/users")}>Perfil</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <Button variant="outline" className="hidden rounded-xl md:inline-flex">
+              <WandSparkles className="h-4 w-4" />
+              Ações rápidas
             </Button>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-1 gap-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Requisições recentes</CardTitle>
-              <CardDescription>
-                Lista do tenant (visível para todos os utilizadores).
-              </CardDescription>
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                <Input
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Pesquisar por GTMI, pedido, serviço ou requerente"
-                  className="max-w-md"
+        <section className="glass-panel rounded-2xl p-5">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <h1 className="text-3xl font-semibold tracking-tight">Requisições</h1>
+              <p className="text-sm text-muted-foreground">
+                Gestão de pedidos de reposição e compras
+              </p>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-3">
+              <Button
+                onClick={openCreateModal}
+                className="h-11 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:from-blue-500 hover:to-indigo-500"
+              >
+                <Plus className="h-4 w-4" />
+                Nova Requisição
+              </Button>
+              <Button variant="outline" onClick={exportCsv} disabled={loading || filteredRequests.length === 0} className="h-11 rounded-2xl">
+                Exportar CSV
+              </Button>
+              <Button variant="outline" onClick={() => loadAll()} disabled={loading} className="h-11 rounded-2xl">
+                <RefreshCcw className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        </section>
+
+        <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {[
+            { label: "Total Requisições", value: metrics.total, tone: "text-primary", pct: "+5.2%" },
+            { label: "Pendentes", value: metrics.pending, tone: "text-amber-600", pct: "+2.0%" },
+            { label: "Aprovadas", value: metrics.approved, tone: "text-emerald-600", pct: "+1.3%" },
+            { label: "Concluídas", value: metrics.fulfilled, tone: "text-indigo-600", pct: "+4.4%" },
+          ].map((card, idx) => (
+            <article key={idx} className="rounded-2xl border border-border/60 bg-[hsl(var(--surface-1)/0.82)] p-4 shadow-sm">
+              <div className="text-xs uppercase tracking-[0.14em] text-muted-foreground">{card.label}</div>
+              <div className={`mt-1 text-3xl font-semibold ${card.tone}`}>{card.value}</div>
+              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted/70">
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-blue-500 to-indigo-500"
+                  style={{ width: `${Math.max(15, Math.min(100, (card.value / Math.max(1, metrics.total)) * 100))}%` }}
                 />
-                <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as any)}>
-                  <SelectTrigger className="w-[180px]">
-                    <SelectValue placeholder="Estado" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="ALL">Todos os estados</SelectItem>
-                    <SelectItem value="SUBMITTED">Submetida</SelectItem>
-                    <SelectItem value="APPROVED">Aprovada</SelectItem>
-                    <SelectItem value="REJECTED">Rejeitada</SelectItem>
-                    <SelectItem value="FULFILLED">Cumprida</SelectItem>
-                    <SelectItem value="DRAFT">Rascunho</SelectItem>
+              </div>
+              <div className="mt-2 text-xs text-muted-foreground">{card.pct} nos últimos 30 dias</div>
+            </article>
+          ))}
+        </section>
+
+        <section className="rounded-2xl border border-border/60 bg-[hsl(var(--surface-1)/0.8)] p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                className="h-10 rounded-xl"
+                onClick={() => setShowAdvancedFilters((prev) => !prev)}
+              >
+                <Filter className="h-4 w-4" />
+                Filtros avançados
+                <Badge variant="secondary" className="rounded-full">{activeFiltersCount}</Badge>
+                <ChevronDown className={`h-4 w-4 transition-transform ${showAdvancedFilters ? "rotate-180" : ""}`} />
+              </Button>
+              <Button
+                variant="outline"
+                className="h-10 rounded-xl md:hidden"
+                onClick={() => setFilterSheetOpen(true)}
+              >
+                <SlidersHorizontal className="h-4 w-4" />
+                Filtros
+              </Button>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <div className="inline-flex rounded-full border border-border/70 bg-[hsl(var(--surface-2)/0.72)] p-1">
+                <button
+                  type="button"
+                  onClick={() => setViewMode("table")}
+                  className={`rounded-full px-3 py-1 text-xs ${viewMode === "table" ? "bg-primary/15 text-primary" : "text-muted-foreground"}`}
+                >
+                  <Table2 className="mr-1 inline h-3.5 w-3.5" />
+                  Tabela
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode("cards")}
+                  className={`rounded-full px-3 py-1 text-xs ${viewMode === "cards" ? "bg-primary/15 text-primary" : "text-muted-foreground"}`}
+                >
+                  <LayoutGrid className="mr-1 inline h-3.5 w-3.5" />
+                  Cards
+                </button>
+              </div>
+              <Select value={String(pageSize)} onValueChange={(v) => setPageSize(Number(v))}>
+                <SelectTrigger className="h-10 w-[94px] rounded-xl">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="glass-panel">
+                  {[6, 10, 20, 30].map((s) => (
+                    <SelectItem key={s} value={String(s)}>
+                      {s}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          {showAdvancedFilters ? (
+            <div className="mt-4 grid gap-3 lg:grid-cols-5">
+              <div className="space-y-2 lg:col-span-2">
+                <div className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Estado</div>
+                <div className="flex h-11 items-center gap-1 rounded-xl border border-border/60 bg-[hsl(var(--surface-2)/0.7)] p-1">
+                  {[
+                    ["ALL", "Todos"],
+                    ["SUBMITTED", "Submetidas"],
+                    ["APPROVED", "Aprovadas"],
+                    ["FULFILLED", "Concluídas"],
+                    ["REJECTED", "Rejeitadas"],
+                  ].map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => setStatusFilter(value as any)}
+                      className={`h-full flex-1 rounded-lg text-xs ${statusFilter === value ? "bg-primary/15 text-primary" : "text-muted-foreground"}`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <div className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Prioridade</div>
+                <Select value={priorityFilter} onValueChange={(v) => setPriorityFilter(v as any)}>
+                  <SelectTrigger className="h-11 rounded-xl"><SelectValue /></SelectTrigger>
+                  <SelectContent className="glass-panel">
+                    <SelectItem value="ALL">Todas</SelectItem>
+                    <SelectItem value="LOW">Baixa</SelectItem>
+                    <SelectItem value="NORMAL">Normal</SelectItem>
+                    <SelectItem value="HIGH">Alta</SelectItem>
+                    <SelectItem value="URGENT">Urgente</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
-            </CardHeader>
-            <CardContent>
-              {loading ? (
-                <p className="text-sm text-muted-foreground">A carregar...</p>
-              ) : visibleRequests.length === 0 ? (
-                <p className="text-sm text-muted-foreground">Sem requisições ainda.</p>
-              ) : (
-                <>
-                  {/* Mobile cards */}
-	                  <div className="space-y-3 md:hidden">
-	                    {visibleRequests.map((r) => (
-                      <div
-                        key={r.id}
-                        className={
-                          "rounded-lg border bg-background p-3 " +
-                          (focusId && focusId === r.id ? "border-primary/40 bg-muted/20" : "")
-                        }
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <Button
-                              variant="link"
-                              className="h-auto p-0 font-semibold"
-                              onClick={() => openDetails(r)}
-                            >
-                              {r.gtmiNumber}
-                            </Button>
-                            <div className="text-xs text-muted-foreground truncate" title={r.requestingService || ""}>
-                              {r.requestingService || "—"}
-                              {isAdmin && r.user?.name ? ` • ${r.user.name}` : ""}
-                            </div>
-                          </div>
 
-	                          <Badge variant="outline" className={formatStatus(r.status).className}>
-	                            {formatStatus(r.status).label}
-	                          </Badge>
-	                        </div>
+              <div className="space-y-2">
+                <div className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Pessoa</div>
+                <Select value={personFilter} onValueChange={setPersonFilter}>
+                  <SelectTrigger className="h-11 rounded-xl"><SelectValue /></SelectTrigger>
+                  <SelectContent className="glass-panel">
+                    <SelectItem value="ALL">Todas</SelectItem>
+                    {personOptions.map((person) => (
+                      <SelectItem key={person} value={person}>{person}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
-                          <div className="mt-2">
-                            {(() => {
-                              const wf = workflowMeta(r.status);
-                              const WfIcon = wf.icon;
-                              return (
-                                <Badge variant="outline" className={wf.className}>
-                                  <WfIcon className={`mr-1 h-3.5 w-3.5 ${wf.iconClassName}`} />
-                                  {wf.label}
-                                </Badge>
-                              );
-                            })()}
-                          </div>
+              <div className="space-y-2">
+                <div className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Serviço</div>
+                <Select value={serviceFilter} onValueChange={setServiceFilter}>
+                  <SelectTrigger className="h-11 rounded-xl"><SelectValue /></SelectTrigger>
+                  <SelectContent className="glass-panel">
+                    <SelectItem value="ALL">Todos</SelectItem>
+                    {serviceOptions.map((service) => (
+                      <SelectItem key={service} value={service}>{service}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
-                          {isAdmin ? (
-                            <div className="mt-2">
-                              <Select
-                                value={r.status}
-                                onValueChange={(v) => changeRequestStatus(r.id, v as RequestDto["status"])}
-                              >
-                                <SelectTrigger className="h-8">
-                                  <SelectValue placeholder="Alterar estado" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="DRAFT">Rascunho</SelectItem>
-                                  <SelectItem value="SUBMITTED">Submetida</SelectItem>
-                                  <SelectItem value="APPROVED">Aprovada</SelectItem>
-                                  <SelectItem value="REJECTED">Rejeitada</SelectItem>
-                                  <SelectItem value="FULFILLED">Cumprida</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                          ) : null}
+              <div className="space-y-2 lg:col-span-2">
+                <div className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Data pedido</div>
+                <div className="grid grid-cols-2 gap-2">
+                  <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="h-11 rounded-xl" />
+                  <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="h-11 rounded-xl" />
+                </div>
+              </div>
 
-	                        <div className="mt-3 grid grid-cols-2 gap-2">
-                          <div>
-                            <div className="text-xs text-muted-foreground">Pedido</div>
-                            <div className="text-sm">{new Date(r.requestedAt).toLocaleString()}</div>
-                          </div>
-                          <div>
-                            <div className="text-xs text-muted-foreground">Itens</div>
-                            <div className="text-sm">{r.items?.length || 0}</div>
-                          </div>
-                          <div>
-                            <div className="text-xs text-muted-foreground">Prioridade</div>
-                            <div className="text-sm">{priorityMeta(r.priority).label}</div>
-                          </div>
-                          <div>
-                            <div className="text-xs text-muted-foreground">Prazo</div>
-                            <div className="text-sm">{r.dueAt ? new Date(r.dueAt).toLocaleDateString("pt-PT") : "—"}</div>
-                          </div>
-                          <div className="col-span-2">
-                            <div className="text-xs text-muted-foreground">Previsto</div>
-                            <div className="text-sm">
-                              {(r.expectedDeliveryFrom ? r.expectedDeliveryFrom.slice(0, 10) : "—") +
-                                " → " +
-                                (r.expectedDeliveryTo ? r.expectedDeliveryTo.slice(0, 10) : "—")}
-                            </div>
-                          </div>
-                          <div className="col-span-2">
-                            <div className="text-xs text-muted-foreground">Assinatura</div>
-                            {r.signedAt ? (
-                              <div className="text-sm">
-                                <span className="font-medium">{r.signedByName || r.signedBy?.name || "—"}</span>
-                                <span className="text-muted-foreground"> • {new Date(r.signedAt).toLocaleString()}</span>
-                              </div>
-                            ) : (
-                              <div className="text-sm text-muted-foreground">Por assinar</div>
-                            )}
-                          </div>
-                        </div>
+              <div className="flex items-end">
+                <Button variant="ghost" className="h-11 rounded-xl" onClick={clearAdvancedFilters}>
+                  Limpar filtros
+                </Button>
+              </div>
+            </div>
+          ) : null}
+        </section>
 
-                        <div className="mt-3 flex justify-end gap-1">
-                          <Button
-                            variant="outline"
-                            size="icon"
-                            onClick={() => openEditModal(r)}
-                            disabled={Boolean(r.signedAt) || (!isAdmin && r.userId !== user?.id)}
-                            title={r.signedAt ? "Assinada — anule a assinatura para editar" : "Editar"}
-                            aria-label="Editar"
-                          >
-                            <PenLine className="h-4 w-4" />
-                          </Button>
+        <section className="rounded-2xl border border-border/60 bg-[hsl(var(--surface-1)/0.82)] p-4">
+          {loading ? (
+            <div className="space-y-3">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className="h-16 animate-pulse rounded-2xl bg-muted/60" />
+              ))}
+            </div>
+          ) : filteredRequests.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-border/80 bg-[hsl(var(--surface-1)/0.7)] p-10 text-center">
+              <CalendarRange className="mx-auto mb-3 h-8 w-8 text-primary" />
+              <div className="text-lg font-semibold">Sem requisições</div>
+              <div className="text-sm text-muted-foreground">Ajusta os filtros ou cria uma nova requisição.</div>
+            </div>
+          ) : viewMode === "cards" || isMobile ? (
+            <div className="space-y-3">
+              {visibleRequests.map((r) => (
+                <details key={r.id} className={`rounded-2xl border border-border/60 bg-[hsl(var(--surface-1)/0.75)] p-4 shadow-sm ${focusId === r.id ? "border-primary/50" : ""}`}>
+                  <summary className="flex cursor-pointer list-none items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <Checkbox
+                          checked={selectedSet.has(r.id)}
+                          onCheckedChange={(v) => toggleSelectOne(r.id, Boolean(v))}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                        <span className="font-semibold">{r.gtmiNumber}</span>
+                        <Badge variant="outline" className={formatStatus(r.status).className}>{formatStatus(r.status).label}</Badge>
+                      </div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        {r.requesterName || r.user?.name || "—"} • {r.requestingService || "—"}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline" className={priorityMeta(r.priority).className}>{priorityMeta(r.priority).label}</Badge>
+                      <span className="text-xs text-muted-foreground">{r.dueAt ? new Date(r.dueAt).toLocaleDateString("pt-PT") : "Sem prazo"}</span>
+                    </div>
+                  </summary>
+                  <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
+                    <div><span className="text-muted-foreground">Pedido:</span> {new Date(r.requestedAt).toLocaleString()}</div>
+                    <div><span className="text-muted-foreground">Itens:</span> {r.items?.length || 0}</div>
+                    <div><span className="text-muted-foreground">Previsto:</span> {(r.expectedDeliveryFrom ? r.expectedDeliveryFrom.slice(0, 10) : "—")} → {(r.expectedDeliveryTo ? r.expectedDeliveryTo.slice(0, 10) : "—")}</div>
+                    <div><span className="text-muted-foreground">Assinatura:</span> {r.signedAt ? "Assinada" : "Por assinar"}</div>
+                  </div>
+                  <div className="mt-3 flex flex-wrap justify-end gap-1">
+                    <Button variant="outline" size="icon" className="rounded-xl" onClick={() => openEditModal(r)} disabled={Boolean(r.signedAt) || (!isAdmin && r.userId !== user?.id)}><PenLine className="h-4 w-4" /></Button>
+                    <AttachmentsDialog
+                      kind="REQUEST"
+                      requestId={r.id}
+                      title={`Anexos • ${r.gtmiNumber}`}
+                      description="Ficheiros ligados a esta requisição."
+                      trigger={<Button variant="outline" size="icon" className="rounded-xl"><Paperclip className="h-4 w-4" /></Button>}
+                    />
+                    <Button variant="outline" size="icon" className="rounded-xl" onClick={() => printRequest(r)}><Printer className="h-4 w-4" /></Button>
+                    <Button variant="outline" size="icon" className="rounded-xl" onClick={() => openQr(r)} disabled={!origin}><QrCode className="h-4 w-4" /></Button>
+                  </div>
+                </details>
+              ))}
+            </div>
+          ) : (
+            <div className="overflow-auto rounded-2xl border border-border/70">
+              <Table>
+                <TableHeader className="sticky top-0 z-10 bg-[hsl(var(--surface-2)/0.95)] backdrop-blur">
+                  <TableRow>
+                    <TableHead className="w-10">
+                      <Checkbox checked={allPageSelected} onCheckedChange={(v) => toggleSelectAllPage(Boolean(v))} />
+                    </TableHead>
+                    <TableHead>Nº</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Prioridade</TableHead>
+                    <TableHead>Pessoa</TableHead>
+                    <TableHead>Serviço</TableHead>
+                    <TableHead>Prazo</TableHead>
+                    <TableHead>Itens</TableHead>
+                    <TableHead className="text-right">Ações</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {visibleRequests.map((r) => (
+                    <TableRow key={r.id} className={focusId === r.id ? "bg-primary/5" : ""}>
+                      <TableCell>
+                        <Checkbox checked={selectedSet.has(r.id)} onCheckedChange={(v) => toggleSelectOne(r.id, Boolean(v))} />
+                      </TableCell>
+                      <TableCell>
+                        <Button variant="link" className="h-auto p-0 font-semibold" onClick={() => openDetails(r)}>
+                          {r.gtmiNumber}
+                        </Button>
+                      </TableCell>
+                      <TableCell>
+                        {isAdmin ? (
+                          <Select value={r.status} onValueChange={(v) => changeRequestStatus(r.id, v as RequestDto["status"])}>
+                            <SelectTrigger className="h-8 w-[170px] rounded-lg">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent className="glass-panel">
+                              <SelectItem value="DRAFT">Rascunho</SelectItem>
+                              <SelectItem value="SUBMITTED">Submetida</SelectItem>
+                              <SelectItem value="APPROVED">Aprovada</SelectItem>
+                              <SelectItem value="REJECTED">Rejeitada</SelectItem>
+                              <SelectItem value="FULFILLED">Cumprida</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        ) : (
+                          <Badge variant="outline" className={formatStatus(r.status).className}>{formatStatus(r.status).label}</Badge>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className={priorityMeta(r.priority).className}>{priorityMeta(r.priority).label}</Badge>
+                      </TableCell>
+                      <TableCell>{r.requesterName || r.user?.name || "—"}</TableCell>
+                      <TableCell className="max-w-[220px] truncate" title={r.requestingService || ""}>{r.requestingService || "—"}</TableCell>
+                      <TableCell>{r.dueAt ? new Date(r.dueAt).toLocaleDateString("pt-PT") : "—"}</TableCell>
+                      <TableCell>{r.items?.length || 0}</TableCell>
+                      <TableCell>
+                        <div className="flex justify-end gap-1">
+                          <Button variant="outline" size="icon" className="rounded-xl" onClick={() => openEditModal(r)} disabled={Boolean(r.signedAt) || (!isAdmin && r.userId !== user?.id)}><PenLine className="h-4 w-4" /></Button>
                           <AttachmentsDialog
                             kind="REQUEST"
                             requestId={r.id}
                             title={`Anexos • ${r.gtmiNumber}`}
                             description="Ficheiros ligados a esta requisição."
-                            trigger={
-                              <Button
-                                variant="outline"
-                                size="icon"
-                                title="Anexos"
-                                aria-label="Anexos"
-                              >
-                                <Paperclip className="h-4 w-4" />
-                              </Button>
-                            }
+                            trigger={<Button variant="outline" size="icon" className="rounded-xl"><Paperclip className="h-4 w-4" /></Button>}
                           />
-                          <Button
-                            variant="outline"
-                            size="icon"
-                            onClick={() => printRequest(r)}
-                            title="Imprimir"
-                            aria-label="Imprimir"
-                          >
-                            <Printer className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="icon"
-                            onClick={() => openQr(r)}
-                            disabled={!origin}
-                            title="QR"
-                            aria-label="QR"
-                          >
-                            <QrCode className="h-4 w-4" />
-                          </Button>
+                          <Button variant="outline" size="icon" className="rounded-xl" onClick={() => printRequest(r)}><Printer className="h-4 w-4" /></Button>
+                          <Button variant="outline" size="icon" className="rounded-xl" onClick={() => openQr(r)} disabled={!origin}><QrCode className="h-4 w-4" /></Button>
                         </div>
-                      </div>
-                    ))}
-                  </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
 
-                  {/* Desktop table */}
-                  <div className="hidden md:block w-full overflow-x-auto">
-                    <Table>
-	                      <TableHeader>
-	                        <TableRow>
-	                          <TableHead className="whitespace-nowrap">Nº</TableHead>
-	                          <TableHead>Status</TableHead>
-                              <TableHead>Situação</TableHead>
-                              <TableHead>Prioridade</TableHead>
-                              <TableHead>Prazo</TableHead>
-	                          {isAdmin ? <TableHead className="hidden lg:table-cell">Pessoa</TableHead> : null}
-	                          <TableHead className="max-w-[220px]">Serviço</TableHead>
-                          <TableHead className="hidden md:table-cell">Pedido</TableHead>
-                          <TableHead className="hidden lg:table-cell">Previsto</TableHead>
-                          <TableHead className="whitespace-nowrap">Itens</TableHead>
-                          <TableHead className="hidden md:table-cell">Assinatura</TableHead>
-                          <TableHead className="text-right whitespace-nowrap">Ações</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {visibleRequests.map((r) => (
-                          <TableRow
-                            key={r.id}
-                            className={focusId && focusId === r.id ? "bg-muted/30" : ""}
-                          >
-                            <TableCell className="font-medium py-2 px-3 whitespace-nowrap">
-                              <Button
-                                variant="link"
-                                className="h-auto p-0 font-semibold"
-                                onClick={() => openDetails(r)}
-                              >
-                                {r.gtmiNumber}
-                              </Button>
-                            </TableCell>
-	                            <TableCell className="py-2 px-3">
-	                              <Badge variant="outline" className={formatStatus(r.status).className}>
-	                                {formatStatus(r.status).label}
-	                              </Badge>
-	                            </TableCell>
-                                <TableCell className="py-2 px-3">
-                                  {isAdmin ? (
-                                    <Select
-                                      value={r.status}
-                                      onValueChange={(v) => changeRequestStatus(r.id, v as RequestDto["status"])}
-                                    >
-                                      <SelectTrigger className="h-8 w-[210px]">
-                                        <SelectValue />
-                                      </SelectTrigger>
-                                      <SelectContent>
-                                        <SelectItem value="DRAFT">Rascunho</SelectItem>
-                                        <SelectItem value="SUBMITTED">Submetida</SelectItem>
-                                        <SelectItem value="APPROVED">Aprovada</SelectItem>
-                                        <SelectItem value="REJECTED">Rejeitada</SelectItem>
-                                        <SelectItem value="FULFILLED">Cumprida</SelectItem>
-                                      </SelectContent>
-                                    </Select>
-                                  ) : (
-                                    (() => {
-                                      const wf = workflowMeta(r.status);
-                                      const WfIcon = wf.icon;
-                                      return (
-                                        <Badge variant="outline" className={wf.className}>
-                                          <WfIcon className={`mr-1 h-3.5 w-3.5 ${wf.iconClassName}`} />
-                                          {wf.label}
-                                        </Badge>
-                                      );
-                                    })()
-                                  )}
-                                </TableCell>
-                            <TableCell className="py-2 px-3">
-                              <Badge variant="outline" className={priorityMeta(r.priority).className}>
-                                {priorityMeta(r.priority).label}
-                              </Badge>
-                            </TableCell>
-                            <TableCell className="py-2 px-3 whitespace-nowrap">
-                              {r.dueAt ? new Date(r.dueAt).toLocaleDateString("pt-PT") : "—"}
-                            </TableCell>
-	                            {isAdmin ? (
-                              <TableCell className="hidden lg:table-cell py-2 px-3">
-                                {r.user ? (
-                                  <span className="text-sm">{r.user.name}</span>
-                                ) : (
-                                  <span className="text-sm text-muted-foreground">—</span>
-                                )}
-                              </TableCell>
-                            ) : null}
-                            <TableCell className="py-2 px-3 max-w-[220px]">
-                              <span className="text-sm truncate block" title={r.requestingService || ""}>
-                                {r.requestingService || "—"}
-                              </span>
-                            </TableCell>
-                            <TableCell className="hidden md:table-cell py-2 px-3 whitespace-nowrap">
-                              <span className="text-sm">{new Date(r.requestedAt).toLocaleString()}</span>
-                            </TableCell>
-                            <TableCell className="hidden lg:table-cell py-2 px-3 whitespace-nowrap">
-                              <span className="text-sm">
-                                {(r.expectedDeliveryFrom ? r.expectedDeliveryFrom.slice(0, 10) : "—") +
-                                  " → " +
-                                  (r.expectedDeliveryTo ? r.expectedDeliveryTo.slice(0, 10) : "—")}
-                              </span>
-                            </TableCell>
-                            <TableCell className="py-2 px-3 whitespace-nowrap">
-                              <span className="text-sm">{r.items?.length || 0}</span>
-                            </TableCell>
-                            <TableCell className="hidden md:table-cell py-2 px-3">
-                              {r.signedAt ? (
-                                <div className="text-sm">
-                                  <div className="font-medium">{r.signedByName || r.signedBy?.name || "—"}</div>
-                                  <div className="text-xs text-muted-foreground whitespace-nowrap">
-                                    {new Date(r.signedAt).toLocaleString()}
-                                  </div>
-                                </div>
-                              ) : (
-                                <span className="text-sm text-muted-foreground">Por assinar</span>
-                              )}
-                            </TableCell>
-                            <TableCell className="text-right py-2 px-3">
-                              <div className="inline-flex items-center gap-1">
-                                <Button
-                                  variant="outline"
-                                  size="icon"
-                                  onClick={() => openEditModal(r)}
-                                  disabled={Boolean(r.signedAt) || (!isAdmin && r.userId !== user?.id)}
-                                  title={r.signedAt ? "Assinada — anule a assinatura para editar" : "Editar"}
-                                  aria-label="Editar"
-                                >
-                                  <PenLine className="h-4 w-4" />
-                                </Button>
-                                <AttachmentsDialog
-                                  kind="REQUEST"
-                                  requestId={r.id}
-                                  title={`Anexos • ${r.gtmiNumber}`}
-                                  description="Ficheiros ligados a esta requisição."
-                                  trigger={
-                                    <Button
-                                      variant="outline"
-                                      size="icon"
-                                      title="Anexos"
-                                      aria-label="Anexos"
-                                    >
-                                      <Paperclip className="h-4 w-4" />
-                                    </Button>
-                                  }
-                                />
-                                <Button
-                                  variant="outline"
-                                  size="icon"
-                                  onClick={() => printRequest(r)}
-                                  title="Imprimir"
-                                  aria-label="Imprimir"
-                                >
-                                  <Printer className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                  variant="outline"
-                                  size="icon"
-                                  onClick={() => openQr(r)}
-                                  disabled={!origin}
-                                  title="QR"
-                                  aria-label="QR"
-                                >
-                                  <QrCode className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                </>
-              )}
+          <div className="mt-4 flex flex-col items-center justify-between gap-3 sm:flex-row">
+            <div className="text-sm text-muted-foreground">
+              A mostrar {filteredRequests.length === 0 ? 0 : pageStart + 1}-{Math.min(filteredRequests.length, pageStart + pageSize)} de {filteredRequests.length}
+            </div>
+            <div className="flex items-center gap-1">
+              <Button variant="ghost" size="icon" className="rounded-full" disabled={safePageIndex === 0} onClick={() => setPageIndex((p) => Math.max(0, p - 1))}>
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              {pageWindow.map((page) => (
+                <button
+                  key={page}
+                  type="button"
+                  onClick={() => setPageIndex(page - 1)}
+                  className={`h-8 min-w-8 rounded-full px-2 text-sm ${page === safePageIndex + 1 ? "bg-primary/15 text-primary" : "text-muted-foreground hover:bg-muted/70"}`}
+                >
+                  {page}
+                </button>
+              ))}
+              <Button variant="ghost" size="icon" className="rounded-full" disabled={safePageIndex >= totalPages - 1} onClick={() => setPageIndex((p) => Math.min(totalPages - 1, p + 1))}>
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        </section>
 
-            </CardContent>
-          </Card>
+        <Dialog open={filterSheetOpen} onOpenChange={setFilterSheetOpen}>
+          <DialogContent className="bottom-0 top-auto max-w-none translate-y-0 rounded-t-2xl border-t border-border/70 px-4 pb-8 pt-6 sm:hidden">
+            <DialogHeader>
+              <DialogTitle>Filtros</DialogTitle>
+              <DialogDescription>Ajuste rápido no mobile.</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3">
+              <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as any)}>
+                <SelectTrigger><SelectValue placeholder="Estado" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ALL">Todos</SelectItem>
+                  <SelectItem value="SUBMITTED">Submetida</SelectItem>
+                  <SelectItem value="APPROVED">Aprovada</SelectItem>
+                  <SelectItem value="REJECTED">Rejeitada</SelectItem>
+                  <SelectItem value="FULFILLED">Cumprida</SelectItem>
+                  <SelectItem value="DRAFT">Rascunho</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={priorityFilter} onValueChange={(v) => setPriorityFilter(v as any)}>
+                <SelectTrigger><SelectValue placeholder="Prioridade" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ALL">Todas</SelectItem>
+                  <SelectItem value="LOW">Baixa</SelectItem>
+                  <SelectItem value="NORMAL">Normal</SelectItem>
+                  <SelectItem value="HIGH">Alta</SelectItem>
+                  <SelectItem value="URGENT">Urgente</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={personFilter} onValueChange={setPersonFilter}>
+                <SelectTrigger><SelectValue placeholder="Pessoa" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ALL">Todas</SelectItem>
+                  {personOptions.map((person) => (
+                    <SelectItem key={person} value={person}>{person}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value={serviceFilter} onValueChange={setServiceFilter}>
+                <SelectTrigger><SelectValue placeholder="Serviço" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ALL">Todos</SelectItem>
+                  {serviceOptions.map((service) => (
+                    <SelectItem key={service} value={service}>{service}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+              <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+              <div className="flex gap-2">
+                <Button variant="outline" className="w-full" onClick={clearAdvancedFilters}>Limpar</Button>
+                <Button className="w-full" onClick={() => setFilterSheetOpen(false)}>Aplicar</Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {selectedRequestIds.length > 0 ? (
+          <div className="fixed bottom-6 left-1/2 z-40 flex w-[min(95vw,680px)] -translate-x-1/2 items-center justify-between gap-2 rounded-2xl border border-primary/30 bg-[hsl(var(--surface-1)/0.9)] px-4 py-3 shadow-2xl backdrop-blur-xl">
+            <div className="text-sm">
+              <span className="font-semibold">{selectedRequestIds.length}</span> selecionada(s)
+            </div>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" className="h-9 rounded-xl" onClick={exportSelectedCsv}>Exportar seleção</Button>
+              <Button variant="ghost" className="h-9 rounded-xl" onClick={() => setSelectedRequestIds([])}>Limpar</Button>
+            </div>
+          </div>
+        ) : null}
+
+        <Button
+          onClick={openCreateModal}
+          className="fixed bottom-6 right-5 z-40 h-12 rounded-full bg-gradient-to-r from-blue-600 to-indigo-600 px-4 text-white shadow-2xl md:hidden"
+        >
+          <Plus className="mr-1 h-4 w-4" />
+          Nova
+        </Button>
 
           <Dialog
             open={createOpen}
             onOpenChange={(o) => {
               setCreateOpen(o);
-              if (!o) setEditRequestId(null);
+              if (!o) {
+                setEditRequestId(null);
+                setWizardStep(1);
+                setWizardSubmitted(false);
+                setWizardSuccess(false);
+              }
             }}
           >
-            <DialogContent className="w-[96vw] max-w-[1200px] max-h-[90vh] overflow-y-auto overflow-x-hidden">
-              <DialogHeader>
-                <DialogTitle>{editRequestId ? "Editar requisição" : "Nova requisição"}</DialogTitle>
-                <DialogDescription>
-                  {editRequestId
-                    ? "Atualize os dados e os itens. (Só é possível antes de assinar.)"
-                    : "Preencha os dados e adicione pelo menos um item."}
-                </DialogDescription>
-              </DialogHeader>
-
-              <div className="space-y-4">
-                {isAdmin && !editRequestId ? (
-                  <div className="space-y-2">
-                    <div className="text-sm font-medium">Criar em nome de</div>
-                    <Select value={asUserId} onValueChange={setAsUserId}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Selecionar utilizador" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {users.map((u) => (
-                          <SelectItem key={u.id} value={u.id}>
-                            {u.name} ({u.email})
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <div className="text-xs text-muted-foreground">
-                      A requisição será criada em nome da pessoa selecionada.
-                    </div>
+            <DialogContent className="left-0 top-0 h-[100dvh] w-screen max-w-none translate-x-0 translate-y-0 overflow-hidden rounded-none border-0 p-0 sm:left-1/2 sm:top-1/2 sm:h-auto sm:w-[min(960px,92vw)] sm:max-h-[88vh] sm:max-w-[min(960px,92vw)] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-3xl sm:border sm:border-border/70">
+              <div className="flex h-[100dvh] flex-col sm:h-auto sm:max-h-[88vh]">
+                <div className="border-b border-border/60 bg-[hsl(var(--surface-1)/0.95)] px-3 py-3 sm:px-5">
+                  <DialogHeader>
+                    <DialogTitle className="text-lg sm:text-xl">{editRequestId ? "Editar requisição" : "Nova requisição"}</DialogTitle>
+                    <DialogDescription>
+                      Wizard de criação em 4 passos.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-[hsl(var(--surface-3)/0.8)]">
+                    <div
+                      className="h-full rounded-full bg-gradient-to-r from-blue-600 to-indigo-600 transition-all duration-300"
+                      style={{ width: `${(wizardStep / 4) * 100}%` }}
+                    />
                   </div>
-                ) : null}
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <div className="text-sm font-medium">Data/Hora do pedido</div>
-                  <Input
-                    type="datetime-local"
-                    value={requestedAt}
-                    onChange={(e) => setRequestedAt(e.target.value)}
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <div className="text-sm font-medium">Serviço requisitante</div>
-                  <select
-                    value={requestingServiceId}
-                    onChange={(e) => setRequestingServiceId(e.target.value)}
-                    className="h-11 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm"
-                  >
-                    <option value="" disabled>
-                      Selecionar serviço...
-                    </option>
-                    {requestingServices.map((s) => (
-                      <option key={s.id} value={String(s.id)}>
-                        {s.codigo} — {s.designacao}
-                      </option>
+                  <div className="mt-3 grid grid-cols-4 gap-1.5 sm:-mx-1 sm:flex sm:gap-2 sm:overflow-x-auto sm:px-1 sm:pb-1">
+                    {wizardSteps.map((step) => (
+                      <button
+                        key={step.id}
+                        type="button"
+                        onClick={() => setWizardStep(step.id)}
+                        className={`rounded-xl border px-2 py-1.5 text-left transition sm:min-w-0 sm:flex-1 sm:px-3 sm:py-2 ${
+                          wizardStep === step.id
+                            ? "border-primary/35 bg-primary/10 text-primary"
+                            : "border-border/60 bg-[hsl(var(--surface-2)/0.55)] text-muted-foreground"
+                        }`}
+                      >
+                        <div className="text-[9px] uppercase tracking-[0.1em] sm:text-[11px]">Passo {step.id}</div>
+                        <div className="truncate text-[11px] font-medium sm:text-sm">{step.label}</div>
+                      </button>
                     ))}
-                  </select>
-                  {requestingServices.length === 0 ? (
-                    <div className="text-xs text-muted-foreground">Lista de serviços indisponível.</div>
-                  ) : null}
+                  </div>
                 </div>
-              </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <div className="text-sm font-medium">Prioridade</div>
-                  <Select value={priority} onValueChange={(v) => setPriority(v as any)}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Prioridade" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="LOW">Baixa</SelectItem>
-                      <SelectItem value="NORMAL">Normal</SelectItem>
-                      <SelectItem value="HIGH">Alta</SelectItem>
-                      <SelectItem value="URGENT">Urgente</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1">
-                  <div className="text-sm font-medium">Prazo (SLA)</div>
-                  <Input type="date" value={dueAt} onChange={(e) => setDueAt(e.target.value)} />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <div className="text-sm font-medium">Funcionário / Órgão (nome)</div>
-                  <Input
-                    placeholder="Nome"
-                    value={requesterName}
-                    onChange={(e) => setRequesterName(e.target.value)}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <div className="text-sm font-medium">Nº mecanográfico</div>
-                  <Input
-                    placeholder="Nº"
-                    value={requesterEmployeeNo}
-                    onChange={(e) => setRequesterEmployeeNo(e.target.value)}
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <div className="text-sm font-medium">Local de entrega</div>
-                <Input
-                  placeholder="Ex: Armazém central / Piso 2 / ..."
-                  value={deliveryLocation}
-                  onChange={(e) => setDeliveryLocation(e.target.value)}
-                />
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <div className="text-sm font-medium">Data prevista (de)</div>
-                  <Input
-                    type="date"
-                    value={expectedDeliveryFrom}
-                    onChange={(e) => setExpectedDeliveryFrom(e.target.value)}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <div className="text-sm font-medium">Data prevista (até)</div>
-                  <Input
-                    type="date"
-                    value={expectedDeliveryTo}
-                    onChange={(e) => setExpectedDeliveryTo(e.target.value)}
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <div className="text-sm font-medium">Fundamento do Pedido</div>
-                <Textarea
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  placeholder="Escreva o motivo/fundamento do pedido..."
-                />
-              </div>
-
-              <div className="space-y-2">
-                <div className="text-sm font-medium">Tipo de bem/serviço</div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  {(Object.keys(goodsTypeLabels) as GoodsType[]).map((k) => (
-                    <label key={k} className="flex items-center gap-2 text-sm">
-                      <Checkbox
-                        checked={goodsTypes[k]}
-                        onCheckedChange={(checked) =>
-                          setGoodsTypes((prev) => ({ ...prev, [k]: Boolean(checked) }))
-                        }
-                      />
-                      <span>{goodsTypeLabels[k]}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <div className="text-sm font-medium">Itens</div>
-                {/* Mobile */}
-                <div className="space-y-3 md:hidden">
-                  {items.map((it, idx) => (
-                    <div key={`item-${idx}`} className="rounded-md border border-border/60 p-3 space-y-2">
-                      <div className="space-y-1">
-                        <div className="text-xs text-muted-foreground">Produto</div>
-                        <Select
-                          value={it.productId}
-                          onValueChange={(v) => {
-                            setItems((prev) =>
-                              prev.map((p, pIdx) =>
-                                pIdx === idx
-                                  ? { ...p, productId: v, destination: "" }
-                                  : p
-                              )
-                            );
-                            void autoPickUnitForRow(idx, { force: false, productId: v });
-                          }}
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Produto" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {allProducts
-                              .slice()
-                              .sort((a, b) => a.name.localeCompare(b.name))
-                              .map((p) => (
-                                <SelectItem key={p.id} value={p.id}>
-                                  {p.name} ({p.sku})
+                <div className="flex-1 overflow-y-auto bg-[hsl(var(--surface-2)/0.28)] px-3 py-2 pb-4 sm:px-5 sm:py-4">
+                  <div className="mx-auto w-full max-w-3xl">
+                  {wizardStep === 1 ? (
+                    <div className="space-y-4 animate-fade-up rounded-2xl border border-border/60 bg-[hsl(var(--surface-1)/0.9)] p-3 sm:p-4">
+                      {isAdmin && !editRequestId ? (
+                        <div className="space-y-2">
+                          <div className="text-sm font-medium">Criar em nome de</div>
+                          <Select value={asUserId} onValueChange={setAsUserId}>
+                            <SelectTrigger className="h-11 rounded-xl">
+                              <SelectValue placeholder="Selecionar utilizador" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {users.map((u) => (
+                                <SelectItem key={u.id} value={u.id}>
+                                  {u.name} ({u.email})
                                 </SelectItem>
                               ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      ) : null}
 
-                      <div className="grid grid-cols-2 gap-2">
+                      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                         <div className="space-y-1">
-                          <div className="text-xs text-muted-foreground">Qtd</div>
-                          <Input
-                            type="number"
-                            min={1}
-                            value={it.quantity}
-                            onChange={(e) => {
-                              const nextQty = Number(e.target.value);
-                              const hasQr = Boolean((it.destination || "").trim());
-                              const avail = it.productId ? unitHintByProductId[it.productId]?.availableCount : 0;
-                              const isUnitTracked = hasQr || (avail ?? 0) > 0;
-
-                              if (isUnitTracked && nextQty > 1) {
-                                toast({
-                                  title: "Qtd inválida",
-                                  description: "Para produtos com QR (unidades), use linhas separadas (Qtd=1 por unidade).",
-                                  variant: "destructive",
-                                });
-                                setItems((prev) =>
-                                  prev.map((p, pIdx) => (pIdx === idx ? { ...p, quantity: 1 } : p))
-                                );
-                                return;
-                              }
-
-                              setItems((prev) =>
-                                prev.map((p, pIdx) =>
-                                  pIdx === idx ? { ...p, quantity: nextQty } : p
-                                )
-                              );
-                            }}
-                          />
+                          <div className="text-sm font-medium">Data/Hora do pedido</div>
+                          <Input type="datetime-local" value={requestedAt} onChange={(e) => setRequestedAt(e.target.value)} className={`h-11 rounded-xl ${wizardSubmitted && !requestedAt ? "border-rose-400" : ""}`} />
                         </div>
                         <div className="space-y-1">
-                          <div className="text-xs text-muted-foreground">Unid.</div>
-                          <Input
-                            placeholder="Ex: caixa / un"
-                            value={it.unit || ""}
-                            onChange={(e) =>
-                              setItems((prev) =>
-                                prev.map((p, pIdx) => (pIdx === idx ? { ...p, unit: e.target.value } : p))
-                              )
-                            }
-                          />
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-2">
-                        <div className="space-y-1">
-                          <div className="text-xs text-muted-foreground">Referência</div>
-                          <Input
-                            placeholder="Ref / Nº série"
-                            value={it.reference || ""}
-                            onChange={(e) =>
-                              setItems((prev) =>
-                                prev.map((p, pIdx) =>
-                                  pIdx === idx ? { ...p, reference: e.target.value } : p
-                                )
-                              )
-                            }
-                          />
+                          <div className="text-sm font-medium">Serviço requisitante</div>
+                          <select
+                            value={requestingServiceId}
+                            onChange={(e) => setRequestingServiceId(e.target.value)}
+                            className={`h-11 w-full rounded-xl border border-input bg-background px-3 text-sm shadow-sm ${wizardSubmitted && !requestingServiceId ? "border-rose-400" : ""}`}
+                          >
+                            <option value="" disabled>Selecionar serviço...</option>
+                            {requestingServices.map((s) => (
+                              <option key={s.id} value={String(s.id)}>
+                                {s.codigo} — {s.designacao}
+                              </option>
+                            ))}
+                          </select>
                         </div>
                         <div className="space-y-1">
-                          <div className="text-xs text-muted-foreground">QR</div>
-                          <div className="flex items-center gap-2">
-                            <Input
-                              placeholder="QR / Código da unidade"
-                              value={it.destination || ""}
-                              onChange={(e) =>
-                                setItems((prev) =>
-                                  prev.map((p, pIdx) =>
-                                    pIdx === idx ? { ...p, destination: e.target.value } : p
-                                  )
-                                )
-                              }
-                            />
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="icon"
-                              disabled={!it.productId || Boolean(unitLoadingByRow[idx])}
-                              title="Escolher automaticamente um QR disponível"
-                              onClick={() => void autoPickUnitForRow(idx, { force: true, productId: it.productId, excludeCode: (it.destination || "").trim() })}
-                            >
-                              <RefreshCcw className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="icon"
-                              disabled={!origin || !it.destination?.trim()}
-                              title="Ver imagem do QR"
-                              onClick={() => {
-                                const code = (it.destination || "").trim();
-                                if (!code) return;
-                                setItemQrCode(code);
-                                setItemQrOpen(true);
-                              }}
-                            >
-                              <QrCode className="h-4 w-4" />
-                            </Button>
-                          </div>
-                          {it.productId && unitHintByProductId[it.productId] ? (
-                            <div className="text-[11px] text-muted-foreground">
-                              Unidades em stock: {unitHintByProductId[it.productId].availableCount}
-                            </div>
-                          ) : null}
+                          <div className="text-sm font-medium">Prioridade</div>
+                          <Select value={priority} onValueChange={(v) => setPriority(v as any)}>
+                            <SelectTrigger className="h-11 rounded-xl"><SelectValue placeholder="Prioridade" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="LOW">Baixa</SelectItem>
+                              <SelectItem value="NORMAL">Normal</SelectItem>
+                              <SelectItem value="HIGH">Alta</SelectItem>
+                              <SelectItem value="URGENT">Urgente</SelectItem>
+                            </SelectContent>
+                          </Select>
                         </div>
-                      </div>
-
-                      <div className="space-y-1">
-                        <div className="text-xs text-muted-foreground">Descrição / Observações</div>
-                        <Input
-                          placeholder="Notas do item"
-                          value={it.notes || ""}
-                          onChange={(e) =>
-                            setItems((prev) =>
-                              prev.map((p, pIdx) => (pIdx === idx ? { ...p, notes: e.target.value } : p))
-                            )
-                          }
-                        />
-                      </div>
-
-                      <div className="flex justify-end">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          disabled={items.length <= 1}
-                          onClick={() => setItems((prev) => prev.filter((_, i) => i !== idx))}
-                          title="Remover item"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        <div className="space-y-1">
+                          <div className="text-sm font-medium">Prazo (SLA)</div>
+                          <Input type="date" value={dueAt} onChange={(e) => setDueAt(e.target.value)} className="h-11 rounded-xl" />
+                        </div>
                       </div>
                     </div>
-                  ))}
-                </div>
+                  ) : null}
 
-                {/* Desktop */}
-                <div className="hidden md:block">
-                  <Table className="min-w-[980px]">
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="w-[320px]">Produto</TableHead>
-                        <TableHead className="w-[110px]">Qtd</TableHead>
-                        <TableHead className="w-[150px]">Unid.</TableHead>
-                        <TableHead className="w-[160px]">Referência</TableHead>
-                        <TableHead className="w-[180px]">QR</TableHead>
-                        <TableHead>Descrição / Observações</TableHead>
-                        <TableHead className="w-[60px]"></TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {items.map((it, idx) => (
-                        <TableRow key={idx}>
-                          <TableCell>
-                            <Select
-                              value={it.productId}
-                              onValueChange={(v) => {
-                                setItems((prev) =>
-                                  prev.map((p, pIdx) =>
-                                    pIdx === idx
-                                      ? { ...p, productId: v, destination: "" }
-                                      : p
-                                  )
-                                );
-                                void autoPickUnitForRow(idx, { force: false, productId: v });
-                              }}
-                            >
-                              <SelectTrigger>
-                                <SelectValue placeholder="Produto" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {allProducts
-                                  .slice()
-                                  .sort((a, b) => a.name.localeCompare(b.name))
-                                  .map((p) => (
-                                    <SelectItem key={p.id} value={p.id}>
-                                      {p.name} ({p.sku})
-                                    </SelectItem>
-                                  ))}
-                              </SelectContent>
-                            </Select>
-                          </TableCell>
-                          <TableCell>
-                            <Input
-                              type="number"
-                              min={1}
-                              value={it.quantity}
-                              onChange={(e) => {
-                                const nextQty = Number(e.target.value);
-                                const hasQr = Boolean((it.destination || "").trim());
-                                const avail = it.productId ? unitHintByProductId[it.productId]?.availableCount : 0;
-                                const isUnitTracked = hasQr || (avail ?? 0) > 0;
+                  {wizardStep === 2 ? (
+                    <div className="space-y-4 animate-fade-up rounded-2xl border border-border/60 bg-[hsl(var(--surface-1)/0.9)] p-3 sm:p-4">
+                      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                        <div className="space-y-1">
+                          <div className="text-sm font-medium">Funcionário / Órgão (nome)</div>
+                          <Input value={requesterName} onChange={(e) => setRequesterName(e.target.value)} placeholder="Nome" className={`h-11 rounded-xl ${wizardSubmitted && !requesterName.trim() ? "border-rose-400" : ""}`} />
+                        </div>
+                        <div className="space-y-1">
+                          <div className="text-sm font-medium">Nº mecanográfico</div>
+                          <Input value={requesterEmployeeNo} onChange={(e) => setRequesterEmployeeNo(e.target.value)} placeholder="Nº" className="h-11 rounded-xl" />
+                        </div>
+                        <div className="space-y-1 md:col-span-2">
+                          <div className="text-sm font-medium">Local de entrega</div>
+                          <Input value={deliveryLocation} onChange={(e) => setDeliveryLocation(e.target.value)} placeholder="Ex: Armazém central / Piso 2 / ..." className="h-11 rounded-xl" list="delivery-location-suggestions" />
+                          <datalist id="delivery-location-suggestions">
+                            {deliverySuggestions.map((loc) => (
+                              <option key={loc} value={loc} />
+                            ))}
+                          </datalist>
+                        </div>
+                        <div className="space-y-1">
+                          <div className="text-sm font-medium">Data prevista (de)</div>
+                          <Input type="date" value={expectedDeliveryFrom} onChange={(e) => setExpectedDeliveryFrom(e.target.value)} className="h-11 rounded-xl" />
+                        </div>
+                        <div className="space-y-1">
+                          <div className="text-sm font-medium">Data prevista (até)</div>
+                          <Input type="date" value={expectedDeliveryTo} onChange={(e) => setExpectedDeliveryTo(e.target.value)} className="h-11 rounded-xl" />
+                        </div>
+                        <div className="space-y-1 md:col-span-2">
+                          <div className="text-sm font-medium">Fundamento do pedido</div>
+                          <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Escreva o motivo/fundamento do pedido..." className="min-h-[110px] rounded-xl" />
+                        </div>
+                      </div>
 
-                                if (isUnitTracked && nextQty > 1) {
-                                  toast({
-                                    title: "Qtd inválida",
-                                    description: "Para produtos com QR (unidades), use linhas separadas (Qtd=1 por unidade).",
-                                    variant: "destructive",
-                                  });
-                                  setItems((prev) =>
-                                    prev.map((p, pIdx) => (pIdx === idx ? { ...p, quantity: 1 } : p))
-                                  );
-                                  return;
-                                }
+                      <div className="space-y-2">
+                        <div className="text-sm font-medium">Tipo de bem/serviço</div>
+                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                          {(Object.keys(goodsTypeLabels) as GoodsType[]).map((k) => (
+                            <label key={k} className="flex items-center gap-2 rounded-xl border border-border/60 bg-[hsl(var(--surface-1)/0.75)] px-3 py-2 text-sm">
+                              <Checkbox checked={goodsTypes[k]} onCheckedChange={(checked) => setGoodsTypes((prev) => ({ ...prev, [k]: Boolean(checked) }))} />
+                              <span>{goodsTypeLabels[k]}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
 
-                                setItems((prev) =>
-                                  prev.map((p, pIdx) =>
-                                    pIdx === idx ? { ...p, quantity: nextQty } : p
-                                  )
-                                );
-                              }}
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <Input
-                              placeholder="Ex: caixa / un"
-                              value={it.unit || ""}
-                              onChange={(e) =>
-                                setItems((prev) =>
-                                  prev.map((p, pIdx) =>
-                                    pIdx === idx ? { ...p, unit: e.target.value } : p
-                                  )
-                                )
-                              }
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <Input
-                              placeholder="Ref / Nº série"
-                              value={it.reference || ""}
-                              onChange={(e) =>
-                                setItems((prev) =>
-                                  prev.map((p, pIdx) =>
-                                    pIdx === idx ? { ...p, reference: e.target.value } : p
-                                  )
-                                )
-                              }
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex items-center gap-2">
-                              <Input
-                                placeholder="QR / Código da unidade"
-                                value={it.destination || ""}
-                                onChange={(e) =>
-                                  setItems((prev) =>
-                                    prev.map((p, pIdx) =>
-                                      pIdx === idx ? { ...p, destination: e.target.value } : p
-                                    )
-                                  )
-                                }
-                              />
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="icon"
-                                disabled={!it.productId || Boolean(unitLoadingByRow[idx])}
-                                title="Escolher automaticamente um QR disponível"
-                                onClick={() => void autoPickUnitForRow(idx, { force: true, productId: it.productId, excludeCode: (it.destination || "").trim() })}
-                              >
-                                <RefreshCcw className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="icon"
-                                disabled={!origin || !it.destination?.trim()}
-                                title="Ver imagem do QR"
-                                onClick={() => {
-                                  const code = (it.destination || "").trim();
-                                  if (!code) return;
-                                  setItemQrCode(code);
-                                  setItemQrOpen(true);
-                                }}
-                              >
-                                <QrCode className="h-4 w-4" />
+                  {wizardStep === 3 ? (
+                    <div className="space-y-3 animate-fade-up rounded-2xl border border-border/60 bg-[hsl(var(--surface-1)/0.9)] p-3 sm:p-4">
+                      {items.map((it, idx) => {
+                        const filteredProducts = productOptions.filter((p) => {
+                          const q = (productSearchByRow[idx] || "").trim().toLowerCase();
+                          if (!q) return true;
+                          return `${p.name} ${p.sku}`.toLowerCase().includes(q);
+                        });
+                        return (
+                          <article key={`item-wizard-${idx}`} className={`rounded-2xl border p-4 shadow-sm ${wizardSubmitted && (!it.productId || it.quantity <= 0) ? "border-rose-400" : "border-border/60"} bg-[hsl(var(--surface-1)/0.8)]`}>
+                            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                              <div className="space-y-1 md:col-span-2">
+                                <div className="text-xs text-muted-foreground">Produto</div>
+                                <Input
+                                  placeholder="Pesquisar produto..."
+                                  value={productSearchByRow[idx] || ""}
+                                  onChange={(e) => setProductSearchByRow((prev) => ({ ...prev, [idx]: e.target.value }))}
+                                  className="h-10 rounded-xl"
+                                />
+                                <Select
+                                  value={it.productId}
+                                  onValueChange={(v) => {
+                                    const selected = productOptions.find((p) => p.id === v);
+                                    setProductSearchByRow((prev) => ({ ...prev, [idx]: selected ? `${selected.name} (${selected.sku})` : "" }));
+                                    setItems((prev) => prev.map((p, pIdx) => (pIdx === idx ? { ...p, productId: v, destination: "" } : p)));
+                                    void autoPickUnitForRow(idx, { force: false, productId: v });
+                                  }}
+                                >
+                                  <SelectTrigger className="h-11 rounded-xl">
+                                    <SelectValue placeholder="Selecionar produto" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {filteredProducts.slice(0, 120).map((p) => (
+                                      <SelectItem key={p.id} value={p.id}>
+                                        {p.name} ({p.sku})
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <div className="space-y-1">
+                                <div className="text-xs text-muted-foreground">Quantidade</div>
+                                <Input type="number" min={1} value={it.quantity} onChange={(e) => setItems((prev) => prev.map((p, pIdx) => (pIdx === idx ? { ...p, quantity: Number(e.target.value) } : p)))} className="h-10 rounded-xl" />
+                              </div>
+                              <div className="space-y-1">
+                                <div className="text-xs text-muted-foreground">Unidade</div>
+                                <Input value={it.unit || ""} onChange={(e) => setItems((prev) => prev.map((p, pIdx) => (pIdx === idx ? { ...p, unit: e.target.value } : p)))} className="h-10 rounded-xl" placeholder="Ex: un" />
+                              </div>
+                              <div className="space-y-1">
+                                <div className="text-xs text-muted-foreground">Referência</div>
+                                <Input value={it.reference || ""} onChange={(e) => setItems((prev) => prev.map((p, pIdx) => (pIdx === idx ? { ...p, reference: e.target.value } : p)))} className="h-10 rounded-xl" placeholder="Ref / Nº série" />
+                              </div>
+                              <div className="space-y-1">
+                                <div className="text-xs text-muted-foreground">QR / Código unidade</div>
+                                <div className="flex items-center gap-2">
+                                  <Input value={it.destination || ""} onChange={(e) => setItems((prev) => prev.map((p, pIdx) => (pIdx === idx ? { ...p, destination: e.target.value } : p)))} className="h-10 rounded-xl" placeholder="Código QR" />
+                                  <Button type="button" variant="outline" size="icon" className="h-10 w-10 rounded-xl" disabled={!it.productId || Boolean(unitLoadingByRow[idx])} onClick={() => void autoPickUnitForRow(idx, { force: true, productId: it.productId, excludeCode: (it.destination || "").trim() })}>
+                                    <RefreshCcw className="h-4 w-4" />
+                                  </Button>
+                                  <Button type="button" variant="outline" size="icon" className="h-10 w-10 rounded-xl" disabled={!origin || !it.destination?.trim()} onClick={() => {
+                                    const code = (it.destination || "").trim();
+                                    if (!code) return;
+                                    setItemQrCode(code);
+                                    setItemQrOpen(true);
+                                  }}>
+                                    <QrCode className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              </div>
+                              <div className="space-y-1 md:col-span-2">
+                                <div className="text-xs text-muted-foreground">Notas</div>
+                                <Input value={it.notes || ""} onChange={(e) => setItems((prev) => prev.map((p, pIdx) => (pIdx === idx ? { ...p, notes: e.target.value } : p)))} className="h-10 rounded-xl" placeholder="Observações" />
+                              </div>
+                            </div>
+                            <div className="mt-3 flex justify-end">
+                              <Button type="button" variant="ghost" size="sm" className="rounded-lg text-rose-600" disabled={items.length <= 1} onClick={() => setItems((prev) => prev.filter((_, i) => i !== idx))}>
+                                <Trash2 className="mr-1 h-4 w-4" />
+                                Remover
                               </Button>
                             </div>
-                            {it.productId && unitHintByProductId[it.productId] ? (
-                              <div className="mt-1 text-[11px] text-muted-foreground">
-                                Unidades em stock: {unitHintByProductId[it.productId].availableCount}
-                              </div>
-                            ) : null}
-                          </TableCell>
-                          <TableCell>
-                            <Input
-                              placeholder="Notas do item"
-                              value={it.notes || ""}
-                              onChange={(e) =>
-                                setItems((prev) =>
-                                  prev.map((p, pIdx) =>
-                                    pIdx === idx ? { ...p, notes: e.target.value } : p
-                                  )
-                                )
-                              }
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              disabled={items.length <= 1}
-                              onClick={() => setItems((prev) => prev.filter((_, i) => i !== idx))}
-                              title="Remover item"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
+                          </article>
+                        );
+                      })}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-10 rounded-xl"
+                        onClick={() =>
+                          setItems((prev) => [
+                            ...prev,
+                            { productId: "", quantity: 1, unit: "", reference: "", destination: "", notes: "" },
+                          ])
+                        }
+                      >
+                        <Plus className="mr-1 h-4 w-4" />
+                        Adicionar item
+                      </Button>
+                    </div>
+                  ) : null}
 
-                <div className="flex justify-between gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() =>
-                      setItems((prev) => [
-                        ...prev,
-                        { productId: "", quantity: 1, unit: "", reference: "", destination: "", notes: "" },
-                      ])
-                    }
-                  >
-                    <Plus className="h-4 w-4 mr-2" />
-                    Adicionar linha
-                  </Button>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <div>
-                  <div className="text-sm font-medium">Fornecedores / Faturas</div>
-                  <div className="text-xs text-muted-foreground">
-                    Preenchido automaticamente com base no produto selecionado (última fatura encontrada).
+                  {wizardStep === 4 ? (
+                    <div className="space-y-4 animate-fade-up rounded-2xl border border-border/60 bg-[hsl(var(--surface-1)/0.9)] p-3 sm:p-4">
+                      <div className="rounded-2xl border border-border/60 bg-[hsl(var(--surface-1)/0.82)] p-4">
+                        <div className="text-sm font-semibold">Resumo</div>
+                        <div className="mt-2 grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
+                          <div><span className="text-muted-foreground">Serviço:</span> {requestingServices.find((s) => String(s.id) === requestingServiceId)?.designacao || "—"}</div>
+                          <div><span className="text-muted-foreground">Data pedido:</span> {requestedAt || "—"}</div>
+                          <div><span className="text-muted-foreground">Prioridade:</span> {priority}</div>
+                          <div><span className="text-muted-foreground">Prazo:</span> {dueAt || "—"}</div>
+                          <div><span className="text-muted-foreground">Requerente:</span> {requesterName || "—"}</div>
+                          <div><span className="text-muted-foreground">Local:</span> {deliveryLocation || "—"}</div>
+                          <div className="sm:col-span-2"><span className="text-muted-foreground">Fundamento:</span> {notes || "—"}</div>
+                        </div>
+                      </div>
+                      <div className="rounded-2xl border border-border/60 bg-[hsl(var(--surface-1)/0.82)] p-4">
+                        <div className="text-sm font-semibold">Itens ({items.length})</div>
+                        <div className="mt-2 space-y-2">
+                          {items.map((it, idx) => (
+                            <div key={`review-${idx}`} className="rounded-xl border border-border/60 bg-[hsl(var(--surface-2)/0.55)] px-3 py-2 text-sm">
+                              {(it.productId ? productById.get(it.productId)?.name : "Produto não selecionado") || "Produto não selecionado"} • Qtd {it.quantity}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      {wizardSuccess ? (
+                        <div className="rounded-2xl border border-emerald-400/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-700 dark:text-emerald-300">
+                          Requisição guardada com sucesso.
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
                   </div>
                 </div>
 
-                {/* Mobile */}
-                <div className="space-y-3 md:hidden">
-                  {items.map((it, idx) => {
-                    const product = it.productId ? productById.get(it.productId) : undefined;
-                    const supplierName = (product as any)?.supplier || "";
-                    const meta = it.productId ? invoiceByProductId[it.productId] : null;
-                    const isLoadingInv = it.productId ? Boolean(invoiceLoadingByProductId[it.productId]) : false;
-
-                    return (
-                      <div key={`sup-m-${idx}`} className="rounded-md border border-border/60 p-3 space-y-2">
-                        <div className="text-sm font-medium truncate">
-                          {product ? `${(product as any).name} (${(product as any).sku})` : it.productId ? "Produto" : "—"}
-                        </div>
-
-                        <div className="grid grid-cols-1 gap-2 text-sm">
-                          <div>
-                            <span className="text-xs text-muted-foreground">Empresa</span>
-                            <div className="truncate">{supplierName || "—"}</div>
-                          </div>
-
-                          <div className="grid grid-cols-2 gap-2">
-                            <div>
-                              <span className="text-xs text-muted-foreground">Fatura Nº</span>
-                              <div>
-                                {isLoadingInv ? (
-                                  <span className="text-xs text-muted-foreground">a puxar...</span>
-                                ) : meta?.invoiceNumber ? (
-                                  meta.invoiceId && it.productId ? (
-                                    <Button
-                                      variant="link"
-                                      className="h-auto p-0 font-medium"
-                                      onClick={() => {
-                                        const q = new URLSearchParams();
-                                        q.set("invoiceId", meta.invoiceId);
-                                        q.set("tab", "invoices");
-                                        if (meta.requestId) q.set("requestId", meta.requestId);
-                                        const suffix = q.toString() ? `?${q.toString()}` : "";
-                                        router.push(`/products/${it.productId}${suffix}`);
-                                      }}
-                                      title="Abrir produto e fatura"
-                                    >
-                                      {meta.invoiceNumber}
-                                    </Button>
-                                  ) : (
-                                    <span className="font-medium">{meta.invoiceNumber}</span>
-                                  )
-                                ) : (
-                                  <span className="text-muted-foreground">—</span>
-                                )}
-                              </div>
-                            </div>
-                            <div>
-                              <span className="text-xs text-muted-foreground">Data</span>
-                              <div>{isLoadingInv ? "" : meta?.issuedAt ? formatDatePt(meta.issuedAt) : "—"}</div>
-                            </div>
-                          </div>
-
-                          <div className="grid grid-cols-2 gap-2">
-                            <div>
-                              <span className="text-xs text-muted-foreground">REQ</span>
-                              <div className="font-mono text-xs">{isLoadingInv ? "" : meta?.reqNumber ? meta.reqNumber : "—"}</div>
-                            </div>
-                            <div>
-                              <span className="text-xs text-muted-foreground">Data REQ</span>
-                              <div>{isLoadingInv ? "" : meta?.reqDate ? formatDatePt(meta.reqDate) : "—"}</div>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {/* Desktop */}
-                <div className="hidden md:block">
-                  <Table className="min-w-[980px]">
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="min-w-[240px]">Produto</TableHead>
-                        <TableHead className="min-w-[200px]">Empresa</TableHead>
-                        <TableHead className="min-w-[140px]">Fatura Nº</TableHead>
-                        <TableHead className="min-w-[130px]">Data</TableHead>
-                        <TableHead className="min-w-[160px]">REQ</TableHead>
-                        <TableHead className="min-w-[130px]">Data REQ</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {items.map((it, idx) => {
-                        const product = it.productId ? productById.get(it.productId) : undefined;
-                        const supplierName = (product as any)?.supplier || "";
-                        const meta = it.productId ? invoiceByProductId[it.productId] : null;
-                        const isLoadingInv = it.productId ? Boolean(invoiceLoadingByProductId[it.productId]) : false;
-
-                        return (
-                          <TableRow key={`sup-${idx}`}>
-                            <TableCell className="max-w-[280px] truncate">
-                              {product ? `${(product as any).name} (${(product as any).sku})` : it.productId ? "Produto" : "—"}
-                            </TableCell>
-                            <TableCell className="max-w-[240px] truncate">{supplierName || "—"}</TableCell>
-                            <TableCell>
-                              {isLoadingInv ? (
-                                <span className="text-xs text-muted-foreground">a puxar...</span>
-                              ) : meta?.invoiceNumber ? (
-                                meta.invoiceId && it.productId ? (
-                                  <Button
-                                    variant="link"
-                                    className="h-auto p-0 font-medium"
-                                    onClick={() => {
-                                      const q = new URLSearchParams();
-                                      q.set("invoiceId", meta.invoiceId);
-                                      q.set("tab", "invoices");
-                                      if (meta.requestId) q.set("requestId", meta.requestId);
-                                      const suffix = q.toString() ? `?${q.toString()}` : "";
-                                      router.push(`/products/${it.productId}${suffix}`);
-                                    }}
-                                    title="Abrir produto e fatura"
-                                  >
-                                    {meta.invoiceNumber}
-                                  </Button>
-                                ) : (
-                                  meta.invoiceNumber
-                                )
-                              ) : (
-                                "—"
-                              )}
-                            </TableCell>
-                            <TableCell>
-                              {isLoadingInv ? "" : meta?.issuedAt ? formatDatePt(meta.issuedAt) : "—"}
-                            </TableCell>
-                            <TableCell className="font-mono text-xs">
-                              {isLoadingInv ? "" : meta?.reqNumber ? meta.reqNumber : "—"}
-                            </TableCell>
-                            <TableCell>
-                              {isLoadingInv ? "" : meta?.reqDate ? formatDatePt(meta.reqDate) : "—"}
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
+                <div className="sticky bottom-0 border-t border-border/60 bg-[hsl(var(--surface-1)/0.95)] px-3 py-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur sm:px-5 sm:py-3 sm:pb-3">
+                  <div className="space-y-2 sm:hidden">
+                    {wizardStep < 4 ? (
+                      <Button className="h-11 w-full" onClick={goNextStep}>
+                        Seguinte
+                      </Button>
+                    ) : (
+                      <Button className="h-11 w-full" onClick={editRequestId ? updateRequest : createRequest} disabled={!canCreate || creating}>
+                        {editRequestId
+                          ? creating
+                            ? "A guardar..."
+                            : "Guardar"
+                          : creating
+                            ? "A criar..."
+                            : "Confirmar e criar"}
+                      </Button>
+                    )}
+                    <div className="grid grid-cols-2 gap-2">
+                      <Button
+                        variant="outline"
+                        className="h-11 w-full"
+                        onClick={() => {
+                          setCreateOpen(false);
+                          setEditRequestId(null);
+                          setWizardStep(1);
+                        }}
+                      >
+                        Cancelar
+                      </Button>
+                      <Button variant="ghost" className="h-11 w-full" onClick={goPrevStep} disabled={wizardStep === 1}>
+                        Anterior
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="hidden items-center justify-between gap-2 sm:flex">
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        onClick={() => {
+                          setCreateOpen(false);
+                          setEditRequestId(null);
+                          setWizardStep(1);
+                        }}
+                      >
+                        Cancelar
+                      </Button>
+                      <Button variant="ghost" onClick={goPrevStep} disabled={wizardStep === 1}>
+                        Anterior
+                      </Button>
+                    </div>
+                    {wizardStep < 4 ? (
+                      <Button onClick={goNextStep}>
+                        Seguinte
+                      </Button>
+                    ) : (
+                      <Button onClick={editRequestId ? updateRequest : createRequest} disabled={!canCreate || creating}>
+                        {editRequestId
+                          ? creating
+                            ? "A guardar..."
+                            : "Guardar"
+                          : creating
+                            ? "A criar..."
+                            : "Confirmar e criar"}
+                      </Button>
+                    )}
+                  </div>
                 </div>
               </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <div className="text-sm font-medium">Título (opcional)</div>
-                  <Input value={title} onChange={(e) => setTitle(e.target.value)} />
-                </div>
-              </div>
-            </div>
-
-            <DialogFooter>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setCreateOpen(false);
-                  setEditRequestId(null);
-                }}
-              >
-                Cancelar
-              </Button>
-              <Button
-                onClick={editRequestId ? updateRequest : createRequest}
-                disabled={!canCreate || creating}
-              >
-                {editRequestId
-                  ? creating
-                    ? "A guardar..."
-                    : "Guardar"
-                  : creating
-                    ? "A criar..."
-                    : "Criar"}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
+            </DialogContent>
         </Dialog>
 
         <Dialog
@@ -2078,7 +2014,6 @@ export default function RequestsPage() {
           </DialogContent>
         </Dialog>
         </div>
-      </div>
     </AuthenticatedLayout>
   );
 }

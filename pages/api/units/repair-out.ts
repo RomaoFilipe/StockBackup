@@ -2,6 +2,8 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { z } from "zod";
 import { prisma } from "@/prisma/client";
 import { getSessionServer } from "@/utils/auth";
+import { logUserAdminAction } from "@/utils/adminAudit";
+import { logInfo } from "@/utils/logger";
 
 const bodySchema = z.object({
   code: z.string().uuid(),
@@ -130,6 +132,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (result.kind === "invalid_state") {
       return res.status(400).json({ error: "Unit state does not allow repair-out" });
     }
+
+    await logUserAdminAction({
+      tenantId: session.tenantId,
+      actorUserId: session.id,
+      action: "UNIT_REPAIR_OUT",
+      note: `Unit sent to repair: ${code}`,
+      payload: {
+        code,
+        reason: reason ?? null,
+        costCenter: costCenter ?? null,
+        hasNotes: Boolean(notes),
+      },
+    });
+    logInfo("Unit sent to repair", { tenantId: session.tenantId, userId: session.id, code }, req);
 
     return res.status(200).json(result);
   } catch (error) {

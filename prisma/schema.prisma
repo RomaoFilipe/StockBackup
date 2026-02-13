@@ -32,6 +32,7 @@ model Tenant {
 
   categories     Category[]
   suppliers      Supplier[]
+  supplierProviders SupplierProvider[]
   products       Product[]
   productInvoices ProductInvoice[]
   units          ProductUnit[]
@@ -144,10 +145,37 @@ model Supplier {
   tenantId String @db.Uuid @map("userId")
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
+  providers SupplierProvider[]
   products Product[]
 
   @@unique([tenantId, name])
   @@index([tenantId])
+  @@index([isActive])
+}
+
+model SupplierProvider {
+  id String @id @default(uuid()) @db.Uuid
+
+  supplierId String @db.Uuid
+  supplier   Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+
+  name  String
+  role  String? @db.VarChar(120)
+  email String? @db.VarChar(255)
+  phone String? @db.VarChar(60)
+  notes String? @db.Text
+
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  tenantId String @db.Uuid @map("userId")
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, supplierId, name])
+  @@index([tenantId])
+  @@index([supplierId])
   @@index([isActive])
 }
 

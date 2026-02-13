@@ -1,13 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import AuthenticatedLayout from "@/app/components/AuthenticatedLayout";
 import { useAuth } from "@/app/authContext";
 import axiosInstance from "@/utils/axiosInstance";
 import { useToast } from "@/hooks/use-toast";
-import PageHeader from "@/app/components/PageHeader";
-import SectionCard from "@/app/components/SectionCard";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -22,7 +20,31 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Bell,
+  Check,
+  ChevronDown,
+  Eye,
+  EyeOff,
+  Filter,
+  Plus,
+  Search,
+  ShieldCheck,
+  UserRound,
+} from "lucide-react";
 
 type RequestingServiceRow = {
   id: number;
@@ -48,6 +70,20 @@ type SupplierRow = {
   address?: string | null;
   notes?: string | null;
   isActive?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+type SupplierProviderRow = {
+  id: string;
+  supplierId: string;
+  name: string;
+  role?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  notes?: string | null;
+  isActive?: boolean;
+  supplier?: { id: string; name: string } | null;
   createdAt?: string;
   updatedAt?: string;
 };
@@ -153,6 +189,20 @@ export default function AdminPage() {
   const [services, setServices] = useState<RequestingServiceRow[]>([]);
   const [servicesLoading, setServicesLoading] = useState(true);
   const [servicesFilter, setServicesFilter] = useState("");
+  const [servicesActiveFilter, setServicesActiveFilter] = useState<"ALL" | "ACTIVE" | "INACTIVE">("ALL");
+  const [servicesSort, setServicesSort] = useState<"codigo" | "designacao" | "id">("codigo");
+  const [selectedServiceIds, setSelectedServiceIds] = useState<number[]>([]);
+  const [inlineEditId, setInlineEditId] = useState<number | null>(null);
+  const [inlineCodigo, setInlineCodigo] = useState("");
+  const [inlineDesignacao, setInlineDesignacao] = useState("");
+  const [inlineAtivo, setInlineAtivo] = useState(true);
+  const [confirmToggleOpen, setConfirmToggleOpen] = useState(false);
+  const [confirmToggleRow, setConfirmToggleRow] = useState<RequestingServiceRow | null>(null);
+  const [mobileCreateOpen, setMobileCreateOpen] = useState(false);
+  const [showServiceIdCol, setShowServiceIdCol] = useState(true);
+  const [showServiceCodigoCol, setShowServiceCodigoCol] = useState(true);
+  const [showServiceAtivoCol, setShowServiceAtivoCol] = useState(true);
+  const [createSuccessPulse, setCreateSuccessPulse] = useState(false);
 
   const [createCodigo, setCreateCodigo] = useState("");
   const [createDesignacao, setCreateDesignacao] = useState("");
@@ -187,6 +237,18 @@ export default function AdminPage() {
   const [editSupplierOpen, setEditSupplierOpen] = useState(false);
   const [editSupplier, setEditSupplier] = useState<SupplierRow | null>(null);
   const [savingSupplier, setSavingSupplier] = useState(false);
+  const [supplierProviders, setSupplierProviders] = useState<SupplierProviderRow[]>([]);
+  const [supplierProvidersLoading, setSupplierProvidersLoading] = useState(false);
+  const [expandedSupplierId, setExpandedSupplierId] = useState<string | null>(null);
+  const [providerModalOpen, setProviderModalOpen] = useState(false);
+  const [providerSupplier, setProviderSupplier] = useState<SupplierRow | null>(null);
+  const [createProviderName, setCreateProviderName] = useState("");
+  const [createProviderRole, setCreateProviderRole] = useState("");
+  const [createProviderEmail, setCreateProviderEmail] = useState("");
+  const [createProviderPhone, setCreateProviderPhone] = useState("");
+  const [createProviderNotes, setCreateProviderNotes] = useState("");
+  const [createProviderActive, setCreateProviderActive] = useState(true);
+  const [creatingProvider, setCreatingProvider] = useState(false);
 
   const [accessLinks, setAccessLinks] = useState<PublicAccessLinkRow[]>([]);
   const [accessLinksLoading, setAccessLinksLoading] = useState(false);
@@ -267,6 +329,25 @@ export default function AdminPage() {
       setSuppliers([]);
     } finally {
       setSuppliersLoading(false);
+    }
+  };
+
+  const loadSupplierProviders = async (supplierId?: string) => {
+    setSupplierProvidersLoading(true);
+    try {
+      const res = await axiosInstance.get("/supplier-providers", {
+        params: {
+          includeInactive: 1,
+          ...(supplierId ? { supplierId } : {}),
+        },
+      });
+      setSupplierProviders(Array.isArray(res.data) ? res.data : []);
+    } catch (error: any) {
+      const msg = error?.response?.data?.error || "Não foi possível carregar prestadores.";
+      toast({ title: "Erro", description: msg, variant: "destructive" });
+      setSupplierProviders([]);
+    } finally {
+      setSupplierProvidersLoading(false);
     }
   };
 
@@ -461,15 +542,23 @@ export default function AdminPage() {
 
   const filteredServices = useMemo(() => {
     const q = servicesFilter.trim().toLowerCase();
-    if (!q) return services;
-    return services.filter((s) => {
+    const rows = services.filter((s) => {
+      if (servicesActiveFilter === "ACTIVE" && !s.ativo) return false;
+      if (servicesActiveFilter === "INACTIVE" && s.ativo) return false;
+      if (!q) return true;
       return (
         s.codigo.toLowerCase().includes(q) ||
         s.designacao.toLowerCase().includes(q) ||
         String(s.id).includes(q)
       );
     });
-  }, [services, servicesFilter]);
+    rows.sort((a, b) => {
+      if (servicesSort === "id") return a.id - b.id;
+      if (servicesSort === "designacao") return a.designacao.localeCompare(b.designacao, "pt");
+      return a.codigo.localeCompare(b.codigo, "pt");
+    });
+    return rows;
+  }, [services, servicesFilter, servicesActiveFilter, servicesSort]);
 
   const filteredCategories = useMemo(() => {
     const q = categoriesFilter.trim().toLowerCase();
@@ -523,7 +612,7 @@ export default function AdminPage() {
 
   useEffect(() => {
     setServicesPage(1);
-  }, [servicesFilter]);
+  }, [servicesFilter, servicesActiveFilter, servicesSort]);
 
   useEffect(() => {
     setCategoriesPage(1);
@@ -534,10 +623,31 @@ export default function AdminPage() {
   }, [suppliersFilter]);
 
   useEffect(() => {
+    if (!expandedSupplierId) return;
+    if (suppliers.some((s) => s.id === expandedSupplierId)) return;
+    setExpandedSupplierId(null);
+  }, [suppliers, expandedSupplierId]);
+
+  useEffect(() => {
     setServicesPage(1);
     setCategoriesPage(1);
     setSuppliersPage(1);
   }, [tab, pageSize]);
+
+  useEffect(() => {
+    const allowed = new Set(filteredServices.map((s) => s.id));
+    setSelectedServiceIds((prev) => prev.filter((id) => allowed.has(id)));
+  }, [filteredServices]);
+
+  const tabCounts = useMemo(
+    () => ({
+      services: services.length,
+      categories: categories.length,
+      suppliers: suppliers.length,
+      received: publicRequests.length,
+    }),
+    [services.length, categories.length, suppliers.length, publicRequests.length]
+  );
 
   const PaginationBar = (props: {
     page: number;
@@ -617,6 +727,9 @@ export default function AdminPage() {
       setCreateCodigo("");
       setCreateDesignacao("");
       setCreateAtivo(true);
+      setCreateSuccessPulse(true);
+      setTimeout(() => setCreateSuccessPulse(false), 900);
+      setMobileCreateOpen(false);
       toast({ title: "Serviço criado" });
     } catch (error: any) {
       const msg = error?.response?.data?.error || "Não foi possível criar serviço.";
@@ -665,6 +778,83 @@ export default function AdminPage() {
       toast({ title: !row.ativo ? "Serviço ativado" : "Serviço desativado" });
     } catch (error: any) {
       const msg = error?.response?.data?.error || "Não foi possível atualizar.";
+      toast({ title: "Erro", description: msg, variant: "destructive" });
+    }
+  };
+
+  const requestToggleAtivo = (row: RequestingServiceRow) => {
+    if (row.ativo) {
+      setConfirmToggleRow(row);
+      setConfirmToggleOpen(true);
+      return;
+    }
+    void toggleAtivo(row);
+  };
+
+  const startInlineEdit = (row: RequestingServiceRow) => {
+    setInlineEditId(row.id);
+    setInlineCodigo(row.codigo);
+    setInlineDesignacao(row.designacao);
+    setInlineAtivo(row.ativo);
+  };
+
+  const cancelInlineEdit = () => {
+    setInlineEditId(null);
+    setInlineCodigo("");
+    setInlineDesignacao("");
+    setInlineAtivo(true);
+  };
+
+  const saveInlineEdit = async (id: number) => {
+    if (!inlineCodigo.trim() || !inlineDesignacao.trim()) {
+      toast({ title: "Erro", description: "Código e designação são obrigatórios.", variant: "destructive" });
+      return;
+    }
+    try {
+      const res = await axiosInstance.patch(`/requesting-services/${id}`, {
+        codigo: inlineCodigo.trim(),
+        designacao: inlineDesignacao.trim(),
+        ativo: inlineAtivo,
+      });
+      setServices((prev) => prev.map((s) => (s.id === id ? res.data : s)));
+      toast({ title: "Serviço atualizado" });
+      cancelInlineEdit();
+    } catch (error: any) {
+      const msg = error?.response?.data?.error || "Não foi possível guardar edição inline.";
+      toast({ title: "Erro", description: msg, variant: "destructive" });
+    }
+  };
+
+  const allPagedServicesSelected =
+    pagedServices.length > 0 && pagedServices.every((s) => selectedServiceIds.includes(s.id));
+
+  const toggleSelectAllPagedServices = (checked: boolean) => {
+    if (!checked) {
+      const ids = new Set(pagedServices.map((s) => s.id));
+      setSelectedServiceIds((prev) => prev.filter((id) => !ids.has(id)));
+      return;
+    }
+    setSelectedServiceIds((prev) => Array.from(new Set([...prev, ...pagedServices.map((s) => s.id)])));
+  };
+
+  const bulkSetActiveServices = async (isActive: boolean) => {
+    const selectedRows = filteredServices.filter((s) => selectedServiceIds.includes(s.id));
+    if (!selectedRows.length) return;
+    try {
+      await Promise.all(
+        selectedRows.map((row) =>
+          axiosInstance.patch(`/requesting-services/${row.id}`, {
+            codigo: row.codigo,
+            designacao: row.designacao,
+            ativo: isActive,
+          })
+        )
+      );
+      await loadServices();
+      setSelectedServiceIds([]);
+      toast({ title: isActive ? "Serviços ativados" : "Serviços desativados" });
+    } catch (error: any) {
+      const msg = error?.response?.data?.error || "Não foi possível executar ação em lote.";
       toast({ title: "Erro", description: msg, variant: "destructive" });
     }
   };
@@ -815,6 +1005,8 @@ export default function AdminPage() {
     try {
       await axiosInstance.delete("/suppliers", { data: { id: row.id } });
       setSuppliers((prev) => prev.filter((s) => s.id !== row.id));
+      setSupplierProviders((prev) => prev.filter((p) => p.supplierId !== row.id));
+      if (expandedSupplierId === row.id) setExpandedSupplierId(null);
       toast({ title: "Fornecedor removido" });
     } catch (error: any) {
       const msg = error?.response?.data?.error || "Não foi possível remover.";
@@ -822,107 +1014,407 @@ export default function AdminPage() {
     }
   };
 
+  const providersBySupplierId = useMemo(() => {
+    const grouped: Record<string, SupplierProviderRow[]> = {};
+    for (const provider of supplierProviders) {
+      if (!grouped[provider.supplierId]) grouped[provider.supplierId] = [];
+      grouped[provider.supplierId].push(provider);
+    }
+    return grouped;
+  }, [supplierProviders]);
+
+  const canCreateProvider = useMemo(() => {
+    return Boolean(providerSupplier?.id) && Boolean(createProviderName.trim());
+  }, [providerSupplier, createProviderName]);
+
+  const createSupplierProvider = async () => {
+    if (!canCreateProvider) return;
+    if (!providerSupplier?.id) return;
+    setCreatingProvider(true);
+    try {
+      const res = await axiosInstance.post("/supplier-providers", {
+        supplierId: providerSupplier.id,
+        name: createProviderName.trim(),
+        role: createProviderRole.trim() || undefined,
+        email: createProviderEmail.trim() || undefined,
+        phone: createProviderPhone.trim() || undefined,
+        notes: createProviderNotes.trim() || undefined,
+        isActive: createProviderActive,
+      });
+      setSupplierProviders((prev) => {
+        const next = [res.data, ...prev];
+        next.sort((a, b) => a.name.localeCompare(b.name, "pt"));
+        return next;
+      });
+      setCreateProviderName("");
+      setCreateProviderRole("");
+      setCreateProviderEmail("");
+      setCreateProviderPhone("");
+      setCreateProviderNotes("");
+      setCreateProviderActive(true);
+      setProviderModalOpen(false);
+      toast({ title: "Prestador criado" });
+    } catch (error: any) {
+      const msg = error?.response?.data?.error || "Não foi possível criar prestador.";
+      toast({ title: "Erro", description: msg, variant: "destructive" });
+    } finally {
+      setCreatingProvider(false);
+    }
+  };
+
+  const deleteSupplierProvider = async (row: SupplierProviderRow) => {
+    if (!confirm(`Remover prestador "${row.name}"?`)) return;
+    try {
+      await axiosInstance.delete("/supplier-providers", { data: { id: row.id } });
+      setSupplierProviders((prev) => prev.filter((p) => p.id !== row.id));
+      toast({ title: "Prestador removido" });
+    } catch (error: any) {
+      const msg = error?.response?.data?.error || "Não foi possível remover prestador.";
+      toast({ title: "Erro", description: msg, variant: "destructive" });
+    }
+  };
+
+  const openCreateProviderModal = (supplier: SupplierRow) => {
+    setProviderSupplier(supplier);
+    setCreateProviderName("");
+    setCreateProviderRole("");
+    setCreateProviderEmail("");
+    setCreateProviderPhone("");
+    setCreateProviderNotes("");
+    setCreateProviderActive(true);
+    setProviderModalOpen(true);
+  };
+
+  const toggleSupplierProvidersExpand = async (supplierId: string) => {
+    if (expandedSupplierId === supplierId) {
+      setExpandedSupplierId(null);
+      return;
+    }
+    setExpandedSupplierId(supplierId);
+    await loadSupplierProviders(supplierId);
+  };
+
   return (
     <AuthenticatedLayout>
-      <div className="p-4 sm:p-6 space-y-6">
-        <PageHeader title="Gestão" description="Gerir tabelas e conteúdos (apenas ADMIN)." />
+      <div className="space-y-6 overflow-x-hidden">
+        <section className="glass-panel rounded-2xl p-5">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <h1 className="text-3xl font-semibold tracking-tight">Gestão</h1>
+              <p className="text-sm text-muted-foreground">Configuração e controlo de entidades do sistema</p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                className="h-11 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:from-blue-500 hover:to-indigo-500"
+                onClick={() => {
+                  setTab("services");
+                  setMobileCreateOpen(true);
+                }}
+              >
+                <Plus className="h-4 w-4" />
+                Quick Add
+              </Button>
+              <Button variant="outline" className="h-11 rounded-2xl" onClick={() => router.push("/users")}>
+                Audit Log
+              </Button>
+              <Badge className="rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-primary" variant="outline">
+                <ShieldCheck className="mr-1 h-3.5 w-3.5" />
+                ADMIN
+              </Badge>
+            </div>
+          </div>
+        </section>
 
-        <Tabs value={tab} onValueChange={(v) => setTab(v as any)}>
-          <TabsList>
-            <TabsTrigger value="services">Serviços requisitantes</TabsTrigger>
-            <TabsTrigger value="categories">Categorias</TabsTrigger>
-            <TabsTrigger value="suppliers">Fornecedores</TabsTrigger>
-            <TabsTrigger value="received">Recebidos</TabsTrigger>
-          </TabsList>
+        <section className="glass-panel rounded-2xl p-3">
+          <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap">
+            <Button variant="ghost" size="icon" className="rounded-full">
+              <Bell className="h-4 w-4" />
+            </Button>
+            <div className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-border/70 bg-[hsl(var(--surface-1)/0.85)] px-3">
+              <Search className="h-4 w-4 text-muted-foreground" />
+              <Input
+                value={
+                  tab === "services"
+                    ? servicesFilter
+                    : tab === "categories"
+                      ? categoriesFilter
+                      : tab === "suppliers"
+                        ? suppliersFilter
+                        : ""
+                }
+                onChange={(e) => {
+                  const value = e.target.value;
+                  if (tab === "services") setServicesFilter(value);
+                  if (tab === "categories") setCategoriesFilter(value);
+                  if (tab === "suppliers") setSuppliersFilter(value);
+                }}
+                placeholder="Pesquisa rápida no separador atual..."
+                className="min-w-0 border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
+                disabled={tab === "received"}
+              />
+            </div>
+            {tab === "services" ? (
+              <Button variant="outline" className="hidden rounded-xl md:inline-flex" onClick={() => setServicesActiveFilter("ALL")}>
+                <Filter className="h-4 w-4" />
+                Limpar filtro
+              </Button>
+            ) : null}
+            <Button variant="outline" className="ml-auto rounded-full px-2.5 sm:ml-0">
+              <div className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/15 text-primary">
+                <UserRound className="h-4 w-4" />
+              </div>
+              <span className="hidden sm:inline">{user?.name || "Conta"}</span>
+            </Button>
+          </div>
+        </section>
 
-          <TabsContent value="services" className="space-y-4">
-            <SectionCard title="Adicionar serviço" description="Cria novas opções para aparecerem nos formulários." >
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+        <section className="overflow-x-auto">
+          <div className="inline-flex w-max min-w-full items-center gap-1 rounded-2xl border border-border/70 bg-[hsl(var(--surface-2)/0.72)] p-1">
+            {[
+              { key: "services", label: "Serviços", count: tabCounts.services },
+              { key: "categories", label: "Categorias", count: tabCounts.categories },
+              { key: "suppliers", label: "Fornecedores", count: tabCounts.suppliers },
+              { key: "received", label: "Recebidos", count: tabCounts.received },
+            ].map((item) => (
+              <button
+                key={item.key}
+                type="button"
+                onClick={() => setTab(item.key as any)}
+                className={`relative flex items-center gap-2 rounded-xl px-4 py-2 text-sm transition ${
+                  tab === item.key ? "bg-[hsl(var(--surface-1)/0.95)] text-foreground shadow-sm" : "text-muted-foreground"
+                }`}
+              >
+                {item.label}
+                <Badge variant="secondary" className="rounded-full">{item.count}</Badge>
+                {tab === item.key ? <span className="absolute inset-x-3 -bottom-0.5 h-0.5 rounded-full bg-primary" /> : null}
+              </button>
+            ))}
+          </div>
+        </section>
+
+        {tab === "services" ? (
+          <section className="grid gap-4 xl:grid-cols-[340px_minmax(0,1fr)]">
+            <aside className="rounded-2xl border border-border/60 bg-[hsl(var(--surface-1)/0.82)] p-4">
+              <div className="mb-3 text-sm font-semibold">Adicionar Serviço</div>
+              <div className="space-y-3">
                 <div className="space-y-1">
-                  <div className="text-sm font-medium">Código</div>
-                  <Input value={createCodigo} onChange={(e) => setCreateCodigo(e.target.value)} placeholder="Ex: 001" />
+                  <div className="text-sm text-muted-foreground">Código</div>
+                  <Input value={createCodigo} onChange={(e) => setCreateCodigo(e.target.value)} placeholder="Ex: 001" className="h-11 rounded-xl" />
                 </div>
-
-                <div className="space-y-1 md:col-span-2">
-                  <div className="text-sm font-medium">Designação</div>
-                  <Input
-                    value={createDesignacao}
-                    onChange={(e) => setCreateDesignacao(e.target.value)}
-                    placeholder="Ex: Informática"
-                  />
+                <div className="space-y-1">
+                  <div className="text-sm text-muted-foreground">Designação</div>
+                  <Input value={createDesignacao} onChange={(e) => setCreateDesignacao(e.target.value)} placeholder="Ex: Presidente" className="h-11 rounded-xl" />
                 </div>
+                <label className="flex items-center justify-between rounded-xl border border-border/70 bg-[hsl(var(--surface-2)/0.62)] px-3 py-2">
+                  <span className="text-sm">Ativo</span>
+                  <button
+                    type="button"
+                    aria-label="Alternar ativo"
+                    onClick={() => setCreateAtivo((prev) => !prev)}
+                    className={`relative h-6 w-11 rounded-full transition ${createAtivo ? "bg-primary/80" : "bg-muted"}`}
+                  >
+                    <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition ${createAtivo ? "left-[1.3rem]" : "left-0.5"}`} />
+                  </button>
+                </label>
+                <Button
+                  onClick={createService}
+                  disabled={!canCreate || creating}
+                  className="h-11 w-full rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white"
+                >
+                  {creating ? "A adicionar..." : createSuccessPulse ? (
+                    <>
+                      <Check className="h-4 w-4" />
+                      Guardado
+                    </>
+                  ) : (
+                    "Adicionar"
+                  )}
+                </Button>
+                {!canCreate ? (
+                  <div className="text-xs text-amber-600">Preencha código e designação.</div>
+                ) : (
+                  <div className="text-xs text-emerald-600">Validação OK.</div>
+                )}
+              </div>
+            </aside>
 
-                <div className="flex items-end justify-between gap-3">
-                  <div className="flex items-center gap-2">
-                    <Checkbox checked={createAtivo} onCheckedChange={(v) => setCreateAtivo(Boolean(v))} />
-                    <div className="text-sm">Ativo</div>
-                  </div>
-                  <Button onClick={createService} disabled={!canCreate || creating}>
-                    {creating ? "A criar..." : "Adicionar"}
+            <div className="rounded-2xl border border-border/60 bg-[hsl(var(--surface-1)/0.82)] p-4">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant={servicesActiveFilter === "ALL" ? "secondary" : "outline"}
+                    size="sm"
+                    className="rounded-xl"
+                    onClick={() => setServicesActiveFilter("ALL")}
+                  >
+                    Todos
+                  </Button>
+                  <Button
+                    variant={servicesActiveFilter === "ACTIVE" ? "secondary" : "outline"}
+                    size="sm"
+                    className="rounded-xl"
+                    onClick={() => setServicesActiveFilter("ACTIVE")}
+                  >
+                    Ativos
+                  </Button>
+                  <Button
+                    variant={servicesActiveFilter === "INACTIVE" ? "secondary" : "outline"}
+                    size="sm"
+                    className="rounded-xl"
+                    onClick={() => setServicesActiveFilter("INACTIVE")}
+                  >
+                    Inativos
                   </Button>
                 </div>
-              </div>
-            </SectionCard>
-
-            <SectionCard title="Lista" description="Editar, ativar/desativar e procurar serviços." >
-              <div className="flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
-                <div className="w-full sm:max-w-sm">
-                  <Input value={servicesFilter} onChange={(e) => setServicesFilter(e.target.value)} placeholder="Procurar por código, designação ou id" />
+                <div className="flex items-center gap-2">
+                  <Select value={servicesSort} onValueChange={(v) => setServicesSort(v as any)}>
+                    <SelectTrigger className="h-9 w-[140px] rounded-xl"><SelectValue /></SelectTrigger>
+                    <SelectContent className="glass-panel">
+                      <SelectItem value="codigo">Código</SelectItem>
+                      <SelectItem value="designacao">Designação</SelectItem>
+                      <SelectItem value="id">ID</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="outline" size="sm" className="rounded-xl">
+                        Colunas
+                        <ChevronDown className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="glass-panel">
+                      <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setShowServiceIdCol((p) => !p); }}>
+                        {showServiceIdCol ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />} ID
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setShowServiceCodigoCol((p) => !p); }}>
+                        {showServiceCodigoCol ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />} Código
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setShowServiceAtivoCol((p) => !p); }}>
+                        {showServiceAtivoCol ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />} Estado
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
-                <Button variant="outline" onClick={loadServices} disabled={servicesLoading}>
-                  {servicesLoading ? "A carregar..." : "Recarregar"}
-                </Button>
               </div>
 
-              <div className="mt-4 overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-[80px]">ID</TableHead>
-                      <TableHead className="w-[120px]">Código</TableHead>
-                      <TableHead>Designação</TableHead>
-                      <TableHead className="w-[110px]">Ativo</TableHead>
-                      <TableHead className="w-[220px]">Ações</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
+              {servicesLoading ? (
+                <div className="space-y-2">
+                  {Array.from({ length: 8 }).map((_, i) => (
+                    <div key={i} className="h-12 animate-pulse rounded-xl bg-muted/60" />
+                  ))}
+                </div>
+              ) : (
+                <>
+                  <div className="hidden overflow-auto rounded-xl border border-border/60 md:block">
+                    <Table>
+                      <TableHeader className="sticky top-0 z-10 bg-[hsl(var(--surface-2)/0.95)] backdrop-blur">
+                        <TableRow>
+                          <TableHead className="w-10">
+                            <Checkbox
+                              checked={allPagedServicesSelected}
+                              onCheckedChange={(v) => toggleSelectAllPagedServices(Boolean(v))}
+                            />
+                          </TableHead>
+                          {showServiceIdCol ? <TableHead className="w-[80px]">ID</TableHead> : null}
+                          {showServiceCodigoCol ? <TableHead className="w-[140px]">Código</TableHead> : null}
+                          <TableHead>Designação</TableHead>
+                          {showServiceAtivoCol ? <TableHead className="w-[130px]">Estado</TableHead> : null}
+                          <TableHead className="w-[220px] text-right">Ações</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {pagedServices.map((s, idx) => {
+                          const editing = inlineEditId === s.id;
+                          return (
+                            <TableRow key={s.id} className={idx % 2 ? "bg-[hsl(var(--surface-2)/0.28)]" : ""}>
+                              <TableCell>
+                                <Checkbox
+                                  checked={selectedServiceIds.includes(s.id)}
+                                  onCheckedChange={(v) => {
+                                    const checked = Boolean(v);
+                                    setSelectedServiceIds((prev) =>
+                                      checked ? Array.from(new Set([...prev, s.id])) : prev.filter((id) => id !== s.id)
+                                    );
+                                  }}
+                                />
+                              </TableCell>
+                              {showServiceIdCol ? <TableCell>{s.id}</TableCell> : null}
+                              {showServiceCodigoCol ? (
+                                <TableCell className="font-mono text-xs">
+                                  {editing ? <Input value={inlineCodigo} onChange={(e) => setInlineCodigo(e.target.value)} className="h-8 rounded-lg" /> : s.codigo}
+                                </TableCell>
+                              ) : null}
+                              <TableCell>
+                                {editing ? <Input value={inlineDesignacao} onChange={(e) => setInlineDesignacao(e.target.value)} className="h-8 rounded-lg" /> : s.designacao}
+                              </TableCell>
+                              {showServiceAtivoCol ? (
+                                <TableCell>
+                                  {editing ? (
+                                    <Checkbox checked={inlineAtivo} onCheckedChange={(v) => setInlineAtivo(Boolean(v))} />
+                                  ) : (
+                                    <Badge variant="outline" className={s.ativo ? "border-emerald-500/30 text-emerald-700" : "border-slate-400/40 text-muted-foreground"}>
+                                      {s.ativo ? "Ativo" : "Inativo"}
+                                    </Badge>
+                                  )}
+                                </TableCell>
+                              ) : null}
+                              <TableCell>
+                                <div className="flex justify-end gap-1">
+                                  {editing ? (
+                                    <>
+                                      <Button size="sm" onClick={() => saveInlineEdit(s.id)} className="h-8 rounded-lg">Guardar</Button>
+                                      <Button size="sm" variant="outline" onClick={cancelInlineEdit} className="h-8 rounded-lg">Cancelar</Button>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Button size="sm" variant="outline" onClick={() => startInlineEdit(s)} className="h-8 rounded-lg">Editar</Button>
+                                      <Button size="sm" variant="outline" onClick={() => openEdit(s)} className="h-8 rounded-lg">Modal</Button>
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className={`h-8 rounded-lg ${s.ativo ? "border-rose-300 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40" : ""}`}
+                                        onClick={() => requestToggleAtivo(s)}
+                                      >
+                                        {s.ativo ? "Desativar" : "Ativar"}
+                                      </Button>
+                                    </>
+                                  )}
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
+
+                  <div className="space-y-2 md:hidden">
                     {pagedServices.map((s) => (
-                      <TableRow key={s.id} className={!s.ativo ? "opacity-70" : undefined}>
-                        <TableCell>{s.id}</TableCell>
-                        <TableCell className="font-mono text-xs">{s.codigo}</TableCell>
-                        <TableCell>{s.designacao}</TableCell>
-                        <TableCell>
-                          <span className={s.ativo ? "text-emerald-700 dark:text-emerald-300" : "text-muted-foreground"}>
-                            {s.ativo ? "Sim" : "Não"}
-                          </span>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex flex-wrap gap-2">
-                            <Button size="sm" variant="outline" onClick={() => openEdit(s)}>
-                              Editar
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant={s.ativo ? "destructive" : "secondary"}
-                              onClick={() => toggleAtivo(s)}
-                            >
-                              {s.ativo ? "Desativar" : "Ativar"}
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
+                      <article key={s.id} className="rounded-xl border border-border/60 bg-[hsl(var(--surface-1)/0.76)] p-4 shadow-sm">
+                        <div className="text-base font-semibold">{s.designacao}</div>
+                        <div className="mt-1 text-xs text-muted-foreground">Código: {s.codigo}</div>
+                        <div className="mt-2">
+                          <Badge variant="outline" className={s.ativo ? "border-emerald-500/30 text-emerald-700" : "border-slate-400/40 text-muted-foreground"}>
+                            {s.ativo ? "Ativo" : "Inativo"}
+                          </Badge>
+                        </div>
+                        <div className="mt-3 flex gap-2">
+                          <Button size="sm" variant="outline" className="h-9 flex-1 rounded-lg" onClick={() => openEdit(s)}>Editar</Button>
+                          <Button size="sm" variant="outline" className="h-9 flex-1 rounded-lg border-rose-300 text-rose-600" onClick={() => requestToggleAtivo(s)}>
+                            {s.ativo ? "Desativar" : "Ativar"}
+                          </Button>
+                        </div>
+                      </article>
                     ))}
+                  </div>
 
-                    {!servicesLoading && filteredServices.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={5} className="text-sm text-muted-foreground">
-                          Sem resultados.
-                        </TableCell>
-                      </TableRow>
-                    ) : null}
-                  </TableBody>
-                </Table>
-              </div>
+                  {!filteredServices.length ? (
+                    <div className="mt-3 rounded-xl border border-dashed border-border/80 p-8 text-center text-sm text-muted-foreground">
+                      Sem resultados.
+                    </div>
+                  ) : null}
+                </>
+              )}
 
               <PaginationBar
                 page={servicesPage}
@@ -930,39 +1422,36 @@ export default function AdminPage() {
                 totalPages={servicesTotalPages}
                 totalItems={filteredServices.length}
               />
-            </SectionCard>
-          </TabsContent>
+            </div>
+          </section>
+        ) : null}
 
-          <TabsContent value="categories" className="space-y-4">
-            <SectionCard title="Adicionar categoria" description="Categorias são usadas nos produtos." >
-              <div className="flex flex-col sm:flex-row gap-3 sm:items-end">
-                <div className="space-y-1 flex-1">
-                  <div className="text-sm font-medium">Nome</div>
-                  <Input value={createCategoryName} onChange={(e) => setCreateCategoryName(e.target.value)} placeholder="Ex: Consumíveis" />
+        {tab === "categories" ? (
+          <section className="space-y-4">
+            <div className="rounded-2xl border border-border/60 bg-[hsl(var(--surface-1)/0.82)] p-4">
+              <div className="text-sm font-semibold">Adicionar Categoria</div>
+              <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end">
+                <div className="flex-1 space-y-1">
+                  <div className="text-sm text-muted-foreground">Nome</div>
+                  <Input value={createCategoryName} onChange={(e) => setCreateCategoryName(e.target.value)} className="h-11 rounded-xl" />
                 </div>
-                <Button onClick={createCategory} disabled={!canCreateCategory || creatingCategory}>
+                <Button onClick={createCategory} disabled={!canCreateCategory || creatingCategory} className="h-11 rounded-xl">
                   {creatingCategory ? "A criar..." : "Adicionar"}
                 </Button>
               </div>
-            </SectionCard>
-
-            <SectionCard title="Lista" description="Editar, remover e procurar categorias." >
-              <div className="flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
-                <div className="w-full sm:max-w-sm">
-                  <Input value={categoriesFilter} onChange={(e) => setCategoriesFilter(e.target.value)} placeholder="Procurar por nome ou id" />
-                </div>
-                <Button variant="outline" onClick={loadCategories} disabled={categoriesLoading}>
-                  {categoriesLoading ? "A carregar..." : "Recarregar"}
-                </Button>
+            </div>
+            <div className="rounded-2xl border border-border/60 bg-[hsl(var(--surface-1)/0.82)] p-4">
+              <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <Input value={categoriesFilter} onChange={(e) => setCategoriesFilter(e.target.value)} className="h-10 w-full min-w-0 rounded-xl sm:max-w-sm" placeholder="Pesquisar..." />
+                <Button variant="outline" onClick={loadCategories} disabled={categoriesLoading}>Recarregar</Button>
               </div>
-
-              <div className="mt-4 overflow-x-auto">
+              <div className="hidden overflow-auto rounded-xl border border-border/60 md:block">
                 <Table>
                   <TableHeader>
                     <TableRow>
                       <TableHead className="w-[120px]">ID</TableHead>
                       <TableHead>Nome</TableHead>
-                      <TableHead className="w-[260px]">Ações</TableHead>
+                      <TableHead className="w-[220px]">Ações</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -971,275 +1460,405 @@ export default function AdminPage() {
                         <TableCell className="font-mono text-xs">{c.id}</TableCell>
                         <TableCell>{c.name}</TableCell>
                         <TableCell>
-                          <div className="flex flex-wrap gap-2">
-                            <Button size="sm" variant="outline" onClick={() => openEditCategory(c)}>
-                              Editar
-                            </Button>
-                            <Button size="sm" variant="destructive" onClick={() => deleteCategory(c)}>
-                              Remover
-                            </Button>
+                          <div className="flex gap-2">
+                            <Button size="sm" variant="outline" onClick={() => openEditCategory(c)}>Editar</Button>
+                            <Button size="sm" variant="destructive" onClick={() => deleteCategory(c)}>Remover</Button>
                           </div>
                         </TableCell>
                       </TableRow>
                     ))}
-                    {!categoriesLoading && filteredCategories.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={3} className="text-sm text-muted-foreground">
-                          Sem resultados.
-                        </TableCell>
-                      </TableRow>
-                    ) : null}
                   </TableBody>
                 </Table>
               </div>
-
-              <PaginationBar
-                page={categoriesPage}
-                setPage={setCategoriesPage}
-                totalPages={categoriesTotalPages}
-                totalItems={filteredCategories.length}
-              />
-            </SectionCard>
-          </TabsContent>
-
-          <TabsContent value="suppliers" className="space-y-4">
-            <SectionCard title="Adicionar fornecedor" description="Fornecedores são usados nos produtos." >
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <div className="space-y-1">
-                  <div className="text-sm font-medium">Nome</div>
-                  <Input value={createSupplierName} onChange={(e) => setCreateSupplierName(e.target.value)} placeholder="Ex: HP" />
-                </div>
-                <div className="space-y-1">
-                  <div className="text-sm font-medium">NIF</div>
-                  <Input value={createSupplierNif} onChange={(e) => setCreateSupplierNif(e.target.value)} placeholder="Ex: 123456789" />
-                </div>
-                <div className="space-y-1">
-                  <div className="text-sm font-medium">Email</div>
-                  <Input value={createSupplierEmail} onChange={(e) => setCreateSupplierEmail(e.target.value)} placeholder="compras@fornecedor.pt" />
-                </div>
-                <div className="space-y-1">
-                  <div className="text-sm font-medium">Telefone</div>
-                  <Input value={createSupplierPhone} onChange={(e) => setCreateSupplierPhone(e.target.value)} placeholder="+351 ..." />
-                </div>
-                <div className="space-y-1">
-                  <div className="text-sm font-medium">Contacto</div>
-                  <Input value={createSupplierContactName} onChange={(e) => setCreateSupplierContactName(e.target.value)} placeholder="Nome do contacto" />
-                </div>
-                <div className="flex items-end justify-between gap-3">
-                  <div className="flex items-center gap-2">
-                    <Checkbox checked={createSupplierActive} onCheckedChange={(v) => setCreateSupplierActive(Boolean(v))} />
-                    <div className="text-sm">Ativo</div>
+              <div className="space-y-2 md:hidden">
+                {pagedCategories.map((c) => (
+                  <article key={c.id} className="rounded-xl border border-border/60 bg-[hsl(var(--surface-1)/0.8)] p-4 shadow-sm">
+                    <div className="text-sm font-semibold">{c.name}</div>
+                    <div className="mt-1 font-mono text-[11px] text-muted-foreground break-all">{c.id}</div>
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                      <Button size="sm" variant="outline" className="h-9 rounded-lg" onClick={() => openEditCategory(c)}>
+                        Editar
+                      </Button>
+                      <Button size="sm" variant="destructive" className="h-9 rounded-lg" onClick={() => deleteCategory(c)}>
+                        Remover
+                      </Button>
+                    </div>
+                  </article>
+                ))}
+                {!pagedCategories.length ? (
+                  <div className="rounded-xl border border-dashed border-border/70 p-5 text-center text-sm text-muted-foreground">
+                    Sem categorias.
                   </div>
-                  <Button onClick={createSupplier} disabled={!canCreateSupplier || creatingSupplier}>
-                    {creatingSupplier ? "A criar..." : "Adicionar"}
-                  </Button>
-                </div>
+                ) : null}
+              </div>
+              <PaginationBar page={categoriesPage} setPage={setCategoriesPage} totalPages={categoriesTotalPages} totalItems={filteredCategories.length} />
+            </div>
+          </section>
+        ) : null}
 
-                <div className="space-y-1 md:col-span-3">
-                  <div className="text-sm font-medium">Morada</div>
-                  <Textarea
-                    value={createSupplierAddress}
-                    onChange={(e) => setCreateSupplierAddress(e.target.value)}
-                    placeholder="Morada completa (opcional)"
-                    className="min-h-[80px]"
-                  />
+        {tab === "suppliers" ? (
+          <section className="space-y-4">
+            <div className="rounded-2xl border border-border/60 bg-[hsl(var(--surface-1)/0.82)] p-4">
+              <div className="text-sm font-semibold">Adicionar Fornecedor</div>
+              <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
+                <Input value={createSupplierName} onChange={(e) => setCreateSupplierName(e.target.value)} placeholder="Nome" className="h-11 rounded-xl" />
+                <Input value={createSupplierNif} onChange={(e) => setCreateSupplierNif(e.target.value)} placeholder="NIF" className="h-11 rounded-xl" />
+                <Input value={createSupplierEmail} onChange={(e) => setCreateSupplierEmail(e.target.value)} placeholder="Email" className="h-11 rounded-xl" />
+                <Input value={createSupplierPhone} onChange={(e) => setCreateSupplierPhone(e.target.value)} placeholder="Telefone" className="h-11 rounded-xl" />
+                <Input value={createSupplierContactName} onChange={(e) => setCreateSupplierContactName(e.target.value)} placeholder="Contacto" className="h-11 rounded-xl" />
+                <div className="flex items-center justify-between rounded-xl border border-border/70 bg-[hsl(var(--surface-2)/0.62)] px-3 py-2">
+                  <span className="text-sm">Ativo</span>
+                  <Checkbox checked={createSupplierActive} onCheckedChange={(v) => setCreateSupplierActive(Boolean(v))} />
                 </div>
-
-                <div className="space-y-1 md:col-span-3">
-                  <div className="text-sm font-medium">Notas</div>
-                  <Textarea
-                    value={createSupplierNotes}
-                    onChange={(e) => setCreateSupplierNotes(e.target.value)}
-                    placeholder="Notas internas (opcional)"
-                    className="min-h-[80px]"
-                  />
+                <div className="md:col-span-3"><Textarea value={createSupplierAddress} onChange={(e) => setCreateSupplierAddress(e.target.value)} placeholder="Morada" /></div>
+                <div className="md:col-span-3"><Textarea value={createSupplierNotes} onChange={(e) => setCreateSupplierNotes(e.target.value)} placeholder="Notas" /></div>
+                <div className="md:col-span-3 flex justify-end">
+                  <Button onClick={createSupplier} disabled={!canCreateSupplier || creatingSupplier} className="h-11 rounded-xl">{creatingSupplier ? "A criar..." : "Adicionar"}</Button>
                 </div>
               </div>
-            </SectionCard>
-
-            <SectionCard title="Lista" description="Editar, remover e procurar fornecedores." >
-              <div className="flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
-                <div className="w-full sm:max-w-sm">
-                  <Input value={suppliersFilter} onChange={(e) => setSuppliersFilter(e.target.value)} placeholder="Procurar por nome ou id" />
-                </div>
-                <Button variant="outline" onClick={loadSuppliers} disabled={suppliersLoading}>
-                  {suppliersLoading ? "A carregar..." : "Recarregar"}
-                </Button>
+            </div>
+            <div className="rounded-2xl border border-border/60 bg-[hsl(var(--surface-1)/0.82)] p-4">
+              <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <Input value={suppliersFilter} onChange={(e) => setSuppliersFilter(e.target.value)} className="h-10 w-full min-w-0 rounded-xl sm:max-w-sm" placeholder="Pesquisar..." />
+                <Button variant="outline" onClick={loadSuppliers} disabled={suppliersLoading}>Recarregar</Button>
               </div>
-
-              <div className="mt-4 overflow-x-auto">
+              <div className="hidden overflow-auto rounded-xl border border-border/60 md:block">
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="w-[120px]">ID</TableHead>
+                      <TableHead>ID</TableHead>
                       <TableHead>Nome</TableHead>
                       <TableHead className="hidden md:table-cell">NIF</TableHead>
                       <TableHead className="hidden lg:table-cell">Email</TableHead>
                       <TableHead className="hidden lg:table-cell">Telefone</TableHead>
-                      <TableHead className="w-[110px]">Ativo</TableHead>
-                      <TableHead className="w-[260px]">Ações</TableHead>
+                      <TableHead>Ativo</TableHead>
+                      <TableHead className="text-right">Ações</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {pagedSuppliers.map((s) => (
-                      <TableRow key={s.id}>
-                        <TableCell className="font-mono text-xs">{s.id}</TableCell>
-                        <TableCell>{s.name}</TableCell>
-                        <TableCell className="hidden md:table-cell">{s.nif ?? ""}</TableCell>
-                        <TableCell className="hidden lg:table-cell">{s.email ?? ""}</TableCell>
-                        <TableCell className="hidden lg:table-cell">{s.phone ?? ""}</TableCell>
+                    {pagedSuppliers.map((s) => {
+                      const isExpanded = expandedSupplierId === s.id;
+                      const providerRows = providersBySupplierId[s.id] ?? [];
+                      return (
+                        <Fragment key={s.id}>
+                          <TableRow>
+                            <TableCell className="font-mono text-xs">{s.id}</TableCell>
+                            <TableCell>{s.name}</TableCell>
+                            <TableCell className="hidden md:table-cell">{s.nif ?? ""}</TableCell>
+                            <TableCell className="hidden lg:table-cell">{s.email ?? ""}</TableCell>
+                            <TableCell className="hidden lg:table-cell">{s.phone ?? ""}</TableCell>
+                            <TableCell>{s.isActive ? "Sim" : "Não"}</TableCell>
+                            <TableCell>
+                              <div className="flex justify-end gap-2">
+                                <Button size="sm" variant="outline" onClick={() => openCreateProviderModal(s)}>
+                                  <Plus className="h-3.5 w-3.5" />
+                                </Button>
+                                <Button size="sm" variant="outline" onClick={() => openEditSupplier(s)}>
+                                  Editar
+                                </Button>
+                                <Button size="sm" variant="outline" onClick={() => void toggleSupplierProvidersExpand(s.id)}>
+                                  {isExpanded ? "Ocultar" : "Prestadores"}
+                                </Button>
+                                <Button size="sm" variant="destructive" onClick={() => deleteSupplier(s)}>
+                                  Remover
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                          {isExpanded ? (
+                            <TableRow>
+                              <TableCell colSpan={7} className="bg-[hsl(var(--surface-2)/0.35)]">
+                                <div className="rounded-lg border border-border/60 bg-[hsl(var(--surface-1)/0.86)] p-3">
+                                  <div className="mb-2 text-sm font-medium">
+                                    Prestadores de {s.name}
+                                  </div>
+                                  {supplierProvidersLoading ? (
+                                    <div className="text-sm text-muted-foreground">A carregar...</div>
+                                  ) : providerRows.length ? (
+                                    <div className="space-y-2">
+                                      {providerRows.map((provider) => (
+                                        <div key={provider.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/60 px-3 py-2">
+                                          <div className="text-sm">
+                                            <span className="font-medium">{provider.name}</span>
+                                            <span className="text-muted-foreground">
+                                              {provider.role ? ` · ${provider.role}` : ""}
+                                              {provider.email ? ` · ${provider.email}` : ""}
+                                              {provider.phone ? ` · ${provider.phone}` : ""}
+                                            </span>
+                                          </div>
+                                          <Button size="sm" variant="destructive" onClick={() => deleteSupplierProvider(provider)}>
+                                            Remover prestador
+                                          </Button>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <div className="text-sm text-muted-foreground">Sem prestadores para este fornecedor.</div>
+                                  )}
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          ) : null}
+                        </Fragment>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+              <div className="space-y-2 md:hidden">
+                {pagedSuppliers.map((s) => {
+                  const isExpanded = expandedSupplierId === s.id;
+                  const providerRows = providersBySupplierId[s.id] ?? [];
+                  return (
+                    <article key={s.id} className="rounded-xl border border-border/60 bg-[hsl(var(--surface-1)/0.8)] p-4 shadow-sm">
+                      <div className="text-base font-semibold">{s.name}</div>
+                      <div className="mt-1 text-xs text-muted-foreground">NIF: {s.nif || "—"}</div>
+                      <div className="text-xs text-muted-foreground">Email: {s.email || "—"}</div>
+                      <div className="text-xs text-muted-foreground">Telefone: {s.phone || "—"}</div>
+                      <div className="mt-2">
+                        <Badge variant="outline" className={s.isActive ? "border-emerald-500/30 text-emerald-700" : "border-slate-400/40 text-muted-foreground"}>
+                          {s.isActive ? "Ativo" : "Inativo"}
+                        </Badge>
+                      </div>
+                      <div className="mt-3 grid grid-cols-2 gap-2">
+                        <Button size="sm" variant="outline" className="h-9 rounded-lg" onClick={() => openCreateProviderModal(s)}>
+                          <Plus className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button size="sm" variant="outline" className="h-9 rounded-lg" onClick={() => openEditSupplier(s)}>
+                          Editar
+                        </Button>
+                        <Button size="sm" variant="outline" className="h-9 rounded-lg" onClick={() => void toggleSupplierProvidersExpand(s.id)}>
+                          {isExpanded ? "Ocultar" : "Prestadores"}
+                        </Button>
+                        <Button size="sm" variant="destructive" className="h-9 rounded-lg" onClick={() => deleteSupplier(s)}>
+                          Remover
+                        </Button>
+                      </div>
+                      {isExpanded ? (
+                        <div className="mt-3 space-y-2 rounded-lg border border-border/60 bg-[hsl(var(--surface-2)/0.3)] p-2.5">
+                          {supplierProvidersLoading ? (
+                            <div className="text-sm text-muted-foreground">A carregar...</div>
+                          ) : providerRows.length ? (
+                            providerRows.map((provider) => (
+                              <div key={provider.id} className="rounded-md border border-border/60 bg-[hsl(var(--surface-1)/0.9)] p-2.5">
+                                <div className="text-sm font-medium">{provider.name}</div>
+                                <div className="text-xs text-muted-foreground">
+                                  {provider.role ? `${provider.role} · ` : ""}{provider.email || "sem email"}
+                                </div>
+                                <div className="mt-2">
+                                  <Button size="sm" variant="destructive" className="h-8 rounded-md" onClick={() => deleteSupplierProvider(provider)}>
+                                    Remover prestador
+                                  </Button>
+                                </div>
+                              </div>
+                            ))
+                          ) : (
+                            <div className="text-sm text-muted-foreground">Sem prestadores.</div>
+                          )}
+                        </div>
+                      ) : null}
+                    </article>
+                  );
+                })}
+                {!pagedSuppliers.length ? (
+                  <div className="rounded-xl border border-dashed border-border/70 p-5 text-center text-sm text-muted-foreground">
+                    Sem fornecedores.
+                  </div>
+                ) : null}
+              </div>
+              <PaginationBar page={suppliersPage} setPage={setSuppliersPage} totalPages={suppliersTotalPages} totalItems={filteredSuppliers.length} />
+            </div>
+          </section>
+        ) : null}
+
+        {tab === "received" ? (
+          <section className="rounded-2xl border border-border/60 bg-[hsl(var(--surface-1)/0.82)] p-4">
+            <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-2">
+                <div className="text-sm text-muted-foreground">Estado</div>
+                <select
+                  className="h-9 rounded-md border bg-background px-3 text-sm"
+                  value={publicRequestsStatus}
+                  onChange={(e) => setPublicRequestsStatus(e.target.value as PublicRequestStatus)}
+                >
+                  <option value="RECEIVED">Recebidos</option>
+                  <option value="ACCEPTED">Aceites</option>
+                  <option value="REJECTED">Rejeitados</option>
+                </select>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" onClick={() => runBackfillOwners(false)} disabled={backfillRunning}>Simular correção</Button>
+                <Button variant="outline" onClick={() => runBackfillOwners(true)} disabled={backfillRunning}>Aplicar correção</Button>
+                <Button variant="outline" onClick={loadPublicRequests} disabled={publicRequestsLoading}>Recarregar</Button>
+              </div>
+            </div>
+            <div className="hidden overflow-auto rounded-xl border border-border/60 md:block">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[160px]">Data</TableHead>
+                    <TableHead className="w-[240px]">Serviço</TableHead>
+                    <TableHead>Requerente</TableHead>
+                    <TableHead className="w-[120px]">Itens</TableHead>
+                    <TableHead className="w-[120px]">Estado</TableHead>
+                    <TableHead className="w-[260px]">Ações</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {publicRequests.map((r) => {
+                    const st = formatPublicStatus(r.status);
+                    return (
+                      <TableRow key={r.id}>
+                        <TableCell className="text-xs text-muted-foreground">{formatDateTimePt(r.createdAt)}</TableCell>
                         <TableCell>
-                          <span className={s.isActive ? "text-emerald-700 dark:text-emerald-300" : "text-muted-foreground"}>
-                            {s.isActive ? "Sim" : "Não"}
-                          </span>
+                          <div className="text-sm font-medium">{r.requestingService?.designacao ?? "(Serviço desconhecido)"}</div>
+                          <div className="text-xs text-muted-foreground">{r.requestingService?.codigo ?? ""}</div>
                         </TableCell>
                         <TableCell>
+                          <div className="text-sm">{r.requesterName}</div>
+                          <div className="text-xs text-muted-foreground truncate max-w-[260px]">{r.title ? r.title : r.notes ? r.notes : ""}</div>
+                        </TableCell>
+                        <TableCell>{r.items?.length ?? 0}</TableCell>
+                        <TableCell><Badge className={st.className} variant="outline">{st.label}</Badge></TableCell>
+                        <TableCell>
                           <div className="flex flex-wrap gap-2">
-                            <Button size="sm" variant="outline" onClick={() => openEditSupplier(s)}>
-                              Editar
-                            </Button>
-                            <Button size="sm" variant="destructive" onClick={() => deleteSupplier(s)}>
-                              Remover
-                            </Button>
+                            <Button size="sm" variant="outline" onClick={() => openDetails(r)}>Detalhes</Button>
+                            {r.status === "RECEIVED" ? (
+                              <>
+                                <Button size="sm" onClick={() => openHandle("accept", r)}>Aceitar</Button>
+                                <Button size="sm" variant="destructive" onClick={() => openHandle("reject", r)}>Rejeitar</Button>
+                              </>
+                            ) : r.status === "ACCEPTED" && r.acceptedRequest?.id ? (
+                              <Button size="sm" variant="secondary" onClick={() => router.push(`/requests?focus=${r.acceptedRequest?.id}`)}>Ver requisição</Button>
+                            ) : null}
                           </div>
                         </TableCell>
                       </TableRow>
-                    ))}
-                    {!suppliersLoading && filteredSuppliers.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={7} className="text-sm text-muted-foreground">
-                          Sem resultados.
-                        </TableCell>
-                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+            <div className="space-y-2 md:hidden">
+              {publicRequests.map((r) => {
+                const st = formatPublicStatus(r.status);
+                return (
+                  <article key={r.id} className="rounded-xl border border-border/60 bg-[hsl(var(--surface-1)/0.8)] p-4 shadow-sm">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-sm font-semibold">{r.requestingService?.designacao ?? "(Serviço desconhecido)"}</div>
+                      <Badge className={st.className} variant="outline">{st.label}</Badge>
+                    </div>
+                    <div className="mt-1 text-xs text-muted-foreground">{formatDateTimePt(r.createdAt)}</div>
+                    <div className="mt-2 text-sm">{r.requesterName}</div>
+                    <div className="text-xs text-muted-foreground">{r.items?.length ?? 0} item(ns)</div>
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                      <Button size="sm" variant="outline" className="h-9 rounded-lg" onClick={() => openDetails(r)}>
+                        Detalhes
+                      </Button>
+                      {r.status === "RECEIVED" ? (
+                        <Button size="sm" className="h-9 rounded-lg" onClick={() => openHandle("accept", r)}>
+                          Aceitar
+                        </Button>
+                      ) : r.status === "ACCEPTED" && r.acceptedRequest?.id ? (
+                        <Button size="sm" variant="secondary" className="h-9 rounded-lg" onClick={() => router.push(`/requests?focus=${r.acceptedRequest?.id}`)}>
+                          Ver requisição
+                        </Button>
+                      ) : (
+                        <div />
+                      )}
+                    </div>
+                    {r.status === "RECEIVED" ? (
+                      <Button size="sm" variant="destructive" className="mt-2 h-9 w-full rounded-lg" onClick={() => openHandle("reject", r)}>
+                        Rejeitar
+                      </Button>
                     ) : null}
-                  </TableBody>
-                </Table>
-              </div>
-
-              <PaginationBar
-                page={suppliersPage}
-                setPage={setSuppliersPage}
-                totalPages={suppliersTotalPages}
-                totalItems={filteredSuppliers.length}
-              />
-            </SectionCard>
-          </TabsContent>
-
-          <TabsContent value="received" className="space-y-4">
-            <SectionCard
-              title="Recebidos"
-              description="Pedidos submetidos via link público (PIN). Aceite cria uma requisição e movimenta stock; rejeite fica registado no histórico."
-            >
-              <div className="flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="text-sm text-muted-foreground">Estado</div>
-                  <select
-                    className="h-9 rounded-md border bg-background px-3 text-sm"
-                    value={publicRequestsStatus}
-                    onChange={(e) => setPublicRequestsStatus(e.target.value as PublicRequestStatus)}
-                  >
-                    <option value="RECEIVED">Recebidos</option>
-                    <option value="ACCEPTED">Aceites</option>
-                    <option value="REJECTED">Rejeitados</option>
-                  </select>
+                  </article>
+                );
+              })}
+              {!publicRequests.length ? (
+                <div className="rounded-xl border border-dashed border-border/70 p-5 text-center text-sm text-muted-foreground">
+                  Sem pedidos recebidos.
                 </div>
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    variant="outline"
-                    onClick={() => runBackfillOwners(false)}
-                    disabled={backfillRunning}
-                  >
-                    {backfillRunning ? "A executar..." : "Simular correção"}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => runBackfillOwners(true)}
-                    disabled={backfillRunning}
-                  >
-                    {backfillRunning ? "A aplicar..." : "Aplicar correção"}
-                  </Button>
-                  <Button variant="outline" onClick={loadPublicRequests} disabled={publicRequestsLoading}>
-                    {publicRequestsLoading ? "A carregar..." : "Recarregar"}
-                  </Button>
-                </div>
-              </div>
+              ) : null}
+            </div>
+          </section>
+        ) : null}
 
-              <div className="mt-4 overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-[160px]">Data</TableHead>
-                      <TableHead className="w-[240px]">Serviço</TableHead>
-                      <TableHead>Requerente</TableHead>
-                      <TableHead className="w-[120px]">Itens</TableHead>
-                      <TableHead className="w-[120px]">Estado</TableHead>
-                      <TableHead className="w-[260px]">Ações</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {publicRequests.map((r) => {
-                      const st = formatPublicStatus(r.status);
-                      return (
-                        <TableRow key={r.id}>
-                          <TableCell className="text-xs text-muted-foreground">{formatDateTimePt(r.createdAt)}</TableCell>
-                          <TableCell>
-                            <div className="text-sm font-medium">
-                              {r.requestingService?.designacao ?? "(Serviço desconhecido)"}
-                            </div>
-                            <div className="text-xs text-muted-foreground">{r.requestingService?.codigo ?? ""}</div>
-                          </TableCell>
-                          <TableCell>
-                            <div className="text-sm">{r.requesterName}</div>
-                            <div className="text-xs text-muted-foreground truncate max-w-[260px]">
-                              {r.title ? r.title : r.notes ? r.notes : ""}
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <div className="text-sm">{r.items?.length ?? 0}</div>
-                          </TableCell>
-                          <TableCell>
-                            <Badge className={st.className} variant="outline">
-                              {st.label}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex flex-wrap gap-2">
-                              <Button size="sm" variant="outline" onClick={() => openDetails(r)}>
-                                Detalhes
-                              </Button>
-                              {r.status === "RECEIVED" ? (
-                                <>
-                                  <Button size="sm" onClick={() => openHandle("accept", r)}>
-                                    Aceitar
-                                  </Button>
-                                  <Button size="sm" variant="destructive" onClick={() => openHandle("reject", r)}>
-                                    Rejeitar
-                                  </Button>
-                                </>
-                              ) : r.status === "ACCEPTED" && r.acceptedRequest?.id ? (
-                                <Button size="sm" variant="secondary" onClick={() => router.push(`/requests?focus=${r.acceptedRequest?.id}`)}>
-                                  Ver requisição
-                                </Button>
-                              ) : null}
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
+        {selectedServiceIds.length > 0 && tab === "services" ? (
+          <div className="fixed bottom-6 left-1/2 z-40 flex w-[min(95vw,680px)] -translate-x-1/2 items-center justify-between gap-2 rounded-2xl border border-primary/30 bg-[hsl(var(--surface-1)/0.9)] px-4 py-3 shadow-2xl backdrop-blur-xl">
+            <div className="text-sm">
+              <span className="font-semibold">{selectedServiceIds.length}</span> selecionado(s)
+            </div>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" className="h-9 rounded-xl" onClick={() => bulkSetActiveServices(true)}>
+                Ativar
+              </Button>
+              <Button variant="outline" className="h-9 rounded-xl border-rose-300 text-rose-600" onClick={() => bulkSetActiveServices(false)}>
+                Desativar
+              </Button>
+              <Button variant="ghost" className="h-9 rounded-xl" onClick={() => setSelectedServiceIds([])}>
+                Limpar
+              </Button>
+            </div>
+          </div>
+        ) : null}
 
-                    {!publicRequestsLoading && publicRequestsLoadedOnce && publicRequests.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={6} className="text-sm text-muted-foreground">
-                          Sem pedidos.
-                        </TableCell>
-                      </TableRow>
-                    ) : null}
-                  </TableBody>
-                </Table>
-              </div>
-            </SectionCard>
-          </TabsContent>
-        </Tabs>
+        {tab === "services" ? (
+          <Button
+            onClick={() => setMobileCreateOpen(true)}
+            className="fixed bottom-6 right-5 z-40 h-12 rounded-full bg-gradient-to-r from-blue-600 to-indigo-600 px-4 text-white shadow-2xl md:hidden"
+          >
+            <Plus className="mr-1 h-4 w-4" />
+            Adicionar
+          </Button>
+        ) : null}
+
+        <Dialog open={mobileCreateOpen} onOpenChange={setMobileCreateOpen}>
+          <DialogContent className="bottom-0 top-auto max-w-none translate-y-0 rounded-t-2xl border-t border-border/70 px-4 pb-8 pt-6 md:hidden">
+            <DialogHeader>
+              <DialogTitle>Novo Serviço</DialogTitle>
+              <DialogDescription>Criação rápida no mobile.</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3">
+              <Input value={createCodigo} onChange={(e) => setCreateCodigo(e.target.value)} placeholder="Código" />
+              <Input value={createDesignacao} onChange={(e) => setCreateDesignacao(e.target.value)} placeholder="Designação" />
+              <label className="flex items-center justify-between rounded-xl border border-border/70 bg-[hsl(var(--surface-2)/0.62)] px-3 py-2">
+                <span className="text-sm">Ativo</span>
+                <Checkbox checked={createAtivo} onCheckedChange={(v) => setCreateAtivo(Boolean(v))} />
+              </label>
+              <Button onClick={createService} disabled={!canCreate || creating} className="w-full">
+                {creating ? "A adicionar..." : "Adicionar"}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={confirmToggleOpen} onOpenChange={setConfirmToggleOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Confirmar desativação</DialogTitle>
+              <DialogDescription>
+                {confirmToggleRow ? `Deseja desativar "${confirmToggleRow.designacao}"?` : ""}
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setConfirmToggleOpen(false)}>
+                Cancelar
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={async () => {
+                  if (!confirmToggleRow) return;
+                  await toggleAtivo(confirmToggleRow);
+                  setConfirmToggleOpen(false);
+                  setConfirmToggleRow(null);
+                }}
+              >
+                Desativar
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         <Dialog open={detailsOpen} onOpenChange={setDetailsOpen}>
           <DialogContent className="sm:max-w-2xl">
@@ -1675,6 +2294,88 @@ export default function AdminPage() {
                 {savingSupplier ? "A guardar..." : "Guardar"}
               </Button>
             </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={providerModalOpen} onOpenChange={setProviderModalOpen}>
+          <DialogContent className="w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] max-h-[92dvh] overflow-hidden rounded-2xl border-border/70 bg-white p-0 sm:max-w-[720px]">
+            <div className="flex max-h-[92dvh] flex-col">
+              <div className="border-b border-border/60 bg-white px-4 py-3 sm:px-6">
+                <DialogHeader>
+                  <DialogTitle>Criar prestador</DialogTitle>
+                  <DialogDescription>
+                    {providerSupplier ? `Fornecedor: ${providerSupplier.name}` : "Selecione um fornecedor."}
+                  </DialogDescription>
+                </DialogHeader>
+              </div>
+
+              <div className="flex-1 overflow-y-auto bg-white px-4 py-4 sm:px-6">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="space-y-1 sm:col-span-2">
+                    <div className="text-sm font-medium">Nome</div>
+                    <Input
+                      value={createProviderName}
+                      onChange={(e) => setCreateProviderName(e.target.value)}
+                      placeholder="Nome do prestador"
+                      className="h-11 rounded-xl bg-white"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <div className="text-sm font-medium">Função</div>
+                    <Input
+                      value={createProviderRole}
+                      onChange={(e) => setCreateProviderRole(e.target.value)}
+                      placeholder="Ex: Técnico"
+                      className="h-11 rounded-xl bg-white"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <div className="text-sm font-medium">Telefone</div>
+                    <Input
+                      value={createProviderPhone}
+                      onChange={(e) => setCreateProviderPhone(e.target.value)}
+                      placeholder="Telefone"
+                      className="h-11 rounded-xl bg-white"
+                    />
+                  </div>
+                  <div className="space-y-1 sm:col-span-2">
+                    <div className="text-sm font-medium">Email</div>
+                    <Input
+                      value={createProviderEmail}
+                      onChange={(e) => setCreateProviderEmail(e.target.value)}
+                      placeholder="Email"
+                      className="h-11 rounded-xl bg-white"
+                    />
+                  </div>
+                  <div className="space-y-1 sm:col-span-2">
+                    <div className="text-sm font-medium">Notas</div>
+                    <Textarea
+                      value={createProviderNotes}
+                      onChange={(e) => setCreateProviderNotes(e.target.value)}
+                      className="min-h-[110px] rounded-xl bg-white"
+                    />
+                  </div>
+                  <div className="space-y-1 sm:col-span-2">
+                    <div className="text-sm font-medium">Ativo</div>
+                    <div className="flex h-11 items-center gap-2 rounded-xl border border-border/60 px-3">
+                      <Checkbox checked={createProviderActive} onCheckedChange={(v) => setCreateProviderActive(Boolean(v))} />
+                      <div className="text-sm">{createProviderActive ? "Sim" : "Não"}</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="border-t border-border/60 bg-white px-4 py-3 sm:px-6">
+                <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                  <Button variant="outline" className="w-full sm:w-auto" onClick={() => setProviderModalOpen(false)}>
+                    Cancelar
+                  </Button>
+                  <Button className="w-full sm:w-auto" onClick={createSupplierProvider} disabled={!canCreateProvider || creatingProvider}>
+                    {creatingProvider ? "A criar..." : "Criar prestador"}
+                  </Button>
+                </DialogFooter>
+              </div>
+            </div>
           </DialogContent>
         </Dialog>
       </div>

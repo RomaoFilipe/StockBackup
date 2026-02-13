@@ -2,6 +2,8 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { z } from "zod";
 import { prisma } from "@/prisma/client";
 import { getSessionServer } from "@/utils/auth";
+import { logUserAdminAction } from "@/utils/adminAudit";
+import { logInfo, logWarn } from "@/utils/logger";
 
 const bodySchema = z.object({
   code: z.string().uuid(),
@@ -18,6 +20,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const session = await getSessionServer(req, res);
   if (!session) {
     return res.status(401).json({ error: "Unauthorized" });
+  }
+  if (session.role !== "ADMIN") {
+    const attemptedCode = typeof req.body?.code === "string" ? req.body.code : null;
+    logWarn("Unit lost denied: non-admin", { tenantId: session.tenantId, userId: session.id, attemptedCode }, req);
+    await logUserAdminAction({
+      tenantId: session.tenantId,
+      actorUserId: session.id,
+      action: "UNIT_LOST_DENIED_NON_ADMIN",
+      note: "Non-admin attempted to mark unit as lost",
+      payload: { attemptedCode },
+    });
+    return res.status(403).json({ error: "Forbidden: admin only" });
   }
 
   if (req.method !== "POST") {
@@ -125,6 +139,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (result.kind === "forbidden") return res.status(403).json({ error: "Forbidden" });
     if (result.kind === "already") return res.status(400).json({ error: "Unit already lost" });
     if (result.kind === "invalid_state") return res.status(400).json({ error: "Unit state does not allow lost" });
+
+    await logUserAdminAction({
+      tenantId: session.tenantId,
+      actorUserId: session.id,
+      action: "UNIT_LOST",
+      note: `Unit marked as lost: ${code}`,
+      payload: {
+        code,
+        reason: reason ?? null,
+        costCenter: costCenter ?? null,
+        hasNotes: Boolean(notes),
+      },
+    });
+    logInfo("Unit marked as lost", { tenantId: session.tenantId, userId: session.id, code }, req);
 
     return res.status(200).json(result);
   } catch (error) {

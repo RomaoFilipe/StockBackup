@@ -69,7 +69,7 @@ export default function ProductActionsIcons({ product }: ProductActionsIconsProp
 				onClick={handleView}
 				title="Detalhes"
 				aria-label="Ver detalhes do produto"
-				className="h-8 w-8"
+				className="h-8 w-8 rounded-full hover:bg-[hsl(var(--surface-2)/0.8)]"
 			>
 				<Eye className="h-4 w-4" />
 			</Button>
@@ -80,7 +80,7 @@ export default function ProductActionsIcons({ product }: ProductActionsIconsProp
 				onClick={handleEdit}
 				title="Editar"
 				aria-label="Editar produto"
-				className="h-8 w-8"
+				className="h-8 w-8 rounded-full hover:bg-[hsl(var(--surface-2)/0.8)]"
 			>
 				<Pencil className="h-4 w-4" />
 			</Button>
@@ -91,7 +91,7 @@ export default function ProductActionsIcons({ product }: ProductActionsIconsProp
 				onClick={handleDelete}
 				title="Apagar"
 				aria-label="Apagar produto"
-				className="h-8 w-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
+				className="h-8 w-8 rounded-full text-destructive hover:bg-destructive/12 hover:text-destructive"
 				isLoading={isDeleting}
 			>
 				<Trash2 className="h-4 w-4" />
@@ -99,4 +99,3 @@ export default function ProductActionsIcons({ product }: ProductActionsIconsProp
 		</div>
 	);
 }
-

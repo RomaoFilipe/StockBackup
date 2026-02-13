@@ -2,6 +2,8 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { z } from "zod";
 import { prisma } from "@/prisma/client";
 import { getSessionServer } from "@/utils/auth";
+import { logUserAdminAction } from "@/utils/adminAudit";
+import { logInfo } from "@/utils/logger";
 
 const bodySchema = z.object({
   code: z.string().uuid(),
@@ -139,6 +141,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (updated.kind === "not_found") return res.status(404).json({ error: "Unit not found" });
     if (updated.kind === "forbidden") return res.status(403).json({ error: "Forbidden" });
     if (updated.kind === "already") return res.status(400).json({ error: "Unit already acquired" });
+
+    await logUserAdminAction({
+      tenantId: session.tenantId,
+      actorUserId: session.id,
+      action: "UNIT_ACQUIRE",
+      note: `Unit acquired: ${code}`,
+      payload: {
+        code,
+        assignedToUserId: assignedToUserId ?? null,
+        reason: reason ?? null,
+        costCenter: costCenter ?? null,
+        hasNotes: Boolean(notes),
+      },
+    });
+    logInfo("Unit acquired", { tenantId: session.tenantId, userId: session.id, code }, req);
 
     return res.status(200).json(updated);
   } catch (error) {

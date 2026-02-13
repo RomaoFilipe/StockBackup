@@ -17,6 +17,8 @@ import {
   Users,
   Plus,
   FileText,
+  Rows3,
+  StretchHorizontal,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -43,7 +45,6 @@ type NavItem = {
   href: string;
   icon: React.ElementType;
   active?: (pathname: string, searchParams: ReadonlyURLSearchParams | null) => boolean;
-  mobile?: boolean;
 };
 
 const navItemsBase: NavItem[] = [
@@ -51,19 +52,16 @@ const navItemsBase: NavItem[] = [
     label: "Produtos",
     href: "/",
     icon: Package,
-    mobile: true,
   },
   {
     label: "Requisições",
     href: "/requests",
     icon: LayoutGrid,
-    mobile: true,
   },
   {
     label: "Equipamentos",
     href: "/equipamentos",
     icon: Boxes,
-    mobile: true,
   },
   {
     label: "Storage",
@@ -71,13 +69,11 @@ const navItemsBase: NavItem[] = [
     icon: Archive,
     active: (pathname, searchParams) =>
       pathname === "/storage" && searchParams?.get("tab") !== "documents",
-    mobile: true,
   },
   {
     label: "Scan",
     href: "/scan",
     icon: ScanLine,
-    mobile: true,
   },
   {
     label: "Insights",
@@ -101,13 +97,11 @@ const navItemsUserOnly: NavItem[] = [
     label: "Estado do Pedido",
     href: "/requests/estado",
     icon: FileText,
-    mobile: true,
   },
   {
     label: "Novo Pedido",
     href: "/requests/novo",
     icon: Plus,
-    mobile: true,
   },
 ];
 
@@ -122,14 +116,28 @@ export default function AppShell({ children }: AppShellProps) {
   const [confirmPassword, setConfirmPassword] = React.useState("");
   const [changing, setChanging] = React.useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [density, setDensity] = useState<"comfortable" | "compact">("comfortable");
+
+  React.useEffect(() => {
+    const stored = window.localStorage.getItem("ui-density");
+    if (stored === "compact") {
+      setDensity("compact");
+    }
+  }, []);
+
+  React.useEffect(() => {
+    const isCompact = density === "compact";
+    document.documentElement.classList.toggle("density-compact", isCompact);
+    window.localStorage.setItem("ui-density", density);
+  }, [density]);
 
   const navItems = useMemo(() => {
-    // For USER role, hide most sections and show only request-related tabs
+    // USER (desktop/sidebar)
     if (user?.role === "USER") {
       return [...navItemsUserOnly];
     }
 
-    // For ADMIN: start with all base items
+    // ADMIN (desktop/sidebar)
     const items = [...navItemsBase];
     
     if (user?.role === "ADMIN") {
@@ -139,7 +147,6 @@ export default function AppShell({ children }: AppShellProps) {
         label: "DB",
         href: "/DB",
         icon: Database,
-        mobile: true,
       });
 
       const insightsIndex = items.findIndex((i) => i.href === "/business-insights");
@@ -151,14 +158,48 @@ export default function AppShell({ children }: AppShellProps) {
       });
     }
 
-    // Add the user-accessible tabs (Estado/Novo) at the end for ADMIN+
+    // Keep access to request state/new on desktop too
     items.push(...navItemsUserOnly);
 
     return items;
   }, [user?.role]);
 
-  const primaryNav = navItems.filter((item) => item.mobile);
-  const secondaryNav = navItems.filter((item) => !item.mobile);
+  const mobilePrimaryNav = useMemo<NavItem[]>(() => {
+    if (user?.role === "USER") {
+      return [
+        { label: "Estado do Pedido", href: "/requests/estado", icon: FileText },
+        { label: "Novo Pedido", href: "/requests/novo", icon: Plus },
+      ];
+    }
+
+    // Admin: Scan fixed in the middle
+    return [
+      { label: "Produtos", href: "/", icon: Package },
+      { label: "Requisições", href: "/requests", icon: LayoutGrid },
+      { label: "Scan", href: "/scan", icon: ScanLine },
+      { label: "Equipamentos", href: "/equipamentos", icon: Boxes },
+    ];
+  }, [user?.role]);
+
+  const mobileSecondaryNav = useMemo<NavItem[]>(() => {
+    if (user?.role === "USER") return [];
+    return [
+      {
+        label: "Storage",
+        href: "/storage",
+        icon: Archive,
+        active: (pathname, searchParams) =>
+          pathname === "/storage" && searchParams?.get("tab") !== "documents",
+      },
+      { label: "DB", href: "/DB", icon: Database },
+      { label: "Estado do Pedido", href: "/requests/estado", icon: FileText },
+      { label: "Novo Pedido", href: "/requests/novo", icon: Plus },
+      { label: "Pessoas", href: "/users", icon: Users },
+      { label: "Insights", href: "/business-insights", icon: BarChart3 },
+      { label: "Documentação API", href: "/api-docs", icon: BookOpen },
+      { label: "Estado da API", href: "/api-status", icon: Activity },
+    ];
+  }, [user?.role]);
 
   const isActive = (item: NavItem) => {
     if (item.active) return item.active(pathname || "", searchParams);
@@ -223,23 +264,24 @@ export default function AppShell({ children }: AppShellProps) {
   };
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <div className="min-h-screen overflow-x-hidden bg-background text-foreground">
+      <div className="app-mesh-bg" />
       <div className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(1200px_circle_at_20%_-10%,hsl(var(--primary)/0.18),transparent_45%),radial-gradient(900px_circle_at_85%_0%,hsl(var(--ring)/0.14),transparent_40%)]" />
 
-      <div className="flex min-h-screen">
-        <aside className="hidden lg:flex lg:w-64 lg:flex-col lg:border-r lg:border-border/60 lg:bg-card/40 lg:backdrop-blur-xl">
+      <div className="flex min-h-screen min-w-0">
+        <aside className="hidden lg:flex lg:w-72 lg:flex-col lg:border-r lg:border-border/50 lg:bg-[hsl(var(--surface-1)/0.82)] lg:backdrop-blur-xl">
           <div className="flex items-center gap-3 px-6 py-6">
-            <div className="flex size-10 items-center justify-center rounded-2xl bg-primary/15 text-primary">
+            <div className="flex size-11 items-center justify-center rounded-2xl bg-primary/16 text-primary electric-ring">
               <Boxes className="h-5 w-5" />
             </div>
             <div>
               <div className="text-lg font-semibold tracking-tight">Stockly</div>
-              <div className="text-xs text-muted-foreground">Inventory Suite</div>
+              <div className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Inventory Suite</div>
             </div>
           </div>
 
           <nav className="flex-1 space-y-4 px-4 pb-6">
-            <div className="space-y-1">
+            <div className="space-y-1 animate-fade-up">
               {navItems.map((item) => {
                 const Icon = item.icon;
                 const active = isActive(item);
@@ -248,14 +290,14 @@ export default function AppShell({ children }: AppShellProps) {
                     key={item.label}
                     type="button"
                     onClick={() => handleNavigation(item.href)}
-                    className={`flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm transition-colors ${
+                    className={`flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm transition-all ${
                       active
-                        ? "bg-primary/12 text-primary"
-                        : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+                        ? "bg-primary/15 text-primary shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.28)]"
+                        : "text-muted-foreground hover:bg-muted/65 hover:text-foreground"
                     }`}
                     aria-current={active ? "page" : undefined}
                   >
-                    <Icon className="h-4 w-4" />
+                    <Icon className={`h-4 w-4 ${active ? "scale-105" : ""}`} />
                     <span>{item.label}</span>
                   </button>
                 );
@@ -264,7 +306,7 @@ export default function AppShell({ children }: AppShellProps) {
           </nav>
 
           <div className="border-t border-border/60 px-4 py-4">
-            <div className="flex items-center gap-3 rounded-xl bg-muted/40 px-3 py-2">
+            <div className="flex items-center gap-3 rounded-xl bg-[hsl(var(--surface-2)/0.75)] px-3 py-2">
               <div className="flex size-9 items-center justify-center rounded-full bg-primary/15 text-sm font-semibold text-primary">
                 {user?.name?.slice(0, 1) || "S"}
               </div>
@@ -277,7 +319,7 @@ export default function AppShell({ children }: AppShellProps) {
                 </div>
               </div>
             </div>
-            <div className="mt-3 flex items-center gap-2">
+          <div className="mt-3 flex items-center gap-2">
               <ModeToggle />
               <Button
                 variant="outline"
@@ -291,8 +333,8 @@ export default function AppShell({ children }: AppShellProps) {
           </div>
         </aside>
 
-        <div className="flex min-h-screen flex-1 flex-col">
-          <header className="sticky top-0 z-40 border-b border-border/60 bg-background/80 backdrop-blur-xl">
+        <div className="flex min-h-screen min-w-0 flex-1 flex-col overflow-x-hidden">
+          <header className="sticky top-0 z-40 border-b border-border/50 bg-[hsl(var(--surface-1)/0.72)] backdrop-blur-xl">
             <div className="flex items-center justify-between px-4 py-3 sm:px-6 lg:px-10">
               <div className="text-sm text-muted-foreground">
                 Bem-vindo,{" "}
@@ -302,9 +344,31 @@ export default function AppShell({ children }: AppShellProps) {
               </div>
 
               <div className="flex items-center gap-2">
+                <div className="hidden md:flex items-center rounded-full border border-border/60 bg-[hsl(var(--surface-2)/0.72)] p-1">
+                  <Button
+                    variant={density === "comfortable" ? "secondary" : "ghost"}
+                    size="sm"
+                    className="h-7 rounded-full px-2 text-[11px]"
+                    onClick={() => setDensity("comfortable")}
+                    aria-label="Modo confortável"
+                    title="Confortável"
+                  >
+                    <StretchHorizontal className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    variant={density === "compact" ? "secondary" : "ghost"}
+                    size="sm"
+                    className="h-7 rounded-full px-2 text-[11px]"
+                    onClick={() => setDensity("compact")}
+                    aria-label="Modo compacto"
+                    title="Compacto"
+                  >
+                    <Rows3 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
                 <ModeToggle />
                 <RequestsNotificationsBell />
-                <div className="flex size-9 items-center justify-center rounded-full bg-primary/15 text-xs font-semibold text-primary">
+                <div className="flex size-9 items-center justify-center rounded-full bg-primary/15 text-xs font-semibold text-primary electric-ring">
                   {user?.name?.slice(0, 2).toUpperCase() || "ST"}
                 </div>
                 <Button
@@ -328,7 +392,7 @@ export default function AppShell({ children }: AppShellProps) {
                       <DialogTitle className="text-base">Navegação</DialogTitle>
                     </DialogHeader>
                     <div className="mt-2 grid gap-2">
-                      {[...primaryNav, ...secondaryNav].map((item) => {
+                      {[...mobilePrimaryNav, ...mobileSecondaryNav].map((item) => {
                         const Icon = item.icon;
                         const active = isActive(item);
                         return (
@@ -352,6 +416,24 @@ export default function AppShell({ children }: AppShellProps) {
                       <div className="text-xs text-muted-foreground">Conta</div>
                       <div className="text-sm font-medium">{user?.name || "Utilizador"}</div>
                       <div className="text-xs text-muted-foreground">{user?.email || ""}</div>
+                      <div className="mt-3 flex items-center justify-between rounded-xl border border-border/60 bg-[hsl(var(--surface-2)/0.75)] p-1">
+                        <Button
+                          variant={density === "comfortable" ? "secondary" : "ghost"}
+                          size="sm"
+                          className="h-8 flex-1 rounded-lg text-xs"
+                          onClick={() => setDensity("comfortable")}
+                        >
+                          Confortável
+                        </Button>
+                        <Button
+                          variant={density === "compact" ? "secondary" : "ghost"}
+                          size="sm"
+                          className="h-8 flex-1 rounded-lg text-xs"
+                          onClick={() => setDensity("compact")}
+                        >
+                          Compacto
+                        </Button>
+                      </div>
                       <Button
                         variant="outline"
                         className="mt-3 w-full"
@@ -367,7 +449,7 @@ export default function AppShell({ children }: AppShellProps) {
             </div>
           </header>
 
-          <main className="flex-1 px-4 pb-24 pt-10 sm:px-6 sm:pt-10 lg:px-10 lg:pb-10 lg:pt-12">
+          <main className="content-density flex flex-1 flex-col px-4 pb-24 pt-8 sm:px-6 sm:pt-8 lg:px-10 lg:pb-10 lg:pt-10 animate-fade-up">
             {children}
           </main>
         </div>
@@ -407,9 +489,12 @@ export default function AppShell({ children }: AppShellProps) {
         </DialogContent>
       </Dialog>
 
-      <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-border/60 bg-background/90 backdrop-blur-xl lg:hidden">
-        <div className="grid grid-cols-5 gap-1 px-2 py-2">
-          {primaryNav.map((item) => {
+      <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-border/60 bg-[hsl(var(--surface-1)/0.92)] backdrop-blur-xl lg:hidden">
+        <div
+          className="grid gap-1 px-2 py-2"
+          style={{ gridTemplateColumns: `repeat(${mobilePrimaryNav.length + 1}, minmax(0, 1fr))` }}
+        >
+          {mobilePrimaryNav.map((item) => {
             const Icon = item.icon;
             const active = isActive(item);
             return (
@@ -440,10 +525,10 @@ export default function AppShell({ children }: AppShellProps) {
             </DialogTrigger>
             <DialogContent className="bottom-0 top-auto max-w-none translate-y-0 rounded-t-2xl border-t border-border/70 px-4 pb-8 pt-6">
               <DialogHeader>
-                <DialogTitle className="text-base">Mais ações</DialogTitle>
+              <DialogTitle className="text-base">Mais ações</DialogTitle>
               </DialogHeader>
               <div className="mt-2 grid gap-2">
-                {secondaryNav.map((item) => {
+                {mobileSecondaryNav.map((item) => {
                   const Icon = item.icon;
                   const active = isActive(item);
                   return (
@@ -462,6 +547,24 @@ export default function AppShell({ children }: AppShellProps) {
                     </button>
                   );
                 })}
+              </div>
+              <div className="mt-4 flex items-center justify-between rounded-xl border border-border/60 bg-[hsl(var(--surface-2)/0.75)] p-1">
+                <Button
+                  variant={density === "comfortable" ? "secondary" : "ghost"}
+                  size="sm"
+                  className="h-8 flex-1 rounded-lg text-xs"
+                  onClick={() => setDensity("comfortable")}
+                >
+                  Confortável
+                </Button>
+                <Button
+                  variant={density === "compact" ? "secondary" : "ghost"}
+                  size="sm"
+                  className="h-8 flex-1 rounded-lg text-xs"
+                  onClick={() => setDensity("compact")}
+                >
+                  Compacto
+                </Button>
               </div>
             </DialogContent>
           </Dialog>

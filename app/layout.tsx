@@ -1,5 +1,6 @@
 
 import GlobalLoading from "@/components/GlobalLoading";
+import Loading from "@/components/Loading";
 import { Toaster } from "@/components/ui/toaster";
 import localFont from "next/font/local";
 import React, { Suspense } from "react";
@@ -92,10 +93,10 @@ export default function RootLayout({
             enableSystem
             disableTransitionOnChange
           >
-            <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">A carregar...</div>}>
+            <Suspense fallback={<Loading />}>
               <GlobalLoading />
             </Suspense>
-            <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">A carregar...</div>}>
+            <Suspense fallback={<Loading />}>
               {children}
             </Suspense>
           </ThemeProvider>

@@ -9,6 +9,36 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 
+function getCameraErrorMessage(error: unknown, isSecureContext: boolean) {
+  const err = error as { name?: string; message?: string } | null;
+  const message = String(err?.message || "");
+  const lower = message.toLowerCase();
+
+  if (!isSecureContext) {
+    return "O browser bloqueia a câmara em HTTP. Use HTTPS (ou localhost), ou usa o scan por foto.";
+  }
+  if (lower.includes("permissions policy")) {
+    return "A câmara foi bloqueada pela política de permissões da app. Contacta o administrador.";
+  }
+  if (err?.name === "NotAllowedError" || err?.name === "SecurityError") {
+    return "Permissão da câmara negada no browser. Autoriza a câmara e tenta novamente.";
+  }
+  if (err?.name === "NotFoundError" || err?.name === "DevicesNotFoundError") {
+    return "Nenhuma câmara foi encontrada neste dispositivo.";
+  }
+  if (err?.name === "NotReadableError" || err?.name === "TrackStartError") {
+    return "A câmara está ocupada por outra app/tab. Fecha outras apps e tenta novamente.";
+  }
+  if (err?.name === "OverconstrainedError") {
+    return "Não foi possível iniciar a câmara com as definições pedidas.";
+  }
+  return message || "Não foi possível aceder à câmara.";
+}
+
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.trim());
+}
+
 export default function ScanCameraPage() {
   const router = useRouter();
   const { toast } = useToast();
@@ -16,11 +46,17 @@ export default function ScanCameraPage() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const controlsRef = useRef<{ stop: () => void } | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const scanLockRef = useRef(false);
+  const scanLockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const videoTrackRef = useRef<MediaStreamTrack | null>(null);
 
   const [isStarting, setIsStarting] = useState(true);
   const [cameraError, setCameraError] = useState<string>("");
   const [manualCode, setManualCode] = useState<string>("");
   const [isDecodingImage, setIsDecodingImage] = useState(false);
+  const [cameraBootKey, setCameraBootKey] = useState(0);
+  const [torchSupported, setTorchSupported] = useState(false);
+  const [torchOn, setTorchOn] = useState(false);
 
   const isSecureContext = useMemo(() => {
     if (typeof window === "undefined") return true;
@@ -33,12 +69,17 @@ export default function ScanCameraPage() {
     const start = async () => {
       setIsStarting(true);
       setCameraError("");
+      setTorchSupported(false);
+      setTorchOn(false);
+      scanLockRef.current = false;
+      if (scanLockTimerRef.current) {
+        clearTimeout(scanLockTimerRef.current);
+        scanLockTimerRef.current = null;
+      }
 
       try {
         if (!isSecureContext) {
-          throw new Error(
-            "O browser bloqueia a câmara em HTTP. Use HTTPS (ou localhost) — ou use o scan por foto abaixo."
-          );
+          throw new Error("Insecure context");
         }
 
         const video = videoRef.current;
@@ -55,11 +96,25 @@ export default function ScanCameraPage() {
           video,
           (result, error, controls) => {
             if (cancelled) return;
-            if (result) {
+            if (result && !scanLockRef.current) {
+              scanLockRef.current = true;
               const text = result.getText?.() ?? String(result);
+              const trimmed = text.trim();
+              if (!isUuid(trimmed)) {
+                toast({
+                  title: "QR inválido",
+                  description: "Este QR não contém um UUID de unidade válido.",
+                  variant: "destructive",
+                });
+                scanLockTimerRef.current = setTimeout(() => {
+                  scanLockRef.current = false;
+                  scanLockTimerRef.current = null;
+                }, 1200);
+                return;
+              }
               controls?.stop();
               controlsRef.current = null;
-              router.replace(`/scan/${encodeURIComponent(text)}`);
+              router.replace(`/scan/${encodeURIComponent(trimmed)}`);
             }
 
             // Ignore scan errors; keep scanning
@@ -70,12 +125,18 @@ export default function ScanCameraPage() {
 
         if (!cancelled) {
           controlsRef.current = controls;
+          const stream = video.srcObject instanceof MediaStream ? video.srcObject : null;
+          const track = stream?.getVideoTracks?.()[0] ?? null;
+          videoTrackRef.current = track;
+          if (track) {
+            const caps = (track.getCapabilities?.() ?? {}) as { torch?: boolean };
+            setTorchSupported(Boolean(caps.torch));
+          }
         } else {
           controls.stop();
         }
       } catch (err: any) {
-        const message = err?.message || "Não foi possível aceder à câmara.";
-        if (!cancelled) setCameraError(message);
+        if (!cancelled) setCameraError(getCameraErrorMessage(err, isSecureContext));
       } finally {
         if (!cancelled) setIsStarting(false);
       }
@@ -87,17 +148,63 @@ export default function ScanCameraPage() {
       cancelled = true;
       controlsRef.current?.stop();
       controlsRef.current = null;
+      if (scanLockTimerRef.current) {
+        clearTimeout(scanLockTimerRef.current);
+        scanLockTimerRef.current = null;
+      }
+      videoTrackRef.current = null;
     };
-  }, [isSecureContext, router]);
+  }, [isSecureContext, router, cameraBootKey, toast]);
 
-  const openManual = () => {
-    const trimmed = manualCode.trim();
+  const navigateToCode = (rawCode: string) => {
+    const trimmed = rawCode.trim();
     if (!trimmed) {
       toast({ title: "Código em falta", description: "Introduz ou faz scan de um código." });
       return;
     }
-
+    if (!isUuid(trimmed)) {
+      toast({
+        title: "Código inválido",
+        description: "Usa um UUID válido da unidade.",
+        variant: "destructive",
+      });
+      return;
+    }
     router.push(`/scan/${encodeURIComponent(trimmed)}`);
+  };
+
+  const openManual = () => {
+    navigateToCode(manualCode);
+  };
+
+  const retryCamera = () => {
+    controlsRef.current?.stop();
+    controlsRef.current = null;
+    if (scanLockTimerRef.current) {
+      clearTimeout(scanLockTimerRef.current);
+      scanLockTimerRef.current = null;
+    }
+    scanLockRef.current = false;
+    videoTrackRef.current = null;
+    setTorchOn(false);
+    setTorchSupported(false);
+    setCameraBootKey((v) => v + 1);
+  };
+
+  const toggleTorch = async () => {
+    const track = videoTrackRef.current;
+    if (!track) return;
+    const next = !torchOn;
+    try {
+      await track.applyConstraints({ advanced: [{ torch: next } as any] } as MediaTrackConstraints);
+      setTorchOn(next);
+    } catch {
+      toast({
+        title: "Lanterna indisponível",
+        description: "Este dispositivo/browser não permitiu ativar a lanterna.",
+        variant: "destructive",
+      });
+    }
   };
 
   const openImagePicker = () => {
@@ -116,8 +223,9 @@ export default function ScanCameraPage() {
         const reader = new BrowserMultiFormatReader();
         const result = await (reader as any).decodeFromImageUrl(url);
         const text = result?.getText?.() ?? String(result);
-        if (!text?.trim()) throw new Error("QR inválido");
-        router.replace(`/scan/${encodeURIComponent(text)}`);
+        const trimmed = text?.trim();
+        if (!trimmed || !isUuid(trimmed)) throw new Error("QR inválido: não contém UUID válido");
+        router.replace(`/scan/${encodeURIComponent(trimmed)}`);
       } finally {
         URL.revokeObjectURL(url);
       }
@@ -140,13 +248,21 @@ export default function ScanCameraPage() {
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="rounded-lg border bg-muted/10 p-3">
-            <video
-              ref={videoRef}
-              className="w-full rounded-md bg-black aspect-video object-cover"
-              playsInline
-              muted
-              autoPlay
-            />
+            <div className="relative">
+              <video
+                ref={videoRef}
+                className="w-full rounded-md bg-black aspect-video object-cover"
+                playsInline
+                muted
+                autoPlay
+              />
+              <div className="pointer-events-none absolute inset-3 rounded-md border border-white/30">
+                <div className="absolute left-3 top-3 h-7 w-7 border-l-2 border-t-2 border-white/80" />
+                <div className="absolute right-3 top-3 h-7 w-7 border-r-2 border-t-2 border-white/80" />
+                <div className="absolute bottom-3 left-3 h-7 w-7 border-b-2 border-l-2 border-white/80" />
+                <div className="absolute bottom-3 right-3 h-7 w-7 border-b-2 border-r-2 border-white/80" />
+              </div>
+            </div>
             <div className="mt-2 text-xs text-muted-foreground">
               Aponte a câmara ao QR. Ao ler, abre automaticamente o detalhe.
             </div>
@@ -159,9 +275,11 @@ export default function ScanCameraPage() {
               <div className="font-medium">Não foi possível usar a câmara</div>
               <div className="text-muted-foreground">{cameraError}</div>
               <div className="mt-2 text-xs text-muted-foreground">
-                Dica: a câmara no browser precisa de HTTPS. Se estiveres a abrir pelo IP (http://...),
-                usa um domínio com SSL / reverse proxy, ou então usa o scan por foto.
+                Dica: se não der para usar a câmara agora, usa o scan por foto abaixo ou introduz o UUID.
               </div>
+              <Button variant="outline" size="sm" className="mt-3" onClick={retryCamera}>
+                Tentar novamente
+              </Button>
             </div>
           ) : null}
 
@@ -178,8 +296,11 @@ export default function ScanCameraPage() {
             <Button variant="outline" onClick={openImagePicker} disabled={isDecodingImage}>
               {isDecodingImage ? "A ler foto…" : "Scan por foto"}
             </Button>
+            <Button variant="outline" onClick={toggleTorch} disabled={!torchSupported || isStarting || !!cameraError}>
+              {torchOn ? "Desligar lanterna" : "Ligar lanterna"}
+            </Button>
             <div className="text-xs text-muted-foreground sm:self-center">
-              Funciona mesmo sem HTTPS (tirar foto ao QR).
+              Funciona mesmo sem HTTPS (tirar foto ao QR). Lanterna depende do dispositivo.
             </div>
           </div>
 
@@ -188,6 +309,9 @@ export default function ScanCameraPage() {
               placeholder="Ou introduz o código manualmente (UUID)"
               value={manualCode}
               onChange={(e) => setManualCode(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") openManual();
+              }}
             />
             <Button onClick={openManual} className="sm:w-[180px]">
               Abrir

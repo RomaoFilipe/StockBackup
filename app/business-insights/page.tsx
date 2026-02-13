@@ -314,7 +314,7 @@ export default function BusinessInsightsPage() {
         />
 
         {/* Key Metrics */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 stagger-in">
           <AnalyticsCard
             title="Stock baixo"
             value={analyticsData.lowStockItems}
@@ -351,7 +351,7 @@ export default function BusinessInsightsPage() {
 
         {/* Charts and Insights */}
         <Tabs defaultValue="inventory" className="space-y-4">
-          <TabsList className="grid h-11 w-full grid-cols-4 rounded-2xl bg-muted/50 p-1">
+          <TabsList className="grid h-11 w-full grid-cols-4 rounded-2xl bg-[hsl(var(--surface-2)/0.8)] p-1.5">
             <TabsTrigger value="inventory">Inventário</TabsTrigger>
             <TabsTrigger value="requests">Requisições</TabsTrigger>
             <TabsTrigger value="movements">Movimentos</TabsTrigger>
@@ -359,12 +359,12 @@ export default function BusinessInsightsPage() {
           </TabsList>
 
           <TabsContent value="inventory" className="space-y-4">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 stagger-in">
               {/* Category Distribution */}
               <ChartCard
                 title="Distribuição por categoria"
                 icon={PieChartIcon}
-                className="rounded-2xl border-border/60 bg-card/60"
+                className="rounded-2xl border-border/60"
               >
                 <ResponsiveContainer width="100%" height={300}>
                   <PieChart>
@@ -405,7 +405,7 @@ export default function BusinessInsightsPage() {
               <ChartCard
                 title="Unidades por estado"
                 icon={Activity}
-                className="rounded-2xl border-border/60 bg-card/60"
+                className="rounded-2xl border-border/60"
               >
                 <ResponsiveContainer width="100%" height={300}>
                   <BarChart data={(ops?.units.byStatus ?? []).map((r) => ({ name: r.status, value: r.count }))}>
@@ -428,12 +428,12 @@ export default function BusinessInsightsPage() {
           </TabsContent>
 
           <TabsContent value="requests" className="space-y-4">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 stagger-in">
               {/* Requests by status */}
               <ChartCard
                 title="Requisições por estado (30 dias)"
                 icon={Activity}
-                className="rounded-2xl border-border/60 bg-card/60"
+                className="rounded-2xl border-border/60"
               >
                 <ResponsiveContainer width="100%" height={300}>
                   <BarChart data={(ops?.requests.byStatus ?? []).map((r) => ({ name: r.status, value: r.count }))}>
@@ -460,7 +460,7 @@ export default function BusinessInsightsPage() {
               <ChartCard
                 title="Top produtos requisitados (30 dias)"
                 icon={Users}
-                className="rounded-2xl border-border/60 bg-card/60"
+                className="rounded-2xl border-border/60"
               >
                 <ResponsiveContainer width="100%" height={300}>
                   <BarChart data={(ops?.requests.topProducts ?? []).map((r) => ({ name: r.name, value: r.quantity }))}>
@@ -484,11 +484,11 @@ export default function BusinessInsightsPage() {
               </ChartCard>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 stagger-in">
               <ChartCard
                 title="Pendentes de assinatura (aprovação)"
                 icon={Users}
-                className="rounded-2xl border-border/60 bg-card/60"
+                className="rounded-2xl border-border/60"
               >
                 <div className="space-y-3">
                   {(ops?.requests.pendingApprovalSignature ?? []).length ? (
@@ -521,7 +521,7 @@ export default function BusinessInsightsPage() {
               <ChartCard
                 title="Pendentes de assinatura (levantamento)"
                 icon={Package}
-                className="rounded-2xl border-border/60 bg-card/60"
+                className="rounded-2xl border-border/60"
               >
                 <div className="space-y-3">
                   {(ops?.requests.pendingPickupSignature ?? []).length ? (
@@ -559,7 +559,7 @@ export default function BusinessInsightsPage() {
               <ChartCard
                 title="Movimentos por tipo (30 dias)"
                 icon={Activity}
-                className="rounded-2xl border-border/60 bg-card/60"
+                className="rounded-2xl border-border/60"
               >
                 <ResponsiveContainer width="100%" height={300}>
                   <BarChart data={(ops?.movements.byType ?? []).map((r) => ({ name: r.type, value: r.count }))}>
@@ -586,7 +586,7 @@ export default function BusinessInsightsPage() {
               <ChartCard
                 title="Top consumo (OUT) (30 dias)"
                 icon={Package}
-                className="rounded-2xl border-border/60 bg-card/60"
+                className="rounded-2xl border-border/60"
               >
                 <ResponsiveContainer width="100%" height={300}>
                   <BarChart data={(ops?.movements.topOutProducts ?? []).map((r) => ({ name: r.name, value: r.quantity }))}>
@@ -616,7 +616,7 @@ export default function BusinessInsightsPage() {
             <ChartCard
               title="Alertas de stock baixo"
               icon={AlertTriangle}
-              className="rounded-2xl border-border/60 bg-card/60"
+              className="rounded-2xl border-border/60"
             >
               <div className="space-y-4">
                 {analyticsData.lowStockProducts.length > 0 ? (
@@ -658,13 +658,13 @@ export default function BusinessInsightsPage() {
             <ChartCard
               title="Produtos inativos (≥ 90 dias sem movimentos)"
               icon={Eye}
-              className="rounded-2xl border-border/60 bg-card/60"
+              className="rounded-2xl border-border/60"
             >
               <div className="space-y-4">
                 {ops?.stock.inactiveTop?.length ? (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {ops.stock.inactiveTop.slice(0, 6).map((p) => (
-                      <Card key={p.productId} className="rounded-2xl border border-border/60 bg-card/60">
+                      <Card key={p.productId} className="rounded-2xl border border-border/60 bg-[hsl(var(--surface-1)/0.78)]">
                         <CardContent className="p-4">
                           <div className="flex items-center justify-between gap-3">
                             <div className="min-w-0">
@@ -692,8 +692,8 @@ export default function BusinessInsightsPage() {
         </Tabs>
 
         {/* Additional Insights */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <Card className="rounded-2xl border border-border/60 bg-card/60">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 stagger-in">
+          <Card className="glass-panel rounded-2xl border border-border/60">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Eye className="h-5 w-5" />
@@ -722,7 +722,7 @@ export default function BusinessInsightsPage() {
             </CardContent>
           </Card>
 
-          <Card className="rounded-2xl border border-border/60 bg-card/60">
+          <Card className="glass-panel rounded-2xl border border-border/60">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Users className="h-5 w-5" />
@@ -755,7 +755,7 @@ export default function BusinessInsightsPage() {
             </CardContent>
           </Card>
 
-          <Card className="rounded-2xl border border-border/60 bg-card/60">
+          <Card className="glass-panel rounded-2xl border border-border/60">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <QrCode className="h-5 w-5" />

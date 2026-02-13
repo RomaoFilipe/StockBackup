@@ -502,7 +502,7 @@ export default function UsersPage() {
             }
           }}
         >
-          <TabsList className="h-auto flex-wrap gap-1 p-1">
+          <TabsList className="h-auto flex-wrap gap-1 rounded-2xl bg-[hsl(var(--surface-2)/0.78)] p-1.5">
             <TabsTrigger value="users" className="gap-2">
               <Users className="h-4 w-4" />
               Users
@@ -519,21 +519,21 @@ export default function UsersPage() {
 
           <TabsContent value="users" className="mt-4">
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-              <div className="rounded-xl border border-border/70 bg-card/60 p-3">
-                <div className="text-xs text-muted-foreground">Total</div>
-                <div className="text-2xl font-semibold">{userStats.total}</div>
+              <div className="metric-tile">
+                <div className="metric-tile-label">Total</div>
+                <div className="metric-tile-value">{userStats.total}</div>
               </div>
-              <div className="rounded-xl border border-border/70 bg-card/60 p-3">
-                <div className="text-xs text-muted-foreground">Admins</div>
-                <div className="text-2xl font-semibold">{userStats.admins}</div>
+              <div className="metric-tile">
+                <div className="metric-tile-label">Admins</div>
+                <div className="metric-tile-value">{userStats.admins}</div>
               </div>
-              <div className="rounded-xl border border-border/70 bg-card/60 p-3">
-                <div className="text-xs text-muted-foreground">Ativos</div>
-                <div className="text-2xl font-semibold">{userStats.active}</div>
+              <div className="metric-tile">
+                <div className="metric-tile-label">Ativos</div>
+                <div className="metric-tile-value">{userStats.active}</div>
               </div>
-              <div className="rounded-xl border border-border/70 bg-card/60 p-3">
-                <div className="text-xs text-muted-foreground">Inativos</div>
-                <div className="text-2xl font-semibold">{userStats.inactive}</div>
+              <div className="metric-tile">
+                <div className="metric-tile-label">Inativos</div>
+                <div className="metric-tile-value">{userStats.inactive}</div>
               </div>
             </div>
 
@@ -676,11 +676,11 @@ export default function UsersPage() {
                 ) : usersPageItems.length === 0 ? (
                   <p className="text-sm text-muted-foreground">Sem utilizadores.</p>
                 ) : usersView === "table" ? (
-                  <div className="overflow-x-auto border border-border/60 rounded-xl">
+                  <div className="data-grid-shell">
                     <table className="w-full text-sm">
-                      <thead className="bg-muted/40">
+                      <thead className="sticky top-0 z-10 bg-[hsl(var(--surface-2)/0.95)] backdrop-blur">
                         <tr>
-                          <th className="text-left p-2 w-10">
+                          <th className="h-[var(--table-head-h)] w-10 px-[var(--table-cell-px)] text-left text-[0.72rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                             <Checkbox
                               checked={usersPageItems.every((u) => selectedUserIds.includes(u.id))}
                               onCheckedChange={(v) => {
@@ -693,18 +693,18 @@ export default function UsersPage() {
                               }}
                             />
                           </th>
-                          <th className="text-left p-2">Nome</th>
-                          <th className="text-left p-2">Email</th>
-                          <th className="text-left p-2">Serviço</th>
-                          <th className="text-left p-2">Role</th>
-                          <th className="text-left p-2">Estado</th>
-                          <th className="text-right p-2">Ações</th>
+                          <th className="h-[var(--table-head-h)] px-[var(--table-cell-px)] text-left text-[0.72rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Nome</th>
+                          <th className="h-[var(--table-head-h)] px-[var(--table-cell-px)] text-left text-[0.72rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Email</th>
+                          <th className="h-[var(--table-head-h)] px-[var(--table-cell-px)] text-left text-[0.72rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Serviço</th>
+                          <th className="h-[var(--table-head-h)] px-[var(--table-cell-px)] text-left text-[0.72rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Role</th>
+                          <th className="h-[var(--table-head-h)] px-[var(--table-cell-px)] text-left text-[0.72rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Estado</th>
+                          <th className="h-[var(--table-head-h)] px-[var(--table-cell-px)] text-right text-[0.72rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Ações</th>
                         </tr>
                       </thead>
                       <tbody>
                         {usersPageItems.map((u) => (
-                          <tr key={u.id} className="border-t border-border/50">
-                            <td className="p-2 align-top">
+                          <tr key={u.id} className="border-t border-border/50 transition-colors hover:bg-[hsl(var(--surface-2)/0.42)]">
+                            <td className="px-[var(--table-cell-px)] py-[var(--table-cell-py)] align-top">
                               <Checkbox
                                 checked={selectedUserIds.includes(u.id)}
                                 onCheckedChange={(v) =>
@@ -714,16 +714,16 @@ export default function UsersPage() {
                                 }
                               />
                             </td>
-                            <td className="p-2 align-top">{u.name}</td>
-                            <td className="p-2 align-top">{u.email}</td>
-                            <td className="p-2 align-top">{u.requestingService ? `${u.requestingService.codigo} - ${u.requestingService.designacao}` : "—"}</td>
-                            <td className="p-2 align-top"><Badge variant="secondary">{u.role}</Badge></td>
-                            <td className="p-2 align-top">
+                            <td className="px-[var(--table-cell-px)] py-[var(--table-cell-py)] align-top">{u.name}</td>
+                            <td className="px-[var(--table-cell-px)] py-[var(--table-cell-py)] align-top">{u.email}</td>
+                            <td className="px-[var(--table-cell-px)] py-[var(--table-cell-py)] align-top">{u.requestingService ? `${u.requestingService.codigo} - ${u.requestingService.designacao}` : "—"}</td>
+                            <td className="px-[var(--table-cell-px)] py-[var(--table-cell-py)] align-top"><Badge variant="secondary">{u.role}</Badge></td>
+                            <td className="px-[var(--table-cell-px)] py-[var(--table-cell-py)] align-top">
                               <Badge variant="outline" className={u.isActive ? "text-emerald-700 border-emerald-400/40" : "text-amber-700 border-amber-400/40"}>
                                 {u.isActive ? "Ativo" : "Inativo"}
                               </Badge>
                             </td>
-                            <td className="p-2 align-top">
+                            <td className="px-[var(--table-cell-px)] py-[var(--table-cell-py)] align-top">
                               <div className="flex items-center justify-end gap-2">
                                 <Button size="sm" variant="ghost" onClick={() => openUserAudit(u)}>
                                   Histórico
@@ -755,7 +755,7 @@ export default function UsersPage() {
                 ) : (
                   <div className="space-y-2">
                     {usersPageItems.map((u) => (
-                      <div key={u.id} className="border border-border/70 rounded-xl p-3 bg-card/40">
+                      <div key={u.id} className="border border-border/70 rounded-xl p-3 bg-[hsl(var(--surface-1)/0.75)] transition-colors hover:bg-[hsl(var(--surface-2)/0.8)]">
                         <div className="flex items-center justify-between gap-3">
                           <div className="min-w-0">
                             <div className="font-medium truncate flex items-center gap-2">
@@ -845,21 +845,21 @@ export default function UsersPage() {
 
           <TabsContent value="ip" className="mt-4">
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-              <div className="rounded-xl border border-border/70 bg-card/60 p-3">
-                <div className="text-xs text-muted-foreground">Pendentes</div>
-                <div className="text-2xl font-semibold">{allowedIpStats.pending}</div>
+              <div className="metric-tile">
+                <div className="metric-tile-label">Pendentes</div>
+                <div className="metric-tile-value">{allowedIpStats.pending}</div>
               </div>
-              <div className="rounded-xl border border-border/70 bg-card/60 p-3">
-                <div className="text-xs text-muted-foreground">Allowlist total</div>
-                <div className="text-2xl font-semibold">{allowedIpStats.total}</div>
+              <div className="metric-tile">
+                <div className="metric-tile-label">Allowlist total</div>
+                <div className="metric-tile-value">{allowedIpStats.total}</div>
               </div>
-              <div className="rounded-xl border border-border/70 bg-card/60 p-3">
-                <div className="text-xs text-muted-foreground">Ativos</div>
-                <div className="text-2xl font-semibold">{allowedIpStats.active}</div>
+              <div className="metric-tile">
+                <div className="metric-tile-label">Ativos</div>
+                <div className="metric-tile-value">{allowedIpStats.active}</div>
               </div>
-              <div className="rounded-xl border border-border/70 bg-card/60 p-3">
-                <div className="text-xs text-muted-foreground">Inativos</div>
-                <div className="text-2xl font-semibold">{allowedIpStats.inactive}</div>
+              <div className="metric-tile">
+                <div className="metric-tile-label">Inativos</div>
+                <div className="metric-tile-value">{allowedIpStats.inactive}</div>
               </div>
             </div>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
