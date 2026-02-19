@@ -146,6 +146,8 @@ export default function EquipamentosPage() {
   const [globalSearch, setGlobalSearch] = useState("");
   const [serviceSearch, setServiceSearch] = useState("");
   const [serviceFilter, setServiceFilter] = useState<string>("__all__");
+  const [personSearch, setPersonSearch] = useState("");
+  const [personFilter, setPersonFilter] = useState<string>("__all__");
   const [scope, setScope] = useState<ScopeType>("OUT");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
   const [dateFrom, setDateFrom] = useState("");
@@ -228,11 +230,37 @@ export default function EquipamentosPage() {
     return list;
   }, [groupsAfterService]);
 
+  const personOptions = useMemo(() => {
+    const map = new Map<string, { id: string; label: string }>();
+    for (const { item } of allItems) {
+      if (item.assignedTo?.id) {
+        map.set(item.assignedTo.id, {
+          id: item.assignedTo.id,
+          label: `${item.assignedTo.name} • ${item.assignedTo.email}`,
+        });
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label, "pt"));
+  }, [allItems]);
+
+  const personOptionsFiltered = useMemo(() => {
+    const q = personSearch.trim().toLowerCase();
+    if (!q) return personOptions;
+    return personOptions.filter((p) => p.label.toLowerCase().includes(q));
+  }, [personOptions, personSearch]);
+
   const detailItems = useMemo(() => {
     const q = globalSearch.trim().toLowerCase();
 
     return allItems.filter(({ group, item }) => {
       if (statusFilter !== "ALL" && item.status !== statusFilter) return false;
+      if (personFilter !== "__all__") {
+        if (personFilter === "__unassigned__") {
+          if (item.assignedTo?.id) return false;
+        } else if (item.assignedTo?.id !== personFilter) {
+          return false;
+        }
+      }
       if (dateFrom && item.lastOutAt) {
         const d = new Date(item.lastOutAt);
         const from = new Date(`${dateFrom}T00:00:00`);
@@ -256,7 +284,7 @@ export default function EquipamentosPage() {
         .toLowerCase();
       return hay.includes(q);
     });
-  }, [allItems, globalSearch, statusFilter, dateFrom, dateTo]);
+  }, [allItems, globalSearch, statusFilter, personFilter, dateFrom, dateTo]);
 
   const summaryByService = useMemo(() => {
     const map = new Map<
@@ -285,11 +313,32 @@ export default function EquipamentosPage() {
     const inRepair = detailItems.filter((x) => x.item.status === "IN_REPAIR").length;
     const assigned = detailItems.filter((x) => x.item.status === "ACQUIRED").length;
     const topService = summaryByService[0]?.label || "Sem dados";
-    return { total, inRepair, assigned, topService };
+    const byPerson = new Map<string, number>();
+    for (const { item } of detailItems) {
+      const key = item.assignedTo?.name || "Sem pessoa atribuída";
+      byPerson.set(key, (byPerson.get(key) ?? 0) + 1);
+    }
+    const topPerson = Array.from(byPerson.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] || "Sem dados";
+    return { total, inRepair, assigned, topService, topPerson };
   }, [detailItems, summaryByService]);
+
+  const summaryByPerson = useMemo(() => {
+    const map = new Map<string, { key: string; label: string; total: number; personId: string | null }>();
+    for (const { item } of detailItems) {
+      const key = item.assignedTo?.id || "__unassigned__";
+      const label = item.assignedTo?.name
+        ? `${item.assignedTo.name}${item.assignedTo.email ? ` • ${item.assignedTo.email}` : ""}`
+        : "Sem pessoa atribuída";
+      const current = map.get(key);
+      if (current) current.total += 1;
+      else map.set(key, { key, label, total: 1, personId: item.assignedTo?.id || null });
+    }
+    return Array.from(map.values()).sort((a, b) => b.total - a.total);
+  }, [detailItems]);
 
   const clearFilters = () => {
     setServiceFilter("__all__");
+    setPersonFilter("__all__");
     setStatusFilter("ALL");
     setDateFrom("");
     setDateTo("");
@@ -298,6 +347,7 @@ export default function EquipamentosPage() {
 
   const activeFilterCount =
     Number(serviceFilter !== "__all__") +
+    Number(personFilter !== "__all__") +
     Number(statusFilter !== "ALL") +
     Number(Boolean(dateFrom || dateTo)) +
     Number(Boolean(globalSearch.trim()));
@@ -426,6 +476,7 @@ export default function EquipamentosPage() {
               <Settings2 className="h-4 w-4 text-indigo-600" />
             </div>
             <div className="mt-2 truncate text-lg font-semibold text-indigo-600">{kpis.topService}</div>
+            <div className="mt-1 truncate text-xs text-muted-foreground">Pessoa: {kpis.topPerson}</div>
             <Sparkline values={[18, 28, 35, 30, 42, 55, 52]} />
           </article>
         </section>
@@ -474,6 +525,32 @@ export default function EquipamentosPage() {
                       {serviceOptionsFiltered.map((s) => (
                         <SelectItem key={s.id} value={String(s.id)}>
                           {serviceLabel(s)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="space-y-2 lg:col-span-2">
+                <div className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Pessoa</div>
+                <div className="space-y-2">
+                  <Input
+                    value={personSearch}
+                    onChange={(e) => setPersonSearch(e.target.value)}
+                    placeholder="Pesquisar pessoa..."
+                    className="h-10 rounded-xl"
+                  />
+                  <Select value={personFilter} onValueChange={setPersonFilter}>
+                    <SelectTrigger className="h-11 rounded-xl">
+                      <SelectValue placeholder="Todas" />
+                    </SelectTrigger>
+                    <SelectContent className="glass-panel">
+                      <SelectItem value="__all__">Todas</SelectItem>
+                      <SelectItem value="__unassigned__">Sem pessoa atribuída</SelectItem>
+                      {personOptionsFiltered.map((p) => (
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.label}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -532,7 +609,7 @@ export default function EquipamentosPage() {
           ) : null}
         </section>
 
-        <section className="grid gap-4 lg:grid-cols-[340px_minmax(0,1fr)]">
+        <section className="grid gap-4 lg:grid-cols-[300px_300px_minmax(0,1fr)]">
           <aside className="rounded-2xl border border-border/60 bg-[hsl(var(--surface-1)/0.82)] p-3">
             <div className="mb-2 text-sm font-semibold">Resumo por Serviço</div>
             <div className="space-y-2">
@@ -573,6 +650,43 @@ export default function EquipamentosPage() {
             </div>
           </aside>
 
+          <aside className="rounded-2xl border border-border/60 bg-[hsl(var(--surface-1)/0.82)] p-3">
+            <div className="mb-2 text-sm font-semibold">Resumo por Pessoa</div>
+            <div className="space-y-2">
+              {loading ? (
+                Array.from({ length: 6 }).map((_, i) => (
+                  <div key={i} className="h-20 animate-pulse rounded-xl bg-muted/60" />
+                ))
+              ) : summaryByPerson.length === 0 ? (
+                <EmptyState title="Sem pessoas" description="Sem dados para os filtros selecionados." />
+              ) : (
+                summaryByPerson.map((person) => (
+                  <article
+                    key={person.key}
+                    className="rounded-xl border border-border/60 bg-[hsl(var(--surface-1)/0.75)] p-3 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md"
+                  >
+                    <div className="truncate text-sm font-semibold" title={person.label}>{person.label}</div>
+                    <div className="mt-1 text-xs text-muted-foreground">Quantidade: {person.total}</div>
+                    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted/70">
+                      <div
+                        className="h-full rounded-full bg-gradient-to-r from-sky-500 to-cyan-500"
+                        style={{ width: `${Math.max(10, Math.min(100, (person.total / Math.max(1, kpis.total)) * 100))}%` }}
+                      />
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="mt-3 h-8 rounded-lg"
+                      onClick={() => setPersonFilter(person.personId || "__unassigned__")}
+                    >
+                      Ver detalhes
+                    </Button>
+                  </article>
+                ))
+              )}
+            </div>
+          </aside>
+
           <div className="rounded-2xl border border-border/60 bg-[hsl(var(--surface-1)/0.82)] p-3">
             <div className="sticky top-[5.2rem] z-10 mb-2 rounded-xl border border-border/60 bg-[hsl(var(--surface-2)/0.84)] px-3 py-2 text-sm font-semibold backdrop-blur">
               Detalhe de Equipamentos
@@ -603,6 +717,8 @@ export default function EquipamentosPage() {
                     </summary>
 
                     <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
+                      <div><span className="text-muted-foreground">Serviço:</span> {group.label || "—"}</div>
+                      <div><span className="text-muted-foreground">Pessoa:</span> {item.assignedTo?.name || "Sem atribuição"}</div>
                       <div><span className="text-muted-foreground">Requisição:</span> {item.request?.gtmiNumber || "—"}</div>
                       <div><span className="text-muted-foreground">Destinatário:</span> {item.assignedTo?.name || "—"}</div>
                       <div><span className="text-muted-foreground">Última saída:</span> {item.lastOutAt ? new Date(item.lastOutAt).toLocaleString("pt-PT") : "—"}</div>
@@ -669,6 +785,16 @@ export default function EquipamentosPage() {
                     <SelectItem key={s.id} value={String(s.id)}>
                       {serviceLabel(s)}
                     </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value={personFilter} onValueChange={setPersonFilter}>
+                <SelectTrigger><SelectValue placeholder="Pessoa" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__all__">Todas</SelectItem>
+                  <SelectItem value="__unassigned__">Sem pessoa atribuída</SelectItem>
+                  {personOptions.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>{p.label}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>

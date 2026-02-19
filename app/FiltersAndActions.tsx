@@ -13,6 +13,7 @@ import {
   Bell,
   Boxes,
   ChevronDown,
+  CircleOff,
   CircleDollarSign,
   Download,
   Filter,
@@ -166,8 +167,10 @@ export default function FiltersAndActions({
     const total = allProducts.length;
     const inStock = allProducts.filter((p) => p.quantity > 20).length;
     const lowStock = allProducts.filter((p) => p.quantity > 0 && p.quantity <= 20).length;
+    const outOfStock = allProducts.filter((p) => p.quantity <= 0).length;
     const inventoryValue = allProducts.reduce((acc, p) => acc + p.price * p.quantity, 0);
-    return { total, inStock, lowStock, inventoryValue };
+    const averageTicket = total > 0 ? inventoryValue / total : 0;
+    return { total, inStock, lowStock, outOfStock, inventoryValue, averageTicket };
   }, [allProducts]);
 
   const exportToCSV = () => {
@@ -283,6 +286,25 @@ export default function FiltersAndActions({
     selectedSuppliers.length +
     (priceRange[0] > 0 || priceRange[1] < maxPrice ? 1 : 0);
 
+  const selectedCategoryName = useMemo(() => {
+    if (!selectedCategory[0]) return null;
+    return categoryOptions.find((opt) => opt.id === selectedCategory[0])?.name ?? "Categoria";
+  }, [categoryOptions, selectedCategory]);
+
+  const selectedSupplierName = useMemo(() => {
+    if (!selectedSuppliers[0]) return null;
+    return supplierOptions.find((opt) => opt.id === selectedSuppliers[0])?.name ?? "Fornecedor";
+  }, [selectedSuppliers, supplierOptions]);
+
+  const selectedStatusName = useMemo(() => {
+    if (!selectedStatuses[0]) return null;
+    return formatProductStatus(selectedStatuses[0]);
+  }, [selectedStatuses]);
+
+  const stockCoverage = analytics.total > 0 ? Math.round((analytics.inStock / analytics.total) * 100) : 0;
+  const lowStockRatio = analytics.total > 0 ? Math.round((analytics.lowStock / analytics.total) * 100) : 0;
+  const outStockRatio = analytics.total > 0 ? Math.round((analytics.outOfStock / analytics.total) * 100) : 0;
+
   return (
     <div className="space-y-5">
       <div className="sticky top-3 z-20 flex items-center justify-between gap-3 rounded-2xl border border-border/60 bg-[hsl(var(--surface-1)/0.72)] p-3 backdrop-blur-xl">
@@ -364,15 +386,17 @@ export default function FiltersAndActions({
         </div>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         <article className="rounded-2xl border border-border/60 bg-[hsl(var(--surface-1)/0.8)] p-4 shadow-sm transition-transform hover:-translate-y-0.5">
           <div className="flex items-center justify-between text-xs uppercase tracking-[0.16em] text-muted-foreground">
             <span>Total Produtos</span>
             <Boxes className="h-4 w-4 text-primary" />
           </div>
           <div className="mt-2 text-3xl font-semibold">{analytics.total}</div>
-          <div className="mt-1 text-xs text-emerald-600">+4.6% vs mês anterior</div>
-          <Sparkline values={[30, 55, 46, 68, 72, 65, 80]} />
+          <div className="mt-1 text-xs text-muted-foreground">
+            {filteredProducts.length} após filtros
+          </div>
+          <Sparkline values={[20, 32, 48, 56, 68, 72, Math.max(24, stockCoverage)]} />
         </article>
         <article className="rounded-2xl border border-border/60 bg-[hsl(var(--surface-1)/0.8)] p-4 shadow-sm transition-transform hover:-translate-y-0.5">
           <div className="flex items-center justify-between text-xs uppercase tracking-[0.16em] text-muted-foreground">
@@ -382,8 +406,8 @@ export default function FiltersAndActions({
             </Badge>
           </div>
           <div className="mt-2 text-3xl font-semibold">{analytics.inStock}</div>
-          <div className="mt-1 text-xs text-emerald-600">+2.1% disponibilidade</div>
-          <Sparkline values={[22, 38, 45, 57, 61, 64, 70]} />
+          <div className="mt-1 text-xs text-emerald-600">{stockCoverage}% do catálogo</div>
+          <Sparkline values={[22, 38, 45, 57, 61, 64, Math.max(26, stockCoverage)]} />
         </article>
         <article className="rounded-2xl border border-border/60 bg-[hsl(var(--surface-1)/0.8)] p-4 shadow-sm transition-transform hover:-translate-y-0.5">
           <div className="flex items-center justify-between text-xs uppercase tracking-[0.16em] text-muted-foreground">
@@ -391,8 +415,17 @@ export default function FiltersAndActions({
             <TriangleAlert className="h-4 w-4 text-amber-500" />
           </div>
           <div className="mt-2 text-3xl font-semibold">{analytics.lowStock}</div>
-          <div className="mt-1 text-xs text-amber-600">Ação recomendada</div>
-          <Sparkline values={[50, 45, 38, 42, 35, 34, 30]} />
+          <div className="mt-1 text-xs text-amber-600">{lowStockRatio}% com reposição recomendada</div>
+          <Sparkline values={[55, 48, 42, 38, 32, 28, Math.max(20, lowStockRatio)]} />
+        </article>
+        <article className="rounded-2xl border border-border/60 bg-[hsl(var(--surface-1)/0.8)] p-4 shadow-sm transition-transform hover:-translate-y-0.5">
+          <div className="flex items-center justify-between text-xs uppercase tracking-[0.16em] text-muted-foreground">
+            <span>Sem Stock</span>
+            <CircleOff className="h-4 w-4 text-rose-500" />
+          </div>
+          <div className="mt-2 text-3xl font-semibold">{analytics.outOfStock}</div>
+          <div className="mt-1 text-xs text-rose-600">{outStockRatio}% sem disponibilidade</div>
+          <Sparkline values={[16, 24, 20, 28, 26, 32, Math.max(18, outStockRatio)]} />
         </article>
         <article className="rounded-2xl border border-border/60 bg-[hsl(var(--surface-1)/0.8)] p-4 shadow-sm transition-transform hover:-translate-y-0.5">
           <div className="flex items-center justify-between text-xs uppercase tracking-[0.16em] text-muted-foreground">
@@ -406,8 +439,10 @@ export default function FiltersAndActions({
               maximumFractionDigits: 0,
             })}
           </div>
-          <div className="mt-1 text-xs text-emerald-600">+7.4% valorização</div>
-          <Sparkline values={[24, 30, 42, 45, 60, 62, 74]} />
+          <div className="mt-1 text-xs text-muted-foreground">
+            Ticket médio: {analytics.averageTicket.toLocaleString("pt-PT", { style: "currency", currency: "EUR", maximumFractionDigits: 0 })}
+          </div>
+          <Sparkline values={[24, 30, 42, 45, 52, 58, Math.max(24, stockCoverage)]} />
         </article>
       </div>
 
@@ -554,6 +589,18 @@ export default function FiltersAndActions({
                 />
               </div>
             </div>
+          </div>
+        ) : null}
+
+        {activeFilterCount > 0 ? (
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+            <Badge variant="secondary" className="rounded-full">Filtros ativos: {activeFilterCount}</Badge>
+            {selectedCategoryName ? <Badge variant="outline" className="rounded-full">Categoria: {selectedCategoryName}</Badge> : null}
+            {selectedStatusName ? <Badge variant="outline" className="rounded-full">Estado: {selectedStatusName}</Badge> : null}
+            {selectedSupplierName ? <Badge variant="outline" className="rounded-full">Fornecedor: {selectedSupplierName}</Badge> : null}
+            {(priceRange[0] > 0 || priceRange[1] < maxPrice) ? (
+              <Badge variant="outline" className="rounded-full">Preço: {priceRange[0]}-{priceRange[1]}€</Badge>
+            ) : null}
           </div>
         ) : null}
       </div>

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import AuthenticatedLayout from "@/app/components/AuthenticatedLayout";
 import axiosInstance from "@/utils/axiosInstance";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -76,7 +77,7 @@ type ProductInvoice = {
 type ProductUnit = {
   id: string;
   code: string;
-  status: "IN_STOCK" | "ACQUIRED";
+  status: "IN_STOCK" | "ACQUIRED" | "IN_REPAIR" | "SCRAPPED" | "LOST";
   serialNumber?: string | null;
   partNumber?: string | null;
   assetTag?: string | null;
@@ -90,7 +91,7 @@ type ProductUnit = {
 
 type StockMovement = {
   id: string;
-  type: "IN" | "OUT";
+  type: "IN" | "OUT" | "RETURN" | "REPAIR_OUT" | "REPAIR_IN" | "SCRAP" | "LOST";
   quantity: number;
   reason?: string | null;
   costCenter?: string | null;
@@ -105,6 +106,124 @@ type StockMovement = {
   performedBy?: { id: string; name: string; email: string } | null;
   assignedTo?: { id: string; name: string; email: string } | null;
 };
+
+type SessionUser = {
+  id: string;
+  role: "USER" | "ADMIN";
+};
+
+type UnitActionType = "RETURN" | "REPAIR_OUT" | "REPAIR_IN" | "SCRAP" | "LOST";
+
+function formatEur(value: number) {
+  return value.toLocaleString("pt-PT", {
+    style: "currency",
+    currency: "EUR",
+    maximumFractionDigits: 2,
+  });
+}
+
+function productStatusLabel(status?: string) {
+  switch (status) {
+    case "Available":
+      return "Disponível";
+    case "Stock Low":
+      return "Stock baixo";
+    case "Stock Out":
+      return "Sem stock";
+    default:
+      return status || "—";
+  }
+}
+
+function unitStatusMeta(status: ProductUnit["status"]) {
+  switch (status) {
+    case "IN_STOCK":
+      return {
+        label: "Em stock",
+        className: "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+      };
+    case "ACQUIRED":
+      return {
+        label: "Em uso",
+        className: "border-sky-500/25 bg-sky-500/10 text-sky-700 dark:text-sky-300",
+      };
+    case "IN_REPAIR":
+      return {
+        label: "Em reparação",
+        className: "border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-300",
+      };
+    case "SCRAPPED":
+      return {
+        label: "Abatido",
+        className: "border-zinc-500/25 bg-zinc-500/10 text-zinc-700 dark:text-zinc-300",
+      };
+    case "LOST":
+      return {
+        label: "Perdido",
+        className: "border-rose-500/25 bg-rose-500/10 text-rose-700 dark:text-rose-300",
+      };
+    default:
+      return {
+        label: status,
+        className: "border-border/70 bg-muted/40 text-muted-foreground",
+      };
+  }
+}
+
+function movementTypeMeta(type: StockMovement["type"]) {
+  switch (type) {
+    case "IN":
+      return { label: "Entrada", className: "text-emerald-700 dark:text-emerald-300" };
+    case "OUT":
+      return { label: "Saída", className: "text-rose-700 dark:text-rose-300" };
+    case "RETURN":
+      return { label: "Devolução", className: "text-emerald-700 dark:text-emerald-300" };
+    case "REPAIR_OUT":
+      return { label: "Enviado reparação", className: "text-amber-700 dark:text-amber-300" };
+    case "REPAIR_IN":
+      return { label: "Regresso reparação", className: "text-emerald-700 dark:text-emerald-300" };
+    case "SCRAP":
+      return { label: "Abate", className: "text-zinc-700 dark:text-zinc-300" };
+    case "LOST":
+      return { label: "Extravio", className: "text-rose-700 dark:text-rose-300" };
+    default:
+      return { label: type, className: "text-muted-foreground" };
+  }
+}
+
+function unitActionLabel(action: UnitActionType) {
+  switch (action) {
+    case "RETURN":
+      return "Devolver ao stock";
+    case "REPAIR_OUT":
+      return "Enviar para reparação";
+    case "REPAIR_IN":
+      return "Registar regresso da reparação";
+    case "SCRAP":
+      return "Abater unidade";
+    case "LOST":
+      return "Marcar como extraviada";
+    default:
+      return action;
+  }
+}
+
+function unitActionEndpoint(action: UnitActionType) {
+  switch (action) {
+    case "RETURN":
+      return "/api/units/return";
+    case "REPAIR_OUT":
+      return "/api/units/repair-out";
+    case "REPAIR_IN":
+      return "/api/units/repair-in";
+    case "SCRAP":
+      return "/api/units/scrap";
+    case "LOST":
+      return "/api/units/lost";
+    default:
+      return "/api/units/return";
+  }
+}
 
 export default function ProductDetailsPage() {
   const params = useParams<{ id: string }>();
@@ -127,10 +246,29 @@ export default function ProductDetailsPage() {
   }, [tabParam, invoiceIdFromQuery]);
 
   const [tab, setTab] = useState<string>(initialTab);
+  const [session, setSession] = useState<SessionUser | null>(null);
 
   useEffect(() => {
     setTab(initialTab);
   }, [initialTab]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadSession = async () => {
+      try {
+        const res = await fetch("/api/auth/session");
+        if (!res.ok) return;
+        const data = (await res.json()) as SessionUser;
+        if (!cancelled) setSession(data);
+      } catch {
+        // ignore
+      }
+    };
+    loadSession();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const [product, setProduct] = useState<ProductDetails | null>(null);
   const [invoices, setInvoices] = useState<ProductInvoice[]>([]);
@@ -178,15 +316,38 @@ export default function ProductDetailsPage() {
   const [movementsLoading, setMovementsLoading] = useState(false);
   const [movementsNextCursor, setMovementsNextCursor] = useState<string | null>(null);
   const [movementsQuery, setMovementsQuery] = useState("");
-  const [movementsType, setMovementsType] = useState<"" | "IN" | "OUT">("");
+  const [movementsType, setMovementsType] = useState<
+    "" | "IN" | "OUT" | "RETURN" | "REPAIR_OUT" | "REPAIR_IN" | "SCRAP" | "LOST"
+  >("");
   const [movementsFrom, setMovementsFrom] = useState("");
   const [movementsTo, setMovementsTo] = useState("");
+  const [unitHistories, setUnitHistories] = useState<
+    Record<string, { open: boolean; loading: boolean; loaded: boolean; items: StockMovement[] }>
+  >({});
+  const [unitActionDialog, setUnitActionDialog] = useState<{
+    open: boolean;
+    unit: ProductUnit | null;
+    action: UnitActionType;
+    reason: string;
+    costCenter: string;
+    notes: string;
+    saving: boolean;
+  }>({
+    open: false,
+    unit: null,
+    action: "RETURN",
+    reason: "",
+    costCenter: "",
+    notes: "",
+    saving: false,
+  });
 
   const total = useMemo(() => {
     const q = Number.isFinite(quantity) ? quantity : 0;
     const p = Number.isFinite(unitPrice) ? unitPrice : 0;
     return q * p;
   }, [quantity, unitPrice]);
+  const isAdmin = session?.role === "ADMIN";
 
   const loadAll = async () => {
     if (!productId) return;
@@ -361,6 +522,178 @@ export default function ProductDetailsPage() {
     const end = start + unitsPageSize;
     return filteredUnits.slice(start, end);
   }, [filteredUnits, unitsPageIndex, unitsPageSize]);
+
+  const unitStatusStats = useMemo(() => {
+    const stats: Record<ProductUnit["status"], number> = {
+      IN_STOCK: 0,
+      ACQUIRED: 0,
+      IN_REPAIR: 0,
+      SCRAPPED: 0,
+      LOST: 0,
+    };
+    for (const u of units) {
+      stats[u.status] += 1;
+    }
+    return stats;
+  }, [units]);
+
+  const movementStats = useMemo(() => {
+    return movements.reduce(
+      (acc, m) => {
+        if (m.type === "IN" || m.type === "RETURN" || m.type === "REPAIR_IN") acc.entries += m.quantity;
+        if (m.type === "OUT" || m.type === "REPAIR_OUT" || m.type === "SCRAP" || m.type === "LOST")
+          acc.exits += m.quantity;
+        if (m.type === "RETURN" || m.type === "REPAIR_OUT" || m.type === "REPAIR_IN" || m.type === "SCRAP" || m.type === "LOST")
+          acc.critical += 1;
+        return acc;
+      },
+      { entries: 0, exits: 0, critical: 0 }
+    );
+  }, [movements]);
+
+  const lastMovementAt = useMemo(() => {
+    if (movements.length === 0) return null;
+    return new Date(movements[0].createdAt).toLocaleString("pt-PT");
+  }, [movements]);
+
+  const criticalMovements = useMemo(
+    () =>
+      movements
+        .filter((m) => m.type === "RETURN" || m.type === "REPAIR_OUT" || m.type === "REPAIR_IN" || m.type === "SCRAP" || m.type === "LOST")
+        .slice(0, 10),
+    [movements]
+  );
+
+  const unitHealth = useMemo(() => {
+    const totalLoaded = units.length;
+    const pct = (count: number) => (totalLoaded > 0 ? Math.round((count / totalLoaded) * 100) : 0);
+    return {
+      totalLoaded,
+      stockPct: pct(unitStatusStats.IN_STOCK),
+      acquiredPct: pct(unitStatusStats.ACQUIRED),
+      repairPct: pct(unitStatusStats.IN_REPAIR),
+      scrapPct: pct(unitStatusStats.SCRAPPED),
+      lostPct: pct(unitStatusStats.LOST),
+    };
+  }, [units.length, unitStatusStats]);
+
+  const alerts = useMemo(() => {
+    const missingIdentity = units.filter((u) => !(u.serialNumber?.trim() || u.assetTag?.trim())).length;
+    const list: Array<{ level: "warning" | "critical" | "info"; text: string }> = [];
+    if (product?.quantity !== undefined && product.quantity <= 0) {
+      list.push({ level: "critical", text: "Produto sem stock disponível para novas saídas." });
+    } else if (product?.quantity !== undefined && product.quantity <= 5) {
+      list.push({ level: "warning", text: `Stock baixo (${product.quantity} unidade(s) disponíveis).` });
+    }
+    if (unitStatusStats.IN_REPAIR > 0) {
+      list.push({ level: "warning", text: `${unitStatusStats.IN_REPAIR} unidade(s) em reparação.` });
+    }
+    if (unitStatusStats.SCRAPPED > 0 || unitStatusStats.LOST > 0) {
+      list.push({
+        level: "critical",
+        text: `${unitStatusStats.SCRAPPED} abatida(s) e ${unitStatusStats.LOST} extraviada(s).`,
+      });
+    }
+    if (missingIdentity > 0) {
+      list.push({
+        level: "info",
+        text: `${missingIdentity} unidade(s) sem S/N e sem Asset Tag (recomendado completar).`,
+      });
+    }
+    if (invoices.length === 0) {
+      list.push({ level: "info", text: "Ainda não existem faturas associadas a este produto." });
+    }
+    return list;
+  }, [invoices.length, product?.quantity, unitStatusStats, units]);
+
+  const fetchUnitHistory = async (unit: ProductUnit) => {
+    setUnitHistories((prev) => ({
+      ...prev,
+      [unit.id]: { open: true, loading: true, loaded: prev[unit.id]?.loaded ?? false, items: prev[unit.id]?.items ?? [] },
+    }));
+
+    try {
+      const res = await axiosInstance.get("/stock-movements", {
+        params: { unitId: unit.id, limit: 20, asUserId: asUserIdFromQuery || undefined },
+      });
+      const items: StockMovement[] = res.data?.items ?? [];
+      setUnitHistories((prev) => ({
+        ...prev,
+        [unit.id]: { open: true, loading: false, loaded: true, items },
+      }));
+    } catch {
+      setUnitHistories((prev) => ({
+        ...prev,
+        [unit.id]: { open: true, loading: false, loaded: true, items: [] },
+      }));
+      toast({
+        title: "Falha ao carregar histórico da unidade",
+        description: "Não foi possível obter os últimos movimentos desta unidade.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const toggleUnitHistory = async (unit: ProductUnit) => {
+    const current = unitHistories[unit.id];
+    if (!current || !current.loaded) {
+      await fetchUnitHistory(unit);
+      return;
+    }
+    setUnitHistories((prev) => ({
+      ...prev,
+      [unit.id]: { ...current, open: !current.open },
+    }));
+  };
+
+  const openUnitAction = (unit: ProductUnit, action: UnitActionType) => {
+    setUnitActionDialog({
+      open: true,
+      unit,
+      action,
+      reason: "",
+      costCenter: "",
+      notes: "",
+      saving: false,
+    });
+  };
+
+  const executeUnitAction = async () => {
+    if (!unitActionDialog.unit) return;
+    setUnitActionDialog((prev) => ({ ...prev, saving: true }));
+    try {
+      const endpoint = unitActionEndpoint(unitActionDialog.action);
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          code: unitActionDialog.unit.code,
+          asUserId: asUserIdFromQuery || undefined,
+          reason: unitActionDialog.reason.trim() || undefined,
+          costCenter: unitActionDialog.costCenter.trim() || undefined,
+          notes: unitActionDialog.notes.trim() || undefined,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || "Falha ao executar ação");
+
+      toast({
+        title: "Ação registada",
+        description: `${unitActionLabel(unitActionDialog.action)} concluída para a unidade ${unitActionDialog.unit.code}.`,
+      });
+
+      setUnitActionDialog((prev) => ({ ...prev, open: false, saving: false }));
+      await Promise.all([loadAll(), loadUnits({ reset: true }), loadMovements({ reset: true })]);
+      setUnitHistories({});
+    } catch (error: any) {
+      toast({
+        title: "Erro na ação da unidade",
+        description: error?.message || "Não foi possível executar a ação.",
+        variant: "destructive",
+      });
+      setUnitActionDialog((prev) => ({ ...prev, saving: false }));
+    }
+  };
 
   const handleNextUnitsPage = async () => {
     const nextIndex = unitsPageIndex + 1;
@@ -582,7 +915,53 @@ export default function ProductDetailsPage() {
             }
           />
         ) : (
-          <Tabs value={tab} onValueChange={setTab} className="space-y-4">
+          <>
+            <SectionCard
+              title="Resumo rápido"
+              description="Visão operacional imediata para perceber o estado deste produto."
+            >
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <div className="rounded-xl border border-border/60 p-3">
+                  <div className="text-xs text-muted-foreground">Preço unitário</div>
+                  <div className="text-2xl font-semibold">{formatEur(product.price)}</div>
+                  <div className="mt-1">
+                    <Badge variant="outline" className="rounded-full">
+                      Estado: {productStatusLabel(product.status)}
+                    </Badge>
+                  </div>
+                </div>
+                <div className="rounded-xl border border-border/60 p-3">
+                  <div className="text-xs text-muted-foreground">Unidades carregadas</div>
+                  <div className="text-2xl font-semibold">{units.length}</div>
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    Em uso: {unitStatusStats.ACQUIRED} • Em stock: {unitStatusStats.IN_STOCK}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-border/60 p-3">
+                  <div className="text-xs text-muted-foreground">Movimentos (lista atual)</div>
+                  <div className="text-2xl font-semibold">{movements.length}</div>
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    Entradas: {movementStats.entries} • Saídas: {movementStats.exits}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-border/60 p-3">
+                  <div className="text-xs text-muted-foreground">Faturas associadas</div>
+                  <div className="text-2xl font-semibold">{invoices.length}</div>
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    Último movimento: {lastMovementAt || "—"}
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <Button size="sm" variant="outline" onClick={() => setTab("details")}>Ver detalhes</Button>
+                <Button size="sm" variant="outline" onClick={() => setTab("units")}>Ver unidades QR</Button>
+                <Button size="sm" variant="outline" onClick={() => setTab("movements")}>Ver movimentos</Button>
+                <Button size="sm" variant="outline" onClick={() => setTab("invoices")}>Ver faturas</Button>
+              </div>
+            </SectionCard>
+
+            <Tabs value={tab} onValueChange={setTab} className="space-y-4">
             <TabsList>
               <TabsTrigger value="details">Detalhes</TabsTrigger>
               <TabsTrigger value="invoices">Faturas</TabsTrigger>
@@ -594,13 +973,114 @@ export default function ProductDetailsPage() {
               <SectionCard title="Detalhes do produto" description="Informação base e metadados.">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
                   <div><span className="font-medium">SKU:</span> {product.sku}</div>
-                  <div><span className="font-medium">Preço:</span> ${product.price.toFixed(2)}</div>
+                  <div><span className="font-medium">Preço:</span> {formatEur(product.price)}</div>
                   <div><span className="font-medium">Quantidade:</span> {product.quantity}</div>
-                  <div><span className="font-medium">Estado:</span> {product.status || "—"}</div>
+                  <div><span className="font-medium">Estado:</span> {productStatusLabel(product.status)}</div>
                   <div><span className="font-medium">Categoria:</span> {product.category || "—"}</div>
                   <div><span className="font-medium">Fornecedor:</span> {product.supplier || "—"}</div>
+                  <div><span className="font-medium">Criado em:</span> {new Date(product.createdAt).toLocaleString("pt-PT")}</div>
+                  <div><span className="font-medium">Última atualização:</span> {new Date(product.updatedAt).toLocaleString("pt-PT")}</div>
                   <div className="md:col-span-2"><span className="font-medium">Descrição:</span> {product.description?.trim() ? product.description : "—"}</div>
                 </div>
+              </SectionCard>
+
+              <SectionCard
+                title="Estado operacional"
+                description="Visão rápida do que está em stock, em uso, em reparação, abatido e perdido."
+              >
+                <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+                  <div className="rounded-md border border-border/60 p-3">
+                    <div className="text-xs text-muted-foreground">Em stock</div>
+                    <div className="text-xl font-semibold">{unitStatusStats.IN_STOCK}</div>
+                  </div>
+                  <div className="rounded-md border border-border/60 p-3">
+                    <div className="text-xs text-muted-foreground">Em uso</div>
+                    <div className="text-xl font-semibold">{unitStatusStats.ACQUIRED}</div>
+                  </div>
+                  <div className="rounded-md border border-border/60 p-3">
+                    <div className="text-xs text-muted-foreground">Em reparação</div>
+                    <div className="text-xl font-semibold">{unitStatusStats.IN_REPAIR}</div>
+                  </div>
+                  <div className="rounded-md border border-border/60 p-3">
+                    <div className="text-xs text-muted-foreground">Abatidos</div>
+                    <div className="text-xl font-semibold">{unitStatusStats.SCRAPPED}</div>
+                  </div>
+                  <div className="rounded-md border border-border/60 p-3">
+                    <div className="text-xs text-muted-foreground">Perdidos</div>
+                    <div className="text-xl font-semibold">{unitStatusStats.LOST}</div>
+                  </div>
+                </div>
+
+                <div className="mt-4">
+                  <div className="mb-2 text-sm font-medium">Saúde operacional (%)</div>
+                  <div className="space-y-2">
+                    {[
+                      { label: "Em stock", value: unitHealth.stockPct, bar: "bg-emerald-500/70" },
+                      { label: "Em uso", value: unitHealth.acquiredPct, bar: "bg-sky-500/70" },
+                      { label: "Em reparação", value: unitHealth.repairPct, bar: "bg-amber-500/70" },
+                      { label: "Abatido", value: unitHealth.scrapPct, bar: "bg-zinc-500/70" },
+                      { label: "Extraviado", value: unitHealth.lostPct, bar: "bg-rose-500/70" },
+                    ].map((row) => (
+                      <div key={row.label}>
+                        <div className="mb-1 flex items-center justify-between text-xs">
+                          <span>{row.label}</span>
+                          <span className="text-muted-foreground">{row.value}%</span>
+                        </div>
+                        <div className="h-2 rounded-full bg-muted/70">
+                          <div className={`h-2 rounded-full ${row.bar}`} style={{ width: `${row.value}%` }} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="mt-4">
+                  <div className="mb-2 text-sm font-medium">Últimos eventos de devolução/reparação/abate</div>
+                  {criticalMovements.length === 0 ? (
+                    <div className="text-sm text-muted-foreground">Sem eventos críticos registados para este produto.</div>
+                  ) : (
+                    <div className="space-y-2">
+                      {criticalMovements.map((m) => (
+                        <div key={m.id} className="rounded-md border border-border/60 p-2 text-sm">
+                          <div className="font-medium">
+                            {movementTypeMeta(m.type).label} • {new Date(m.createdAt).toLocaleString("pt-PT")}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {m.unit?.code ? `Unidade: ${m.unit.code} • ` : ""}
+                            {m.reason ? `Motivo: ${m.reason}` : "Sem motivo"}
+                            {m.assignedTo?.name ? ` • Pessoa: ${m.assignedTo.name}` : ""}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </SectionCard>
+
+              <SectionCard
+                title="Alertas e recomendações"
+                description="Sinais automáticos para priorizar ações operacionais."
+              >
+                {alerts.length === 0 ? (
+                  <div className="text-sm text-muted-foreground">Sem alertas neste momento.</div>
+                ) : (
+                  <div className="space-y-2">
+                    {alerts.map((a, idx) => (
+                      <div
+                        key={`${a.level}-${idx}`}
+                        className={`rounded-md border p-2 text-sm ${
+                          a.level === "critical"
+                            ? "border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-300"
+                            : a.level === "warning"
+                            ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                            : "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300"
+                        }`}
+                      >
+                        {a.text}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </SectionCard>
             </TabsContent>
 
@@ -697,6 +1177,7 @@ export default function ProductDetailsPage() {
                 ) : (
                   <div className="mt-4 space-y-3">
                     {pagedUnits.map((u) => {
+                        const meta = unitStatusMeta(u.status);
                         const draft = unitDrafts[u.id] ?? {
                           serialNumber: u.serialNumber ?? "",
                           partNumber: u.partNumber ?? "",
@@ -718,13 +1199,22 @@ export default function ProductDetailsPage() {
                                 ) : null}
                                 <div className="space-y-1">
                                   <div className="font-medium break-all">{u.code}</div>
-                                  <div className="text-xs text-muted-foreground">
-                                    Estado: {u.status === "IN_STOCK" ? "Em stock" : "Adquirido"}
+                                  <div className="text-xs text-muted-foreground flex flex-wrap items-center gap-2">
+                                    <Badge variant="outline" className={`rounded-full border ${meta.className}`}>
+                                      {meta.label}
+                                    </Badge>
                                     {u.acquiredAt ? ` • ${new Date(u.acquiredAt).toLocaleDateString("pt-PT")}` : ""}
                                   </div>
                                   <div className="flex items-center gap-2">
                                     <Button variant="outline" size="sm" onClick={() => router.push(`/scan/${u.code}`)}>
                                       Abrir scan
+                                    </Button>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => toggleUnitHistory(u)}
+                                    >
+                                      Histórico
                                     </Button>
                                     <Button
                                       variant="outline"
@@ -744,6 +1234,33 @@ export default function ProductDetailsPage() {
                                     >
                                       Copiar
                                     </Button>
+                                  </div>
+                                  <div className="flex flex-wrap items-center gap-2 pt-1">
+                                    {u.status === "ACQUIRED" ? (
+                                      <>
+                                        <Button variant="outline" size="sm" onClick={() => openUnitAction(u, "RETURN")}>
+                                          Devolver
+                                        </Button>
+                                        <Button variant="outline" size="sm" onClick={() => openUnitAction(u, "REPAIR_OUT")}>
+                                          Reparação
+                                        </Button>
+                                      </>
+                                    ) : null}
+                                    {u.status === "IN_REPAIR" ? (
+                                      <Button variant="outline" size="sm" onClick={() => openUnitAction(u, "REPAIR_IN")}>
+                                        Regressou reparação
+                                      </Button>
+                                    ) : null}
+                                    {isAdmin && u.status !== "SCRAPPED" ? (
+                                      <Button variant="outline" size="sm" onClick={() => openUnitAction(u, "SCRAP")}>
+                                        Abater
+                                      </Button>
+                                    ) : null}
+                                    {isAdmin && u.status !== "LOST" ? (
+                                      <Button variant="outline" size="sm" onClick={() => openUnitAction(u, "LOST")}>
+                                        Extravio
+                                      </Button>
+                                    ) : null}
                                   </div>
                                 </div>
                               </div>
@@ -798,6 +1315,39 @@ export default function ProductDetailsPage() {
                                 </div>
                               </div>
                             </div>
+                            {unitHistories[u.id]?.open ? (
+                              <div className="mt-3 rounded-md border border-border/60 bg-muted/20 p-3">
+                                <div className="mb-2 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                                  Histórico da unidade
+                                </div>
+                                {unitHistories[u.id]?.loading ? (
+                                  <div className="text-sm text-muted-foreground">A carregar movimentos…</div>
+                                ) : (unitHistories[u.id]?.items?.length ?? 0) === 0 ? (
+                                  <div className="text-sm text-muted-foreground">Sem movimentos para esta unidade.</div>
+                                ) : (
+                                  <div className="space-y-2">
+                                    {(unitHistories[u.id]?.items ?? []).map((m) => {
+                                      const metaMove = movementTypeMeta(m.type);
+                                      return (
+                                        <div key={m.id} className="rounded-md border border-border/50 p-2 text-xs">
+                                          <div className="flex items-center justify-between gap-2">
+                                            <span className={`font-medium ${metaMove.className}`}>{metaMove.label}</span>
+                                            <span className="text-muted-foreground">
+                                              {new Date(m.createdAt).toLocaleString("pt-PT")}
+                                            </span>
+                                          </div>
+                                          <div className="mt-1 text-muted-foreground">
+                                            {m.reason ? `Motivo: ${m.reason}` : "Sem motivo"}
+                                            {m.costCenter ? ` • CC: ${m.costCenter}` : ""}
+                                            {m.assignedTo?.name ? ` • Pessoa: ${m.assignedTo.name}` : ""}
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            ) : null}
                           </div>
                         );
                       })}
@@ -889,7 +1439,7 @@ export default function ProductDetailsPage() {
                     </div>
 
                     <div className="flex items-center justify-between">
-                      <span className="text-sm text-muted-foreground">Total: ${total.toFixed(2)}</span>
+                      <span className="text-sm text-muted-foreground">Total: {formatEur(total)}</span>
                       <div className="flex items-center gap-2">
                         <Button variant="outline" onClick={() => setInvoiceDialogOpen(false)} disabled={saving}>
                           Cancelar
@@ -1031,7 +1581,7 @@ export default function ProductDetailsPage() {
 
                         <div className="mt-2 flex items-center justify-between gap-2">
                           <div className="text-sm text-muted-foreground">
-                            {inv.quantity} × {inv.unitPrice} = ${(inv.quantity * inv.unitPrice).toFixed(2)}
+                            {inv.quantity} × {formatEur(inv.unitPrice)} = {formatEur(inv.quantity * inv.unitPrice)}
                           </div>
                           <div className="flex items-center gap-2">
                             <AttachmentsDialog
@@ -1084,8 +1634,13 @@ export default function ProductDetailsPage() {
                         onChange={(e) => setMovementsType(e.target.value as any)}
                       >
                         <option value="">Todos</option>
-                        <option value="IN">IN</option>
-                        <option value="OUT">OUT</option>
+                        <option value="IN">Entrada</option>
+                        <option value="OUT">Saída</option>
+                        <option value="RETURN">Devolução</option>
+                        <option value="REPAIR_OUT">Reparação (saída)</option>
+                        <option value="REPAIR_IN">Reparação (entrada)</option>
+                        <option value="SCRAP">Abate</option>
+                        <option value="LOST">Extravio</option>
                       </select>
                     </div>
 
@@ -1147,8 +1702,7 @@ export default function ProductDetailsPage() {
                       </TableHeader>
                       <TableBody>
                         {movements.map((m) => {
-                          const typeLabel = m.type === "IN" ? "IN" : "OUT";
-                          const typeClass = m.type === "IN" ? "text-emerald-600" : "text-rose-600";
+                          const type = movementTypeMeta(m.type);
                           const docParts = [
                             m.invoice?.invoiceNumber ? `FT: ${m.invoice.invoiceNumber}` : null,
                             m.invoice?.reqNumber ? `REQ: ${m.invoice.reqNumber}` : null,
@@ -1162,7 +1716,9 @@ export default function ProductDetailsPage() {
                               <TableCell className="text-xs text-muted-foreground">
                                 {new Date(m.createdAt).toLocaleString("pt-PT")}
                               </TableCell>
-                              <TableCell className={`font-medium ${typeClass}`}>{typeLabel}</TableCell>
+                              <TableCell>
+                                <span className={`font-medium ${type.className}`}>{type.label}</span>
+                              </TableCell>
                               <TableCell>{m.quantity}</TableCell>
                               <TableCell>
                                 <div className="text-sm">
@@ -1209,7 +1765,78 @@ export default function ProductDetailsPage() {
                 )}
               </SectionCard>
             </TabsContent>
-          </Tabs>
+            </Tabs>
+
+            <Dialog
+              open={unitActionDialog.open}
+              onOpenChange={(open) =>
+                setUnitActionDialog((prev) => ({ ...prev, open, saving: open ? prev.saving : false }))
+              }
+            >
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>{unitActionLabel(unitActionDialog.action)}</DialogTitle>
+                  <DialogDescription>
+                    {unitActionDialog.unit
+                      ? `Unidade ${unitActionDialog.unit.code}. Esta ação será auditada e refletida no histórico de movimentos.`
+                      : "Selecione uma unidade."}
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-3">
+                  <div className="text-xs text-muted-foreground">
+                    Estado atual:{" "}
+                    {unitActionDialog.unit ? unitStatusMeta(unitActionDialog.unit.status).label : "—"}
+                    {!isAdmin && (unitActionDialog.action === "SCRAP" || unitActionDialog.action === "LOST")
+                      ? " • Ação permitida apenas para ADMIN."
+                      : ""}
+                  </div>
+                  <Input
+                    placeholder="Motivo (opcional)"
+                    value={unitActionDialog.reason}
+                    onChange={(e) =>
+                      setUnitActionDialog((prev) => ({ ...prev, reason: e.target.value }))
+                    }
+                  />
+                  <Input
+                    placeholder="Centro de custo (opcional)"
+                    value={unitActionDialog.costCenter}
+                    onChange={(e) =>
+                      setUnitActionDialog((prev) => ({ ...prev, costCenter: e.target.value }))
+                    }
+                  />
+                  <Textarea
+                    placeholder="Notas de auditoria (opcional)"
+                    value={unitActionDialog.notes}
+                    onChange={(e) =>
+                      setUnitActionDialog((prev) => ({ ...prev, notes: e.target.value }))
+                    }
+                  />
+                </div>
+                <DialogFooter>
+                  <Button
+                    variant="outline"
+                    onClick={() =>
+                      setUnitActionDialog((prev) => ({ ...prev, open: false, saving: false }))
+                    }
+                    disabled={unitActionDialog.saving}
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    onClick={executeUnitAction}
+                    disabled={
+                      unitActionDialog.saving ||
+                      !unitActionDialog.unit ||
+                      (!isAdmin &&
+                        (unitActionDialog.action === "SCRAP" || unitActionDialog.action === "LOST"))
+                    }
+                  >
+                    {unitActionDialog.saving ? "A executar..." : "Confirmar"}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          </>
         )}
       </div>
     </AuthenticatedLayout>

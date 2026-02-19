@@ -12,6 +12,7 @@ type RequestItemDto = {
   id: string;
   productId: string;
   quantity: number;
+  role?: "NORMAL" | "OLD" | "NEW";
   notes?: string | null;
   unit?: string | null;
   reference?: string | null;
@@ -35,6 +36,7 @@ type RequestDto = {
   id: string;
   userId: string;
   status: "DRAFT" | "SUBMITTED" | "APPROVED" | "REJECTED" | "FULFILLED";
+  requestType?: "STANDARD" | "RETURN";
   title?: string | null;
   notes?: string | null;
 
@@ -543,6 +545,11 @@ export default function PrintRequestPage() {
           </div>
 
           <div className="field" style={{ marginBottom: 10 }}>
+            <div className="label">Modalidade</div>
+            <div className="value">{request.requestType === "RETURN" ? "Devolução / Substituição" : "Normal"}</div>
+          </div>
+
+          <div className="field" style={{ marginBottom: 10 }}>
             <div className="label">Tipo de bem/serviço</div>
             <div className="value">{goodsTypesText}</div>
             <div className="muted" style={{ fontSize: 10, marginTop: 4 }}>
@@ -553,6 +560,85 @@ export default function PrintRequestPage() {
           </div>
 
           <div style={{ marginBottom: 10 }}>
+            {request.requestType === "RETURN" ? (
+              <>
+                <div className="subtitle" style={{ marginBottom: 6 }}>Itens antigos (a devolver)</div>
+                <table style={{ marginBottom: 8 }}>
+                  <thead>
+                    <tr>
+                      <th style={{ width: 28 }}>Nº</th>
+                      <th>Designação</th>
+                      <th style={{ width: 70 }}>Unid.</th>
+                      <th style={{ width: 60 }}>Qtd</th>
+                      <th style={{ width: 92 }}>Referência</th>
+                      <th style={{ width: 70 }}>QR</th>
+                      <th>Observações</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {request.items.filter((it) => it.role === "OLD").map((it, idx) => (
+                      <tr key={it.id}>
+                        <td>{idx + 1}</td>
+                        <td>
+                          <div style={{ fontWeight: 700 }}>{it.product?.name || it.productId}</div>
+                          {it.product?.sku ? <div className="muted">SKU: {it.product.sku}</div> : null}
+                        </td>
+                        <td>{it.unit || ""}</td>
+                        <td>{it.quantity}</td>
+                        <td>{it.reference || ""}</td>
+                        <td>{it.destination || ""}</td>
+                        <td>{it.notes || ""}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+
+                <div className="subtitle" style={{ marginBottom: 6 }}>Itens novos (a substituir)</div>
+                <table>
+                  <thead>
+                    <tr>
+                      <th style={{ width: 28 }}>Nº</th>
+                      <th>Designação</th>
+                      <th style={{ width: 70 }}>Unid.</th>
+                      <th style={{ width: 60 }}>Qtd</th>
+                      <th style={{ width: 92 }}>Referência</th>
+                      <th style={{ width: 70 }}>QR</th>
+                      <th>Observações</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {request.items.filter((it) => it.role === "NEW").map((it, idx) => (
+                      <tr key={it.id}>
+                        <td>{idx + 1}</td>
+                        <td>
+                          <div style={{ fontWeight: 700 }}>{it.product?.name || it.productId}</div>
+                          {it.product?.sku ? <div className="muted">SKU: {it.product.sku}</div> : null}
+                        </td>
+                        <td>{it.unit || ""}</td>
+                        <td>{it.quantity}</td>
+                        <td>{it.reference || ""}</td>
+                        <td>
+                          {it.destination?.trim() ? (
+                            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                              {itemQrByCode[it.destination.trim()] ? (
+                                <img
+                                  src={itemQrByCode[it.destination.trim()]}
+                                  alt={`QR ${it.destination.trim()}`}
+                                  style={{ width: 44, height: 44, imageRendering: "pixelated" }}
+                                />
+                              ) : null}
+                            </div>
+                          ) : (
+                            ""
+                          )}
+                        </td>
+                        <td>{it.notes || ""}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </>
+            ) : (
             <table>
               <thead>
                 <tr>
@@ -596,6 +682,7 @@ export default function PrintRequestPage() {
                 ))}
               </tbody>
             </table>
+            )}
           </div>
 
           <div style={{ marginBottom: 10 }}>

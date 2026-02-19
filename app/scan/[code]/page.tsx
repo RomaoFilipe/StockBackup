@@ -401,9 +401,18 @@ export default function ScanUnitPage() {
         <CardHeader>
           <div className="flex items-center justify-between gap-2">
             <CardTitle>Scan • Unidade</CardTitle>
-            <Button variant="outline" size="sm" onClick={() => router.push("/scan")}>
-              Abrir câmara
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => router.push(unit ? `/scan/substitution?oldCode=${encodeURIComponent(unit.code)}` : "/scan/substitution")}
+              >
+                Substituição
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => router.push("/scan")}>
+                Abrir câmara
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent>

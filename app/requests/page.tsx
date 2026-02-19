@@ -1,7 +1,7 @@
 "use client";
 
 import AuthenticatedLayout from "@/app/components/AuthenticatedLayout";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Dispatch, SetStateAction, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/app/authContext";
 import { useProductStore } from "@/app/useProductStore";
@@ -33,9 +33,11 @@ import AttachmentsDialog from "@/app/components/AttachmentsDialog";
 import {
   Bell,
   CalendarRange,
+  Check,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronsUpDown,
   Filter,
   LayoutGrid,
   Paperclip,
@@ -60,12 +62,22 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 type AvailableUnitDto = { id: string; code: string };
 
 type RequestItemDto = {
   id: string;
   productId: string;
   quantity: number;
+  role?: "NORMAL" | "OLD" | "NEW";
   notes?: string | null;
   unit?: string | null;
   reference?: string | null;
@@ -83,11 +95,18 @@ type RequestingServiceDto = {
   designacao: string;
   ativo: boolean;
 };
+type RequestingServiceUserDto = {
+  id: string;
+  name: string;
+  email: string;
+  requestingServiceId: number | null;
+};
 
 type RequestDto = {
   id: string;
   userId: string;
   status: "DRAFT" | "SUBMITTED" | "APPROVED" | "REJECTED" | "FULFILLED";
+  requestType?: "STANDARD" | "RETURN";
   title?: string | null;
   notes?: string | null;
   gtmiYear: number;
@@ -110,6 +129,7 @@ type RequestDto = {
   supplierOption3?: string | null;
 
   signedAt?: string | null;
+  pickupSignedAt?: string | null;
   signedByName?: string | null;
   signedByTitle?: string | null;
   signedByUserId?: string | null;
@@ -123,12 +143,11 @@ type RequestDto = {
   createdBy?: { id: string; name: string; email: string };
 };
 
-type UserDto = {
-  id: string;
-  name: string;
-  email: string;
-  role: "USER" | "ADMIN";
-};
+const needsRestockSignatureBadge = (r: Pick<RequestDto, "requestType" | "status" | "pickupSignedAt">) =>
+  r.requestType === "RETURN" &&
+  r.status !== "FULFILLED" &&
+  r.status !== "REJECTED" &&
+  !r.pickupSignedAt;
 
 const formatStatus = (status: RequestDto["status"]) => {
   switch (status) {
@@ -179,11 +198,14 @@ function toDatetimeLocalValue(d: Date) {
 type NewRequestItem = {
   productId: string;
   quantity: number;
+  role?: "NORMAL" | "OLD" | "NEW";
   unit?: string;
   reference?: string;
   destination?: string;
   notes?: string;
 };
+
+type RequestMode = "STANDARD" | "RETURN";
 
 type InvoiceMeta = {
   invoiceId: string;
@@ -212,8 +234,6 @@ export default function RequestsPage() {
   const focusId = searchParams?.get("focus");
 
   const isAdmin = user?.role === "ADMIN";
-  const [users, setUsers] = useState<UserDto[]>([]);
-  const [asUserId, setAsUserId] = useState<string>("");
 
   const [requests, setRequests] = useState<RequestDto[]>([]);
   const [loading, setLoading] = useState(true);
@@ -255,7 +275,7 @@ export default function RequestsPage() {
   const [wizardStep, setWizardStep] = useState<1 | 2 | 3 | 4>(1);
   const [wizardSubmitted, setWizardSubmitted] = useState(false);
   const [wizardSuccess, setWizardSuccess] = useState(false);
-  const [productSearchByRow, setProductSearchByRow] = useState<Record<number, string>>({});
+  const [productSearchByRow, setProductSearchByRow] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (!searchParams) return;
@@ -267,6 +287,7 @@ export default function RequestsPage() {
   }, [searchParams]);
 
   const [requestedAt, setRequestedAt] = useState(() => toDatetimeLocalValue(new Date()));
+  const [requestMode, setRequestMode] = useState<RequestMode>("STANDARD");
   const [priority, setPriority] = useState<"LOW" | "NORMAL" | "HIGH" | "URGENT">("NORMAL");
   const [dueAt, setDueAt] = useState<string>("");
   const [title, setTitle] = useState("");
@@ -274,6 +295,10 @@ export default function RequestsPage() {
 
   const [requestingServices, setRequestingServices] = useState<RequestingServiceDto[]>([]);
   const [requestingServiceId, setRequestingServiceId] = useState<string>("");
+  const [requestingServiceUsers, setRequestingServiceUsers] = useState<RequestingServiceUserDto[]>([]);
+  const [requestingServiceUsersLoading, setRequestingServiceUsersLoading] = useState(false);
+  const [requesterPickerOpen, setRequesterPickerOpen] = useState(false);
+  const [selectedRequesterUserId, setSelectedRequesterUserId] = useState<string>("");
   const [requesterName, setRequesterName] = useState("");
   const [requesterEmployeeNo, setRequesterEmployeeNo] = useState("");
   const [deliveryLocation, setDeliveryLocation] = useState("");
@@ -296,15 +321,24 @@ export default function RequestsPage() {
   const [items, setItems] = useState<NewRequestItem[]>([
     { productId: "", quantity: 1, unit: "", reference: "", destination: "", notes: "" },
   ]);
+  const [returnOldItems, setReturnOldItems] = useState<NewRequestItem[]>([
+    { productId: "", quantity: 1, unit: "", reference: "", destination: "", notes: "" },
+  ]);
+  const [returnNewItems, setReturnNewItems] = useState<NewRequestItem[]>([
+    { productId: "", quantity: 1, unit: "", reference: "", destination: "", notes: "" },
+  ]);
 
   const resetForm = () => {
     setRequestedAt(toDatetimeLocalValue(new Date()));
+    setRequestMode("STANDARD");
     setPriority("NORMAL");
     setDueAt("");
     setTitle("");
     setNotes("");
     setRequestingServiceId(user?.requestingServiceId ? String(user.requestingServiceId) : "");
-    setRequesterName(user?.name ?? "");
+    setSelectedRequesterUserId("");
+    setRequesterPickerOpen(false);
+    setRequesterName("");
     setRequesterEmployeeNo("");
     setDeliveryLocation("");
     setExpectedDeliveryFrom("");
@@ -315,6 +349,8 @@ export default function RequestsPage() {
       OTHER_PRODUCTS: false,
     });
     setItems([{ productId: "", quantity: 1, unit: "", reference: "", destination: "", notes: "" }]);
+    setReturnOldItems([{ productId: "", quantity: 1, unit: "", reference: "", destination: "", notes: "" }]);
+    setReturnNewItems([{ productId: "", quantity: 1, unit: "", reference: "", destination: "", notes: "" }]);
     setInvoiceByProductId({});
     setInvoiceLoadingByProductId({});
     setUnitHintByProductId({});
@@ -325,11 +361,39 @@ export default function RequestsPage() {
     setWizardSuccess(false);
   };
 
-  const openCreateModal = () => {
+  const openCreateModal = (mode: RequestMode = "STANDARD") => {
     setEditRequestId(null);
     resetForm();
+    setRequestMode(mode);
     setWizardStep(1);
     setCreateOpen(true);
+  };
+
+  const splitReturnItemsFromRequest = (rawItems: RequestItemDto[]) => {
+    const old: NewRequestItem[] = [];
+    const next: NewRequestItem[] = [];
+    const normal: NewRequestItem[] = [];
+
+    for (const it of rawItems) {
+      const mapped: NewRequestItem = {
+        productId: it.productId,
+        quantity: Number(it.quantity),
+        unit: it.unit ?? "",
+        reference: it.reference ?? "",
+        destination: it.destination ?? "",
+        notes: it.notes ?? "",
+      };
+
+      if (it.role === "OLD") {
+        old.push(mapped);
+      } else if (it.role === "NEW") {
+        next.push(mapped);
+      } else {
+        normal.push(mapped);
+      }
+    }
+
+    return { old, next, normal };
   };
 
   const openEditModal = (r: RequestDto) => {
@@ -342,6 +406,8 @@ export default function RequestsPage() {
     setTitle(r.title ?? "");
     setNotes(r.notes ?? "");
     setRequestingServiceId(r.requestingServiceId ? String(r.requestingServiceId) : "");
+    setSelectedRequesterUserId("");
+    setRequesterPickerOpen(false);
     setRequesterName(r.requesterName ?? "");
     setRequesterEmployeeNo(r.requesterEmployeeNo ?? "");
     setDeliveryLocation(r.deliveryLocation ?? "");
@@ -353,8 +419,12 @@ export default function RequestsPage() {
       OTHER_PRODUCTS: Boolean(r.goodsTypes?.includes("OTHER_PRODUCTS")),
     });
 
+    const incomingItems = Array.isArray(r.items) ? r.items : [];
+    const split = splitReturnItemsFromRequest(incomingItems);
+    const isReturn = r.requestType === "RETURN";
+    setRequestMode(isReturn ? "RETURN" : "STANDARD");
     setItems(
-      (Array.isArray(r.items) ? r.items : []).map((it) => ({
+      (isReturn ? split.normal : incomingItems).map((it) => ({
         productId: it.productId,
         quantity: Number(it.quantity),
         unit: it.unit ?? "",
@@ -363,6 +433,8 @@ export default function RequestsPage() {
         notes: it.notes ?? "",
       }))
     );
+    setReturnOldItems(split.old.length ? split.old : [{ productId: "", quantity: 1, unit: "", reference: "", destination: "", notes: "" }]);
+    setReturnNewItems(split.next.length ? split.next : [{ productId: "", quantity: 1, unit: "", reference: "", destination: "", notes: "" }]);
     setProductSearchByRow({});
     setWizardStep(1);
     setWizardSubmitted(false);
@@ -438,8 +510,12 @@ export default function RequestsPage() {
 
   // Keep a lightweight hint of unit availability per selected product (used for UI hinting).
   useEffect(() => {
+    const activeItems =
+      requestMode === "RETURN"
+        ? [...returnOldItems, ...returnNewItems]
+        : items;
     const uniqueProductIds = Array.from(
-      new Set(items.map((it) => it.productId).filter((id) => Boolean(id)))
+      new Set(activeItems.map((it) => it.productId).filter((id) => Boolean(id)))
     ) as string[];
 
     const missing = uniqueProductIds.filter((id) => unitHintByProductId[id] === undefined);
@@ -473,11 +549,15 @@ export default function RequestsPage() {
     return () => {
       alive = false;
     };
-  }, [items, unitHintByProductId]);
+  }, [items, requestMode, returnNewItems, returnOldItems, unitHintByProductId]);
 
   useEffect(() => {
+    const activeItems =
+      requestMode === "RETURN"
+        ? [...returnOldItems, ...returnNewItems]
+        : items;
     const uniqueProductIds = Array.from(
-      new Set(items.map((it) => it.productId).filter((id) => Boolean(id)))
+      new Set(activeItems.map((it) => it.productId).filter((id) => Boolean(id)))
     ) as string[];
 
     const missing = uniqueProductIds.filter(
@@ -538,14 +618,20 @@ export default function RequestsPage() {
     return () => {
       alive = false;
     };
-  }, [items]);
+  }, [items, requestMode, returnNewItems, returnOldItems]);
 
   const canCreate = useMemo(() => {
-    const hasAtLeastOneItem = items.length > 0;
-    const allValid = items.every((it) => Boolean(it.productId) && Number.isFinite(it.quantity) && it.quantity > 0);
+    const validStandard = items.length > 0
+      && items.every((it) => Boolean(it.productId) && Number.isFinite(it.quantity) && it.quantity > 0);
+    const validReturnOld = returnOldItems.length > 0
+      && returnOldItems.every((it) => Boolean(it.productId) && Number.isFinite(it.quantity) && it.quantity > 0);
+    const validReturnNew = returnNewItems.length > 0
+      && returnNewItems.every((it) => Boolean(it.productId) && Number.isFinite(it.quantity) && it.quantity > 0);
+    const hasAtLeastOneItem = requestMode === "RETURN" ? validReturnOld && validReturnNew : validStandard;
+    const allValid = hasAtLeastOneItem;
     const hasRequestingService = Boolean(requestingServiceId);
     return hasAtLeastOneItem && allValid && hasRequestingService;
-  }, [items, requestingServiceId]);
+  }, [items, requestMode, requestingServiceId, returnNewItems, returnOldItems]);
 
   const wizardSteps = [
     { id: 1 as const, label: "Informação Básica" },
@@ -580,6 +666,12 @@ export default function RequestsPage() {
       return Boolean(requesterName.trim());
     }
     if (step === 3) {
+      if (requestMode === "RETURN") {
+        return returnOldItems.length > 0
+          && returnNewItems.length > 0
+          && returnOldItems.every((it) => Boolean(it.productId) && Number(it.quantity) > 0)
+          && returnNewItems.every((it) => Boolean(it.productId) && Number(it.quantity) > 0);
+      }
       return items.length > 0 && items.every((it) => Boolean(it.productId) && Number(it.quantity) > 0);
     }
     return true;
@@ -652,21 +744,6 @@ export default function RequestsPage() {
       .replace(/\/+$/, "");
     setOrigin(envBase || window.location.origin);
 
-    const bootstrapAdmin = async () => {
-      if (!isAdmin) return;
-      try {
-        const res = await axiosInstance.get("/users");
-        setUsers(res.data || []);
-        if (!asUserId && user?.id) {
-          setAsUserId(user.id);
-        }
-      } catch {
-        // ignore: admin features won't show without users list
-      }
-    };
-
-    bootstrapAdmin();
-
     (async () => {
       try {
         const res = await axiosInstance.get("/requesting-services");
@@ -679,13 +756,6 @@ export default function RequestsPage() {
     void loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthLoading, isLoggedIn, isAdmin, loadAll]);
-
-  useEffect(() => {
-    if (isAdmin && asUserId) {
-      void loadAll();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [asUserId, isAdmin, loadAll]);
 
   useEffect(() => {
     if (isAuthLoading || !isLoggedIn) return;
@@ -706,12 +776,88 @@ export default function RequestsPage() {
     };
   }, [isAuthLoading, isLoggedIn, loadAll]);
 
+  useEffect(() => {
+    if (isAuthLoading || !isLoggedIn) return;
+
+    const serviceId = Number(requestingServiceId);
+    if (!Number.isFinite(serviceId) || serviceId <= 0) {
+      setRequestingServiceUsers([]);
+      setRequestingServiceUsersLoading(false);
+      return;
+    }
+
+    let alive = true;
+    setRequestingServiceUsersLoading(true);
+    (async () => {
+      try {
+        const res = await axiosInstance.get("/requesting-services/users", {
+          params: { requestingServiceId: serviceId },
+        });
+        if (!alive) return;
+        setRequestingServiceUsers(Array.isArray(res.data) ? res.data : []);
+      } catch {
+        if (!alive) return;
+        setRequestingServiceUsers([]);
+      } finally {
+        if (!alive) return;
+        setRequestingServiceUsersLoading(false);
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, [isAuthLoading, isLoggedIn, requestingServiceId]);
+
+  useEffect(() => {
+    if (!requestingServiceUsers.length) {
+      if (selectedRequesterUserId) setSelectedRequesterUserId("");
+      return;
+    }
+
+    const email = requesterEmployeeNo.trim().toLowerCase();
+    const name = requesterName.trim().toLowerCase();
+    const matched = requestingServiceUsers.find((u) => {
+      if (email) return u.email.toLowerCase() === email;
+      return name ? u.name.toLowerCase() === name : false;
+    });
+
+    if (matched?.id && matched.id !== selectedRequesterUserId) {
+      setSelectedRequesterUserId(matched.id);
+    }
+  }, [requesterEmployeeNo, requesterName, requestingServiceUsers, selectedRequesterUserId]);
+
+  const selectedRequesterUser = useMemo(
+    () => requestingServiceUsers.find((u) => u.id === selectedRequesterUserId) ?? null,
+    [requestingServiceUsers, selectedRequesterUserId]
+  );
+
+  const selectedRequesterLabel = useMemo(() => {
+    if (selectedRequesterUser) {
+      return `${selectedRequesterUser.name} (${selectedRequesterUser.email})`;
+    }
+    if (requesterName.trim()) {
+      return requesterEmployeeNo.trim()
+        ? `${requesterName.trim()} (${requesterEmployeeNo.trim()})`
+        : requesterName.trim();
+    }
+    return "Selecionar funcionário";
+  }, [requesterEmployeeNo, requesterName, selectedRequesterUser]);
+
+  const buildItemsForSubmit = () => {
+    if (requestMode === "RETURN") {
+      return [
+        ...returnOldItems.map((it) => ({ ...it, role: "OLD" as const })),
+        ...returnNewItems.map((it) => ({ ...it, role: "NEW" as const })),
+      ];
+    }
+    return items.map((it) => ({ ...it, role: "NORMAL" as const }));
+  };
+
   const createRequest = async () => {
     if (!canCreate) return;
     setCreating(true);
     try {
-      const effectiveAsUserId = isAdmin && asUserId ? asUserId : undefined;
-
       const requestedAtDate = requestedAt ? new Date(requestedAt) : new Date();
       if (Number.isNaN(requestedAtDate.getTime())) {
         toast({
@@ -745,10 +891,11 @@ export default function RequestsPage() {
       const requestedAtIso = requestedAtDate.toISOString();
 
       const effectiveGoodsTypes = (Object.keys(goodsTypes) as GoodsType[]).filter((k) => goodsTypes[k]);
+      const submitItems = buildItemsForSubmit();
 
       const supplierNamesOrdered = Array.from(
         new Set(
-          items
+          submitItems
             .map((it) => (it.productId ? (productById.get(it.productId) as any)?.supplier : undefined))
             .filter((s): s is string => Boolean(s))
         )
@@ -759,7 +906,7 @@ export default function RequestsPage() {
       const supplierOption3 = supplierNamesOrdered[2];
 
       const payload = {
-        asUserId: effectiveAsUserId,
+        requestType: requestMode,
         requestedAt: requestedAtIso,
         priority,
         dueAt: dueAt ? new Date(dueAt).toISOString() : undefined,
@@ -775,13 +922,14 @@ export default function RequestsPage() {
         supplierOption1: supplierOption1 ? supplierOption1.trim() : undefined,
         supplierOption2: supplierOption2 ? supplierOption2.trim() : undefined,
         supplierOption3: supplierOption3 ? supplierOption3.trim() : undefined,
-        items: items.map((it) => ({
+        items: submitItems.map((it) => ({
           productId: it.productId,
           quantity: it.quantity,
           unit: it.unit?.trim() ? it.unit.trim() : undefined,
           reference: it.reference?.trim() ? it.reference.trim() : undefined,
           destination: it.destination?.trim() ? it.destination.trim() : undefined,
           notes: it.notes?.trim() ? it.notes.trim() : undefined,
+          role: it.role,
         })),
       };
       const res = await axiosInstance.post("/requests", payload);
@@ -793,6 +941,8 @@ export default function RequestsPage() {
       setTitle("");
       setNotes("");
       setRequestingServiceId("");
+      setSelectedRequesterUserId("");
+      setRequesterPickerOpen(false);
       setRequesterName("");
       setRequesterEmployeeNo("");
       setDeliveryLocation("");
@@ -804,6 +954,8 @@ export default function RequestsPage() {
         OTHER_PRODUCTS: false,
       });
       setItems([{ productId: "", quantity: 1, unit: "", reference: "", destination: "", notes: "" }]);
+      setReturnOldItems([{ productId: "", quantity: 1, unit: "", reference: "", destination: "", notes: "" }]);
+      setReturnNewItems([{ productId: "", quantity: 1, unit: "", reference: "", destination: "", notes: "" }]);
       setInvoiceByProductId({});
       setInvoiceLoadingByProductId({});
 
@@ -877,10 +1029,11 @@ export default function RequestsPage() {
       }
 
       const effectiveGoodsTypes = (Object.keys(goodsTypes) as GoodsType[]).filter((k) => goodsTypes[k]);
+      const submitItems = buildItemsForSubmit();
 
       const supplierNamesOrdered = Array.from(
         new Set(
-          items
+          submitItems
             .map((it) => (it.productId ? (productById.get(it.productId) as any)?.supplier : undefined))
             .filter((s): s is string => Boolean(s))
         )
@@ -891,6 +1044,7 @@ export default function RequestsPage() {
       const supplierOption3 = supplierNamesOrdered[2] || null;
 
       const payload = {
+        requestType: requestMode,
         requestedAt: requestedAtDate.toISOString(),
         requestingServiceId: serviceId,
         priority,
@@ -906,13 +1060,14 @@ export default function RequestsPage() {
         supplierOption1,
         supplierOption2,
         supplierOption3,
-        replaceItems: items.map((it) => ({
+        replaceItems: submitItems.map((it) => ({
           productId: it.productId,
           quantity: it.quantity,
           unit: it.unit?.trim() ? it.unit.trim() : null,
           reference: it.reference?.trim() ? it.reference.trim() : null,
           destination: it.destination?.trim() ? it.destination.trim() : null,
           notes: it.notes?.trim() ? it.notes.trim() : null,
+          role: it.role,
         })),
       };
 
@@ -1137,6 +1292,99 @@ export default function RequestsPage() {
     return arr;
   }, [safePageIndex, totalPages]);
 
+  const renderItemSection = (
+    sectionTitle: string,
+    sectionTone: "old" | "new" | "normal",
+    list: NewRequestItem[],
+    setList: Dispatch<SetStateAction<NewRequestItem[]>>
+  ) => (
+    <div className={`space-y-3 rounded-2xl border p-3 ${sectionTone === "old" ? "border-amber-300/50 bg-amber-50/40 dark:bg-amber-950/10" : sectionTone === "new" ? "border-emerald-300/50 bg-emerald-50/40 dark:bg-emerald-950/10" : "border-border/60 bg-[hsl(var(--surface-1)/0.8)]"}`}>
+      <div className="text-sm font-semibold">{sectionTitle}</div>
+      {list.map((it, idx) => {
+        const rowKey = `${sectionTitle}-${idx}`;
+        const filteredProducts = productOptions.filter((p) => {
+          const q = (productSearchByRow[rowKey] || "").trim().toLowerCase();
+          if (!q) return true;
+          return `${p.name} ${p.sku}`.toLowerCase().includes(q);
+        });
+        return (
+          <article key={`${sectionTitle}-${idx}`} className={`rounded-2xl border p-4 shadow-sm ${wizardSubmitted && (!it.productId || it.quantity <= 0) ? "border-rose-400" : "border-border/60"} bg-[hsl(var(--surface-1)/0.8)]`}>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <div className="space-y-1 md:col-span-2">
+                <div className="text-xs text-muted-foreground">Produto</div>
+                <Input
+                  placeholder="Pesquisar produto..."
+                  value={productSearchByRow[rowKey] || ""}
+                  onChange={(e) => setProductSearchByRow((prev) => ({ ...prev, [rowKey]: e.target.value }))}
+                  className="h-10 rounded-xl"
+                />
+                <Select
+                  value={it.productId}
+                  onValueChange={(v) => {
+                    const selected = productOptions.find((p) => p.id === v);
+                    setProductSearchByRow((prev) => ({ ...prev, [rowKey]: selected ? `${selected.name} (${selected.sku})` : "" }));
+                    setList((prev) => prev.map((p, pIdx) => (pIdx === idx ? { ...p, productId: v, destination: "" } : p)));
+                  }}
+                >
+                  <SelectTrigger className="h-11 rounded-xl">
+                    <SelectValue placeholder="Selecionar produto" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {filteredProducts.slice(0, 120).map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.name} ({p.sku})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <div className="text-xs text-muted-foreground">Quantidade</div>
+                <Input type="number" min={1} value={it.quantity} onChange={(e) => setList((prev) => prev.map((p, pIdx) => (pIdx === idx ? { ...p, quantity: Number(e.target.value) } : p)))} className="h-10 rounded-xl" />
+              </div>
+              <div className="space-y-1">
+                <div className="text-xs text-muted-foreground">Unidade</div>
+                <Input value={it.unit || ""} onChange={(e) => setList((prev) => prev.map((p, pIdx) => (pIdx === idx ? { ...p, unit: e.target.value } : p)))} className="h-10 rounded-xl" placeholder="Ex: un" />
+              </div>
+              <div className="space-y-1">
+                <div className="text-xs text-muted-foreground">Referência</div>
+                <Input value={it.reference || ""} onChange={(e) => setList((prev) => prev.map((p, pIdx) => (pIdx === idx ? { ...p, reference: e.target.value } : p)))} className="h-10 rounded-xl" placeholder="Ref / Nº série" />
+              </div>
+              <div className="space-y-1">
+                <div className="text-xs text-muted-foreground">QR / Código unidade</div>
+                <Input value={it.destination || ""} onChange={(e) => setList((prev) => prev.map((p, pIdx) => (pIdx === idx ? { ...p, destination: e.target.value } : p)))} className="h-10 rounded-xl" placeholder="Código QR" />
+              </div>
+              <div className="space-y-1 md:col-span-2">
+                <div className="text-xs text-muted-foreground">Notas</div>
+                <Input value={it.notes || ""} onChange={(e) => setList((prev) => prev.map((p, pIdx) => (pIdx === idx ? { ...p, notes: e.target.value } : p)))} className="h-10 rounded-xl" placeholder="Observações" />
+              </div>
+            </div>
+            <div className="mt-3 flex justify-end">
+              <Button type="button" variant="ghost" size="sm" className="rounded-lg text-rose-600" disabled={list.length <= 1} onClick={() => setList((prev) => prev.filter((_, i) => i !== idx))}>
+                <Trash2 className="mr-1 h-4 w-4" />
+                Remover
+              </Button>
+            </div>
+          </article>
+        );
+      })}
+      <Button
+        type="button"
+        variant="outline"
+        className="h-10 rounded-xl"
+        onClick={() =>
+          setList((prev) => [
+            ...prev,
+            { productId: "", quantity: 1, unit: "", reference: "", destination: "", notes: "" },
+          ])
+        }
+      >
+        <Plus className="mr-1 h-4 w-4" />
+        Adicionar item
+      </Button>
+    </div>
+  );
+
 
   return (
     <AuthenticatedLayout>
@@ -1188,13 +1436,21 @@ export default function RequestsPage() {
                 Gestão de pedidos de reposição e compras
               </p>
             </div>
-            <div className="grid gap-2 sm:grid-cols-3">
+            <div className="grid gap-2 sm:grid-cols-4">
               <Button
-                onClick={openCreateModal}
+                onClick={() => openCreateModal("STANDARD")}
                 className="h-11 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:from-blue-500 hover:to-indigo-500"
               >
                 <Plus className="h-4 w-4" />
                 Nova Requisição
+              </Button>
+              <Button
+                onClick={() => openCreateModal("RETURN")}
+                variant="outline"
+                className="h-11 rounded-2xl"
+              >
+                <Plus className="h-4 w-4" />
+                Requisição Devolução
               </Button>
               <Button variant="outline" onClick={exportCsv} disabled={loading || filteredRequests.length === 0} className="h-11 rounded-2xl">
                 Exportar CSV
@@ -1392,6 +1648,11 @@ export default function RequestsPage() {
                         />
                         <span className="font-semibold">{r.gtmiNumber}</span>
                         <Badge variant="outline" className={formatStatus(r.status).className}>{formatStatus(r.status).label}</Badge>
+                        {needsRestockSignatureBadge(r) ? (
+                          <Badge variant="outline" className="border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300">
+                            Aguarda assinatura para repor stock
+                          </Badge>
+                        ) : null}
                       </div>
                       <div className="mt-1 text-xs text-muted-foreground">
                         {r.requesterName || r.user?.name || "—"} • {r.requestingService || "—"}
@@ -1454,20 +1715,34 @@ export default function RequestsPage() {
                       </TableCell>
                       <TableCell>
                         {isAdmin ? (
-                          <Select value={r.status} onValueChange={(v) => changeRequestStatus(r.id, v as RequestDto["status"])}>
-                            <SelectTrigger className="h-8 w-[170px] rounded-lg">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent className="glass-panel">
-                              <SelectItem value="DRAFT">Rascunho</SelectItem>
-                              <SelectItem value="SUBMITTED">Submetida</SelectItem>
-                              <SelectItem value="APPROVED">Aprovada</SelectItem>
-                              <SelectItem value="REJECTED">Rejeitada</SelectItem>
-                              <SelectItem value="FULFILLED">Cumprida</SelectItem>
-                            </SelectContent>
-                          </Select>
+                          <div className="space-y-1">
+                            <Select value={r.status} onValueChange={(v) => changeRequestStatus(r.id, v as RequestDto["status"])}>
+                              <SelectTrigger className="h-8 w-[170px] rounded-lg">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent className="glass-panel">
+                                <SelectItem value="DRAFT">Rascunho</SelectItem>
+                                <SelectItem value="SUBMITTED">Submetida</SelectItem>
+                                <SelectItem value="APPROVED">Aprovada</SelectItem>
+                                <SelectItem value="REJECTED">Rejeitada</SelectItem>
+                                <SelectItem value="FULFILLED">Cumprida</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            {needsRestockSignatureBadge(r) ? (
+                              <Badge variant="outline" className="border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300">
+                                Aguarda assinatura para repor stock
+                              </Badge>
+                            ) : null}
+                          </div>
                         ) : (
-                          <Badge variant="outline" className={formatStatus(r.status).className}>{formatStatus(r.status).label}</Badge>
+                          <div className="space-y-1">
+                            <Badge variant="outline" className={formatStatus(r.status).className}>{formatStatus(r.status).label}</Badge>
+                            {needsRestockSignatureBadge(r) ? (
+                              <Badge variant="outline" className="border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300">
+                                Aguarda assinatura para repor stock
+                              </Badge>
+                            ) : null}
+                          </div>
                         )}
                       </TableCell>
                       <TableCell>
@@ -1592,7 +1867,7 @@ export default function RequestsPage() {
         ) : null}
 
         <Button
-          onClick={openCreateModal}
+          onClick={() => openCreateModal("STANDARD")}
           className="fixed bottom-6 right-5 z-40 h-12 rounded-full bg-gradient-to-r from-blue-600 to-indigo-600 px-4 text-white shadow-2xl md:hidden"
         >
           <Plus className="mr-1 h-4 w-4" />
@@ -1615,9 +1890,15 @@ export default function RequestsPage() {
               <div className="flex h-[100dvh] flex-col sm:h-auto sm:max-h-[88vh]">
                 <div className="border-b border-border/60 bg-[hsl(var(--surface-1)/0.95)] px-3 py-3 sm:px-5">
                   <DialogHeader>
-                    <DialogTitle className="text-lg sm:text-xl">{editRequestId ? "Editar requisição" : "Nova requisição"}</DialogTitle>
+                    <DialogTitle className="text-lg sm:text-xl">
+                      {editRequestId
+                        ? "Editar requisição"
+                        : requestMode === "RETURN"
+                          ? "Nova requisição de devolução"
+                          : "Nova requisição"}
+                    </DialogTitle>
                     <DialogDescription>
-                      Wizard de criação em 4 passos.
+                      Wizard de criação em 4 passos. O número GTMI é gerado no mesmo formato das restantes requisições.
                     </DialogDescription>
                   </DialogHeader>
                   <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-[hsl(var(--surface-3)/0.8)]">
@@ -1649,25 +1930,31 @@ export default function RequestsPage() {
                   <div className="mx-auto w-full max-w-3xl">
                   {wizardStep === 1 ? (
                     <div className="space-y-4 animate-fade-up rounded-2xl border border-border/60 bg-[hsl(var(--surface-1)/0.9)] p-3 sm:p-4">
-                      {isAdmin && !editRequestId ? (
-                        <div className="space-y-2">
-                          <div className="text-sm font-medium">Criar em nome de</div>
-                          <Select value={asUserId} onValueChange={setAsUserId}>
-                            <SelectTrigger className="h-11 rounded-xl">
-                              <SelectValue placeholder="Selecionar utilizador" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {users.map((u) => (
-                                <SelectItem key={u.id} value={u.id}>
-                                  {u.name} ({u.email})
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      ) : null}
-
                       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                        <div className="space-y-1 md:col-span-2">
+                          <div className="text-sm font-medium">Tipo de requisição</div>
+                          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                            <button
+                              type="button"
+                              className={`h-11 rounded-xl border text-sm ${requestMode === "STANDARD" ? "border-primary/50 bg-primary/10 text-primary" : "border-border/60 bg-[hsl(var(--surface-2)/0.6)] text-muted-foreground"}`}
+                              onClick={() => setRequestMode("STANDARD")}
+                              disabled={Boolean(editRequestId)}
+                            >
+                              Requisição normal
+                            </button>
+                            <button
+                              type="button"
+                              className={`h-11 rounded-xl border text-sm ${requestMode === "RETURN" ? "border-primary/50 bg-primary/10 text-primary" : "border-border/60 bg-[hsl(var(--surface-2)/0.6)] text-muted-foreground"}`}
+                              onClick={() => setRequestMode("RETURN")}
+                              disabled={Boolean(editRequestId)}
+                            >
+                              Devolução / Substituição
+                            </button>
+                          </div>
+                          {editRequestId ? (
+                            <p className="text-xs text-muted-foreground">O tipo é definido a partir dos itens já existentes nesta requisição.</p>
+                          ) : null}
+                        </div>
                         <div className="space-y-1">
                           <div className="text-sm font-medium">Data/Hora do pedido</div>
                           <Input type="datetime-local" value={requestedAt} onChange={(e) => setRequestedAt(e.target.value)} className={`h-11 rounded-xl ${wizardSubmitted && !requestedAt ? "border-rose-400" : ""}`} />
@@ -1676,7 +1963,13 @@ export default function RequestsPage() {
                           <div className="text-sm font-medium">Serviço requisitante</div>
                           <select
                             value={requestingServiceId}
-                            onChange={(e) => setRequestingServiceId(e.target.value)}
+                            onChange={(e) => {
+                              setRequestingServiceId(e.target.value);
+                              setSelectedRequesterUserId("");
+                              setRequesterName("");
+                              setRequesterEmployeeNo("");
+                              setRequesterPickerOpen(false);
+                            }}
                             className={`h-11 w-full rounded-xl border border-input bg-background px-3 text-sm shadow-sm ${wizardSubmitted && !requestingServiceId ? "border-rose-400" : ""}`}
                           >
                             <option value="" disabled>Selecionar serviço...</option>
@@ -1712,11 +2005,65 @@ export default function RequestsPage() {
                       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                         <div className="space-y-1">
                           <div className="text-sm font-medium">Funcionário / Órgão (nome)</div>
-                          <Input value={requesterName} onChange={(e) => setRequesterName(e.target.value)} placeholder="Nome" className={`h-11 rounded-xl ${wizardSubmitted && !requesterName.trim() ? "border-rose-400" : ""}`} />
+                          <Popover open={requesterPickerOpen} onOpenChange={setRequesterPickerOpen}>
+                            <PopoverTrigger asChild>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                role="combobox"
+                                aria-expanded={requesterPickerOpen}
+                                className={`h-11 w-full justify-between rounded-xl border-input font-normal ${wizardSubmitted && !requesterName.trim() ? "border-rose-400" : ""}`}
+                              >
+                                <span className="truncate text-left">{selectedRequesterLabel}</span>
+                                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0">
+                              <Command>
+                                <CommandInput
+                                  placeholder={
+                                    requestingServiceId
+                                      ? "Pesquisar funcionário por nome..."
+                                      : "Selecione o serviço no passo 1"
+                                  }
+                                  disabled={!requestingServiceId}
+                                />
+                                <CommandList>
+                                  <CommandEmpty>
+                                    {requestingServiceId
+                                      ? requestingServiceUsersLoading
+                                        ? "A carregar funcionários..."
+                                        : "Nenhum funcionário encontrado para este departamento."
+                                      : "Selecione primeiro o serviço requisitante."}
+                                  </CommandEmpty>
+                                  <CommandGroup>
+                                    {requestingServiceUsers.map((employee) => (
+                                      <CommandItem
+                                        key={employee.id}
+                                        value={`${employee.name} ${employee.email}`}
+                                        onSelect={() => {
+                                          setSelectedRequesterUserId(employee.id);
+                                          setRequesterName(employee.name);
+                                          setRequesterEmployeeNo(employee.email);
+                                          setRequesterPickerOpen(false);
+                                        }}
+                                      >
+                                        <div className="flex w-full items-center justify-between gap-2">
+                                          <span className="truncate">{employee.name}</span>
+                                          <span className="truncate text-xs text-muted-foreground">{employee.email}</span>
+                                        </div>
+                                        {selectedRequesterUserId === employee.id ? <Check className="h-4 w-4" /> : null}
+                                      </CommandItem>
+                                    ))}
+                                  </CommandGroup>
+                                </CommandList>
+                              </Command>
+                            </PopoverContent>
+                          </Popover>
                         </div>
                         <div className="space-y-1">
-                          <div className="text-sm font-medium">Nº mecanográfico</div>
-                          <Input value={requesterEmployeeNo} onChange={(e) => setRequesterEmployeeNo(e.target.value)} placeholder="Nº" className="h-11 rounded-xl" />
+                          <div className="text-sm font-medium">Email</div>
+                          <Input value={requesterEmployeeNo} readOnly placeholder="Email do funcionário selecionado" className="h-11 rounded-xl" />
                         </div>
                         <div className="space-y-1 md:col-span-2">
                           <div className="text-sm font-medium">Local de entrega</div>
@@ -1757,101 +2104,111 @@ export default function RequestsPage() {
 
                   {wizardStep === 3 ? (
                     <div className="space-y-3 animate-fade-up rounded-2xl border border-border/60 bg-[hsl(var(--surface-1)/0.9)] p-3 sm:p-4">
-                      {items.map((it, idx) => {
-                        const filteredProducts = productOptions.filter((p) => {
-                          const q = (productSearchByRow[idx] || "").trim().toLowerCase();
-                          if (!q) return true;
-                          return `${p.name} ${p.sku}`.toLowerCase().includes(q);
-                        });
-                        return (
-                          <article key={`item-wizard-${idx}`} className={`rounded-2xl border p-4 shadow-sm ${wizardSubmitted && (!it.productId || it.quantity <= 0) ? "border-rose-400" : "border-border/60"} bg-[hsl(var(--surface-1)/0.8)]`}>
-                            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                              <div className="space-y-1 md:col-span-2">
-                                <div className="text-xs text-muted-foreground">Produto</div>
-                                <Input
-                                  placeholder="Pesquisar produto..."
-                                  value={productSearchByRow[idx] || ""}
-                                  onChange={(e) => setProductSearchByRow((prev) => ({ ...prev, [idx]: e.target.value }))}
-                                  className="h-10 rounded-xl"
-                                />
-                                <Select
-                                  value={it.productId}
-                                  onValueChange={(v) => {
-                                    const selected = productOptions.find((p) => p.id === v);
-                                    setProductSearchByRow((prev) => ({ ...prev, [idx]: selected ? `${selected.name} (${selected.sku})` : "" }));
-                                    setItems((prev) => prev.map((p, pIdx) => (pIdx === idx ? { ...p, productId: v, destination: "" } : p)));
-                                    void autoPickUnitForRow(idx, { force: false, productId: v });
-                                  }}
-                                >
-                                  <SelectTrigger className="h-11 rounded-xl">
-                                    <SelectValue placeholder="Selecionar produto" />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {filteredProducts.slice(0, 120).map((p) => (
-                                      <SelectItem key={p.id} value={p.id}>
-                                        {p.name} ({p.sku})
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                              <div className="space-y-1">
-                                <div className="text-xs text-muted-foreground">Quantidade</div>
-                                <Input type="number" min={1} value={it.quantity} onChange={(e) => setItems((prev) => prev.map((p, pIdx) => (pIdx === idx ? { ...p, quantity: Number(e.target.value) } : p)))} className="h-10 rounded-xl" />
-                              </div>
-                              <div className="space-y-1">
-                                <div className="text-xs text-muted-foreground">Unidade</div>
-                                <Input value={it.unit || ""} onChange={(e) => setItems((prev) => prev.map((p, pIdx) => (pIdx === idx ? { ...p, unit: e.target.value } : p)))} className="h-10 rounded-xl" placeholder="Ex: un" />
-                              </div>
-                              <div className="space-y-1">
-                                <div className="text-xs text-muted-foreground">Referência</div>
-                                <Input value={it.reference || ""} onChange={(e) => setItems((prev) => prev.map((p, pIdx) => (pIdx === idx ? { ...p, reference: e.target.value } : p)))} className="h-10 rounded-xl" placeholder="Ref / Nº série" />
-                              </div>
-                              <div className="space-y-1">
-                                <div className="text-xs text-muted-foreground">QR / Código unidade</div>
-                                <div className="flex items-center gap-2">
-                                  <Input value={it.destination || ""} onChange={(e) => setItems((prev) => prev.map((p, pIdx) => (pIdx === idx ? { ...p, destination: e.target.value } : p)))} className="h-10 rounded-xl" placeholder="Código QR" />
-                                  <Button type="button" variant="outline" size="icon" className="h-10 w-10 rounded-xl" disabled={!it.productId || Boolean(unitLoadingByRow[idx])} onClick={() => void autoPickUnitForRow(idx, { force: true, productId: it.productId, excludeCode: (it.destination || "").trim() })}>
-                                    <RefreshCcw className="h-4 w-4" />
-                                  </Button>
-                                  <Button type="button" variant="outline" size="icon" className="h-10 w-10 rounded-xl" disabled={!origin || !it.destination?.trim()} onClick={() => {
-                                    const code = (it.destination || "").trim();
-                                    if (!code) return;
-                                    setItemQrCode(code);
-                                    setItemQrOpen(true);
-                                  }}>
-                                    <QrCode className="h-4 w-4" />
+                      {requestMode === "RETURN" ? (
+                        <>
+                          {renderItemSection("Itens antigos (a devolver/retirar)", "old", returnOldItems, setReturnOldItems)}
+                          {renderItemSection("Itens novos (a substituir/entregar)", "new", returnNewItems, setReturnNewItems)}
+                        </>
+                      ) : (
+                        <>
+                          {items.map((it, idx) => {
+                            const rowKey = `std-${idx}`;
+                            const filteredProducts = productOptions.filter((p) => {
+                              const q = (productSearchByRow[rowKey] || "").trim().toLowerCase();
+                              if (!q) return true;
+                              return `${p.name} ${p.sku}`.toLowerCase().includes(q);
+                            });
+                            return (
+                              <article key={`item-wizard-${idx}`} className={`rounded-2xl border p-4 shadow-sm ${wizardSubmitted && (!it.productId || it.quantity <= 0) ? "border-rose-400" : "border-border/60"} bg-[hsl(var(--surface-1)/0.8)]`}>
+                                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                                  <div className="space-y-1 md:col-span-2">
+                                    <div className="text-xs text-muted-foreground">Produto</div>
+                                    <Input
+                                      placeholder="Pesquisar produto..."
+                                      value={productSearchByRow[rowKey] || ""}
+                                      onChange={(e) => setProductSearchByRow((prev) => ({ ...prev, [rowKey]: e.target.value }))}
+                                      className="h-10 rounded-xl"
+                                    />
+                                    <Select
+                                      value={it.productId}
+                                      onValueChange={(v) => {
+                                        const selected = productOptions.find((p) => p.id === v);
+                                        setProductSearchByRow((prev) => ({ ...prev, [rowKey]: selected ? `${selected.name} (${selected.sku})` : "" }));
+                                        setItems((prev) => prev.map((p, pIdx) => (pIdx === idx ? { ...p, productId: v, destination: "" } : p)));
+                                        void autoPickUnitForRow(idx, { force: false, productId: v });
+                                      }}
+                                    >
+                                      <SelectTrigger className="h-11 rounded-xl">
+                                        <SelectValue placeholder="Selecionar produto" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {filteredProducts.slice(0, 120).map((p) => (
+                                          <SelectItem key={p.id} value={p.id}>
+                                            {p.name} ({p.sku})
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                  <div className="space-y-1">
+                                    <div className="text-xs text-muted-foreground">Quantidade</div>
+                                    <Input type="number" min={1} value={it.quantity} onChange={(e) => setItems((prev) => prev.map((p, pIdx) => (pIdx === idx ? { ...p, quantity: Number(e.target.value) } : p)))} className="h-10 rounded-xl" />
+                                  </div>
+                                  <div className="space-y-1">
+                                    <div className="text-xs text-muted-foreground">Unidade</div>
+                                    <Input value={it.unit || ""} onChange={(e) => setItems((prev) => prev.map((p, pIdx) => (pIdx === idx ? { ...p, unit: e.target.value } : p)))} className="h-10 rounded-xl" placeholder="Ex: un" />
+                                  </div>
+                                  <div className="space-y-1">
+                                    <div className="text-xs text-muted-foreground">Referência</div>
+                                    <Input value={it.reference || ""} onChange={(e) => setItems((prev) => prev.map((p, pIdx) => (pIdx === idx ? { ...p, reference: e.target.value } : p)))} className="h-10 rounded-xl" placeholder="Ref / Nº série" />
+                                  </div>
+                                  <div className="space-y-1">
+                                    <div className="text-xs text-muted-foreground">QR / Código unidade</div>
+                                    <div className="flex items-center gap-2">
+                                      <Input value={it.destination || ""} onChange={(e) => setItems((prev) => prev.map((p, pIdx) => (pIdx === idx ? { ...p, destination: e.target.value } : p)))} className="h-10 rounded-xl" placeholder="Código QR" />
+                                      <Button type="button" variant="outline" size="icon" className="h-10 w-10 rounded-xl" disabled={!it.productId || Boolean(unitLoadingByRow[idx])} onClick={() => void autoPickUnitForRow(idx, { force: true, productId: it.productId, excludeCode: (it.destination || "").trim() })}>
+                                        <RefreshCcw className="h-4 w-4" />
+                                      </Button>
+                                      <Button type="button" variant="outline" size="icon" className="h-10 w-10 rounded-xl" disabled={!origin || !it.destination?.trim()} onClick={() => {
+                                        const code = (it.destination || "").trim();
+                                        if (!code) return;
+                                        setItemQrCode(code);
+                                        setItemQrOpen(true);
+                                      }}>
+                                        <QrCode className="h-4 w-4" />
+                                      </Button>
+                                    </div>
+                                  </div>
+                                  <div className="space-y-1 md:col-span-2">
+                                    <div className="text-xs text-muted-foreground">Notas</div>
+                                    <Input value={it.notes || ""} onChange={(e) => setItems((prev) => prev.map((p, pIdx) => (pIdx === idx ? { ...p, notes: e.target.value } : p)))} className="h-10 rounded-xl" placeholder="Observações" />
+                                  </div>
+                                </div>
+                                <div className="mt-3 flex justify-end">
+                                  <Button type="button" variant="ghost" size="sm" className="rounded-lg text-rose-600" disabled={items.length <= 1} onClick={() => setItems((prev) => prev.filter((_, i) => i !== idx))}>
+                                    <Trash2 className="mr-1 h-4 w-4" />
+                                    Remover
                                   </Button>
                                 </div>
-                              </div>
-                              <div className="space-y-1 md:col-span-2">
-                                <div className="text-xs text-muted-foreground">Notas</div>
-                                <Input value={it.notes || ""} onChange={(e) => setItems((prev) => prev.map((p, pIdx) => (pIdx === idx ? { ...p, notes: e.target.value } : p)))} className="h-10 rounded-xl" placeholder="Observações" />
-                              </div>
-                            </div>
-                            <div className="mt-3 flex justify-end">
-                              <Button type="button" variant="ghost" size="sm" className="rounded-lg text-rose-600" disabled={items.length <= 1} onClick={() => setItems((prev) => prev.filter((_, i) => i !== idx))}>
-                                <Trash2 className="mr-1 h-4 w-4" />
-                                Remover
-                              </Button>
-                            </div>
-                          </article>
-                        );
-                      })}
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="h-10 rounded-xl"
-                        onClick={() =>
-                          setItems((prev) => [
-                            ...prev,
-                            { productId: "", quantity: 1, unit: "", reference: "", destination: "", notes: "" },
-                          ])
-                        }
-                      >
-                        <Plus className="mr-1 h-4 w-4" />
-                        Adicionar item
-                      </Button>
+                              </article>
+                            );
+                          })}
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="h-10 rounded-xl"
+                            onClick={() =>
+                              setItems((prev) => [
+                                ...prev,
+                                { productId: "", quantity: 1, unit: "", reference: "", destination: "", notes: "" },
+                              ])
+                            }
+                          >
+                            <Plus className="mr-1 h-4 w-4" />
+                            Adicionar item
+                          </Button>
+                        </>
+                      )}
                     </div>
                   ) : null}
 
@@ -1860,6 +2217,7 @@ export default function RequestsPage() {
                       <div className="rounded-2xl border border-border/60 bg-[hsl(var(--surface-1)/0.82)] p-4">
                         <div className="text-sm font-semibold">Resumo</div>
                         <div className="mt-2 grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
+                          <div><span className="text-muted-foreground">Tipo:</span> {requestMode === "RETURN" ? "Devolução / Substituição" : "Normal"}</div>
                           <div><span className="text-muted-foreground">Serviço:</span> {requestingServices.find((s) => String(s.id) === requestingServiceId)?.designacao || "—"}</div>
                           <div><span className="text-muted-foreground">Data pedido:</span> {requestedAt || "—"}</div>
                           <div><span className="text-muted-foreground">Prioridade:</span> {priority}</div>
@@ -1870,14 +2228,37 @@ export default function RequestsPage() {
                         </div>
                       </div>
                       <div className="rounded-2xl border border-border/60 bg-[hsl(var(--surface-1)/0.82)] p-4">
-                        <div className="text-sm font-semibold">Itens ({items.length})</div>
-                        <div className="mt-2 space-y-2">
-                          {items.map((it, idx) => (
-                            <div key={`review-${idx}`} className="rounded-xl border border-border/60 bg-[hsl(var(--surface-2)/0.55)] px-3 py-2 text-sm">
-                              {(it.productId ? productById.get(it.productId)?.name : "Produto não selecionado") || "Produto não selecionado"} • Qtd {it.quantity}
+                        {requestMode === "RETURN" ? (
+                          <div className="space-y-3">
+                            <div className="text-sm font-semibold">Itens antigos ({returnOldItems.length})</div>
+                            <div className="space-y-2">
+                              {returnOldItems.map((it, idx) => (
+                                <div key={`review-old-${idx}`} className="rounded-xl border border-amber-300/50 bg-amber-50/40 px-3 py-2 text-sm dark:bg-amber-950/10">
+                                  {(it.productId ? productById.get(it.productId)?.name : "Produto não selecionado") || "Produto não selecionado"} • Qtd {it.quantity}
+                                </div>
+                              ))}
                             </div>
-                          ))}
-                        </div>
+                            <div className="text-sm font-semibold">Itens novos ({returnNewItems.length})</div>
+                            <div className="space-y-2">
+                              {returnNewItems.map((it, idx) => (
+                                <div key={`review-new-${idx}`} className="rounded-xl border border-emerald-300/50 bg-emerald-50/40 px-3 py-2 text-sm dark:bg-emerald-950/10">
+                                  {(it.productId ? productById.get(it.productId)?.name : "Produto não selecionado") || "Produto não selecionado"} • Qtd {it.quantity}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="text-sm font-semibold">Itens ({items.length})</div>
+                            <div className="mt-2 space-y-2">
+                              {items.map((it, idx) => (
+                                <div key={`review-${idx}`} className="rounded-xl border border-border/60 bg-[hsl(var(--surface-2)/0.55)] px-3 py-2 text-sm">
+                                  {(it.productId ? productById.get(it.productId)?.name : "Produto não selecionado") || "Produto não selecionado"} • Qtd {it.quantity}
+                                </div>
+                              ))}
+                            </div>
+                          </>
+                        )}
                       </div>
                       {wizardSuccess ? (
                         <div className="rounded-2xl border border-emerald-400/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-700 dark:text-emerald-300">
@@ -1903,7 +2284,9 @@ export default function RequestsPage() {
                             : "Guardar"
                           : creating
                             ? "A criar..."
-                            : "Confirmar e criar"}
+                            : requestMode === "RETURN"
+                              ? "Confirmar devolução"
+                              : "Confirmar e criar"}
                       </Button>
                     )}
                     <div className="grid grid-cols-2 gap-2">
@@ -1951,7 +2334,9 @@ export default function RequestsPage() {
                             : "Guardar"
                           : creating
                             ? "A criar..."
-                            : "Confirmar e criar"}
+                            : requestMode === "RETURN"
+                              ? "Confirmar devolução"
+                              : "Confirmar e criar"}
                       </Button>
                     )}
                   </div>

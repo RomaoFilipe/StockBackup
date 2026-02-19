@@ -37,6 +37,7 @@ model Tenant {
   productInvoices ProductInvoice[]
   units          ProductUnit[]
   requests       Request[]
+  reports        Report[]
   requestStatusAudits RequestStatusAudit[]
   notifications Notification[]
   storedFiles    StoredFile[]
@@ -102,6 +103,7 @@ model User {
 
   submittedPublicRequests PublicRequest[] @relation("PublicRequestRequesterUser")
   handledPublicRequests           PublicRequest[]       @relation("PublicRequestHandledBy")
+  generatedReports Report[] @relation("ReportGeneratedBy")
 
   @@unique([tenantId, email])
   @@unique([tenantId, username])
@@ -228,6 +230,17 @@ enum RequestPriority {
   URGENT
 }
 
+enum RequestType {
+  STANDARD
+  RETURN
+}
+
+enum RequestItemRole {
+  NORMAL
+  OLD
+  NEW
+}
+
 enum RequestGoodsType {
   MATERIALS_SERVICES
   WAREHOUSE_MATERIALS
@@ -243,6 +256,7 @@ enum PublicRequestStatus {
 model Request {
   id         String        @id @default(uuid()) @db.Uuid
   status     RequestStatus @default(DRAFT)
+  requestType RequestType  @default(STANDARD)
   title      String?
   notes      String?
   gtmiYear   Int
@@ -346,6 +360,7 @@ model Request {
 
 model RequestItem {
   id          String   @id @default(uuid()) @db.Uuid
+  role        RequestItemRole @default(NORMAL)
   quantity    BigInt
   notes       String?
   unit        String?
@@ -754,6 +769,26 @@ model RequestStatusAudit {
   @@index([createdAt])
   @@index([toStatus])
   @@index([changedByUserId])
+}
+
+model Report {
+  id        String   @id @default(uuid()) @db.Uuid
+  createdAt DateTime @default(now())
+
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  generatedById String @db.Uuid
+  generatedBy   User   @relation("ReportGeneratedBy", fields: [generatedById], references: [id], onDelete: Restrict)
+
+  period       String @db.VarChar(20)
+  filters      Json?
+  documentHash String @db.VarChar(64)
+  filePath     String?
+
+  @@index([tenantId])
+  @@index([generatedById])
+  @@index([createdAt])
 }
 
 model RateLimitBucket {

@@ -16,6 +16,10 @@ const bodySchema = z.object({
 const computeProductStatus = (quantity: number) =>
   quantity > 20 ? "Available" : quantity > 0 ? "Stock Low" : "Stock Out";
 
+function formatGtmiNumber(gtmiYear: number, gtmiSeq: number) {
+  return `GTMI-${gtmiYear}-${String(gtmiSeq).padStart(6, "0")}`;
+}
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const session = await getSessionServer(req, res);
   if (!session) {
@@ -43,11 +47,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         where: { code },
         select: {
           id: true,
+          code: true,
           status: true,
           tenantId: true,
           productId: true,
           invoiceId: true,
           assignedToUserId: true,
+          product: { select: { id: true, name: true, sku: true } },
           invoice: { select: { requestId: true } },
         },
       });
@@ -59,51 +65,93 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         return { kind: "invalid_state" as const, status: unit.status };
       }
 
-      await txAny.productUnit.update({
-        where: { id: unit.id },
-        data: {
-          status: "IN_STOCK",
-          assignedToUserId: null,
+      const performedAt = new Date();
+      const requestOwnerUserId = unit.assignedToUserId ?? performedByUserId;
+      const requestOwner = await tx.user.findFirst({
+        where: { id: requestOwnerUserId, tenantId },
+        select: {
+          id: true,
+          name: true,
+          requestingServiceId: true,
+          requestingService: { select: { codigo: true, designacao: true } },
         },
-        select: { id: true },
       });
 
-      await txAny.stockMovement.create({
+      if (!requestOwner) return { kind: "forbidden" as const };
+
+      const gtmiYear = performedAt.getFullYear();
+      const maxSeq = await tx.request.aggregate({
+        where: { tenantId, gtmiYear },
+        _max: { gtmiSeq: true },
+      });
+      const gtmiSeq = (maxSeq._max.gtmiSeq ?? 0) + 1;
+      const gtmiNumber = formatGtmiNumber(gtmiYear, gtmiSeq);
+      const reqServiceText = requestOwner.requestingService
+        ? `${requestOwner.requestingService.codigo} — ${requestOwner.requestingService.designacao}`.slice(0, 120)
+        : null;
+
+      const linkedRequest = await tx.request.create({
         data: {
-          type: "RETURN",
-          quantity: BigInt(1) as any,
           tenantId,
-          productId: unit.productId,
-          unitId: unit.id,
-          invoiceId: unit.invoiceId,
-          requestId: unit.invoice?.requestId ?? null,
-          performedByUserId,
-          assignedToUserId: unit.assignedToUserId ?? null,
-          reason: reason ?? null,
-          costCenter: costCenter ?? null,
+          userId: requestOwner.id,
+          createdByUserId: performedByUserId,
+          status: "SUBMITTED",
+          requestType: "RETURN",
+          title: "Requisição de Devolução",
           notes: notes ?? null,
+          gtmiYear,
+          gtmiSeq,
+          gtmiNumber,
+          requestedAt: performedAt,
+          priority: "NORMAL",
+          requestingService: reqServiceText,
+          requestingServiceId: requestOwner.requestingServiceId ?? null,
+          requesterName: requestOwner.name,
+          goodsTypes: ["MATERIALS_SERVICES"],
+          supplierOption1: unit.product.name,
+          items: {
+            create: [
+              {
+                productId: unit.productId,
+                quantity: BigInt(1) as any,
+                notes: reason ?? null,
+                unit: "un",
+                reference: "Equipamento devolvido",
+                destination: unit.code,
+                role: "OLD",
+              },
+            ],
+          },
         },
-        select: { id: true },
+        select: { id: true, gtmiNumber: true },
       });
 
-      const product = await tx.product.update({
-        where: { id: unit.productId },
-        data: { quantity: { increment: BigInt(1) as any } },
-        select: { id: true, quantity: true },
+      await tx.requestStatusAudit.create({
+        data: {
+          tenantId,
+          requestId: linkedRequest.id,
+          fromStatus: null,
+          toStatus: "SUBMITTED",
+          changedByUserId: performedByUserId,
+          source: "api/units/return:POST",
+          note: `Criada automaticamente por devolução da unidade ${unit.code}`,
+        },
       });
+
+      const product = await tx.product.findUnique({
+        where: { id: unit.productId },
+        select: { id: true, quantity: true, status: true },
+      });
+      if (!product) return { kind: "not_found" as const };
 
       const finalQuantity = Number(product.quantity);
-      const finalStatus = computeProductStatus(finalQuantity);
-
-      await tx.product.update({
-        where: { id: unit.productId },
-        data: { status: finalStatus },
-      });
+      const finalStatus = product.status ?? computeProductStatus(finalQuantity);
 
       return {
         kind: "ok" as const,
-        unit: { id: unit.id, code, status: "IN_STOCK" as const },
+        unit: { id: unit.id, code, status: "ACQUIRED" as const },
         product: { id: unit.productId, quantity: finalQuantity, status: finalStatus },
+        linkedRequest: { id: linkedRequest.id, gtmiNumber: linkedRequest.gtmiNumber },
       };
     });
 
@@ -116,16 +164,27 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     await logUserAdminAction({
       tenantId: session.tenantId,
       actorUserId: session.id,
-      action: "UNIT_RETURN",
-      note: `Unit returned to stock: ${code}`,
+      action: "UNIT_RETURN_REQUEST_CREATED",
+      note: `Return request created for unit: ${code}`,
       payload: {
         code,
+        linkedRequestId: result.linkedRequest.id,
+        linkedRequestGtmiNumber: result.linkedRequest.gtmiNumber,
         reason: reason ?? null,
         costCenter: costCenter ?? null,
         hasNotes: Boolean(notes),
       },
     });
-    logInfo("Unit returned to stock", { tenantId: session.tenantId, userId: session.id, code }, req);
+    logInfo(
+      "Return request created; stock pending signature",
+      {
+        tenantId: session.tenantId,
+        userId: session.id,
+        code,
+        linkedRequestId: result.linkedRequest.id,
+      },
+      req
+    );
 
     return res.status(200).json(result);
   } catch (error) {

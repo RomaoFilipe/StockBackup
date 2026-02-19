@@ -6,6 +6,8 @@ import { createRequestStatusAudit, notifyAdmin, notifyUser } from "@/utils/notif
 import { publishRealtimeEvent } from "@/utils/realtime";
 
 const goodsTypeSchema = z.enum(["MATERIALS_SERVICES", "WAREHOUSE_MATERIALS", "OTHER_PRODUCTS"]);
+const requestTypeSchema = z.enum(["STANDARD", "RETURN"]);
+const requestItemRoleSchema = z.enum(["NORMAL", "OLD", "NEW"]);
 
 const dateLikeString = z
   .string()
@@ -14,12 +16,12 @@ const dateLikeString = z
   .transform((v) => new Date(v));
 
 const createRequestSchema = z.object({
-  asUserId: z.string().uuid().optional(),
   title: z.string().min(1).max(120).optional(),
   notes: z.string().max(1000).optional(),
   requestedAt: dateLikeString.optional(),
   priority: z.enum(["LOW", "NORMAL", "HIGH", "URGENT"]).optional(),
   dueAt: dateLikeString.optional(),
+  requestType: requestTypeSchema.optional(),
 
   requestingServiceId: z.number().int(),
   requesterName: z.string().max(120).optional(),
@@ -41,6 +43,7 @@ const createRequestSchema = z.object({
         unit: z.string().max(60).optional(),
         reference: z.string().max(120).optional(),
         destination: z.string().max(120).optional(),
+        role: requestItemRoleSchema.optional(),
       })
     )
     .min(1),
@@ -78,6 +81,7 @@ async function createRequestWithGtmiSeq(args: {
   requestedAt: Date;
   priority?: "LOW" | "NORMAL" | "HIGH" | "URGENT";
   dueAt?: Date;
+  requestType: z.infer<typeof requestTypeSchema>;
   requestingService?: string;
   requestingServiceId?: number;
   requesterName?: string;
@@ -96,6 +100,7 @@ async function createRequestWithGtmiSeq(args: {
     unit?: string;
     reference?: string;
     destination?: string;
+    role?: z.infer<typeof requestItemRoleSchema>;
   }>;
 }) {
   const gtmiYear = args.requestedAt.getFullYear();
@@ -119,6 +124,7 @@ async function createRequestWithGtmiSeq(args: {
             userId: args.userId,
             createdByUserId: args.createdByUserId,
             status: "SUBMITTED",
+            requestType: args.requestType,
 
             title: args.title,
             notes: args.notes,
@@ -150,6 +156,7 @@ async function createRequestWithGtmiSeq(args: {
                 unit: i.unit,
                 reference: i.reference,
                 destination: i.destination,
+                role: i.role ?? "NORMAL",
               })),
             },
           },
@@ -164,6 +171,22 @@ async function createRequestWithGtmiSeq(args: {
         });
 
         // === Stock deduction / unit allocation ===
+        if (args.requestType === "RETURN") {
+          const final = await tx.request.findUnique({
+            where: { id: created.id },
+            include: {
+              user: { select: { id: true, name: true, email: true } },
+              createdBy: { select: { id: true, name: true, email: true } },
+              items: {
+                include: { product: { select: { id: true, name: true, sku: true } } },
+                orderBy: { createdAt: "asc" },
+              },
+            },
+          });
+
+          return final ?? created;
+        }
+
         const performerUserId = args.createdByUserId;
         const assignedToUserId = args.userId;
         const stockReason = `Requisi\u00e7\u00e3o ${gtmiNumber}`;
@@ -484,12 +507,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     const {
-      asUserId,
       title,
       notes,
       requestedAt,
       priority,
       dueAt,
+      requestType,
       requestingServiceId,
       requesterName,
       requesterEmployeeNo,
@@ -502,7 +525,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       supplierOption3,
       items,
     } = parsed.data;
-    const createForUserId = isAdmin && asUserId ? asUserId : session.id;
+    const effectiveRequestType = requestType ?? "STANDARD";
+
+    if (effectiveRequestType === "RETURN") {
+      const hasOld = items.some((it) => (it.role ?? "NORMAL") === "OLD");
+      const hasNew = items.some((it) => (it.role ?? "NORMAL") === "NEW");
+      if (!hasOld || !hasNew) {
+        return res.status(400).json({ error: "Requisição de devolução exige itens ANTIGOS e NOVOS." });
+      }
+    }
 
     try {
       const svc = await prisma.requestingService.findUnique({
@@ -533,13 +564,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const effectiveRequestedAt = requestedAt ?? new Date();
       const created = await createRequestWithGtmiSeq({
         tenantId,
-        userId: createForUserId,
+        userId: session.id,
         createdByUserId: session.id,
         title,
         notes,
         requestedAt: effectiveRequestedAt,
         priority: priority ?? "NORMAL",
         dueAt,
+        requestType: effectiveRequestType,
         requestingService: normalizedRequestingService,
         requestingServiceId,
         requesterName,
@@ -551,7 +583,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         supplierOption1,
         supplierOption2,
         supplierOption3,
-        items,
+        items: items.map((it) => ({
+          ...it,
+          role: it.role ?? "NORMAL",
+        })),
       });
 
       try {

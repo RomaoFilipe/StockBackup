@@ -42,6 +42,7 @@ type RequestItemDto = {
   id: string;
   productId: string;
   quantity: number;
+  role?: "NORMAL" | "OLD" | "NEW";
   notes?: string | null;
   unit?: string | null;
   reference?: string | null;
@@ -65,6 +66,7 @@ type RequestDto = {
   id: string;
   userId: string;
   status: "DRAFT" | "SUBMITTED" | "APPROVED" | "REJECTED" | "FULFILLED";
+  requestType?: "STANDARD" | "RETURN";
   title?: string | null;
   notes?: string | null;
 
@@ -150,6 +152,14 @@ const formatStatus = (status: RequestDto["status"]) => {
       return { label: status, className: "bg-muted/50 text-muted-foreground border-border/60" };
   }
 };
+
+const needsRestockSignatureBadge = (
+  r: Pick<RequestDto, "requestType" | "status" | "pickupSignedAt">
+) =>
+  r.requestType === "RETURN" &&
+  r.status !== "FULFILLED" &&
+  r.status !== "REJECTED" &&
+  !r.pickupSignedAt;
 
 function makeClientKey() {
   try {
@@ -475,6 +485,14 @@ export default function RequestDetailsPage() {
               <Badge variant="outline" className={formatStatus(request.status).className}>
                 {formatStatus(request.status).label}
               </Badge>
+              {needsRestockSignatureBadge(request) ? (
+                <Badge
+                  variant="outline"
+                  className="border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                >
+                  Aguarda assinatura para repor stock
+                </Badge>
+              ) : null}
               <div className="text-sm text-muted-foreground">{new Date(request.requestedAt).toLocaleString()}</div>
               {request.user?.name ? (
                 <div className="text-sm text-muted-foreground">• Pedido de {request.user.name}</div>
@@ -589,6 +607,21 @@ export default function RequestDetailsPage() {
                 </CardHeader>
                 <CardContent className="space-y-2">
                   <div className="text-sm">
+                    <span className="text-muted-foreground">Modalidade:</span>{" "}
+                    <span>{request.requestType === "RETURN" ? "Devolução / Substituição" : "Normal"}</span>
+                  </div>
+                  {needsRestockSignatureBadge(request) ? (
+                    <div className="text-sm">
+                      <span className="text-muted-foreground">Reposição stock:</span>{" "}
+                      <Badge
+                        variant="outline"
+                        className="border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                      >
+                        Aguarda assinatura para repor stock
+                      </Badge>
+                    </div>
+                  ) : null}
+                  <div className="text-sm">
                     <span className="text-muted-foreground">Tipo:</span>{" "}
                     <span>
                       {request.goodsTypes?.length ? request.goodsTypes.map((g) => goodsTypeLabels[g]).join(" • ") : "—"}
@@ -611,8 +644,78 @@ export default function RequestDetailsPage() {
             </div>
 
             <div>
-              <div className="text-sm font-medium mb-2">Itens</div>
-              <Table>
+              <div className="text-sm font-medium mb-2">
+                Itens {request.requestType === "RETURN" ? "(Devolução/Substituição)" : ""}
+              </div>
+              {request.requestType === "RETURN" ? (
+                <div className="space-y-4">
+                  <div>
+                    <div className="mb-2 text-sm font-medium text-amber-700 dark:text-amber-300">Itens antigos (a devolver)</div>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="w-[48px]">#</TableHead>
+                          <TableHead>Produto</TableHead>
+                          <TableHead className="w-[110px]">Qtd</TableHead>
+                          <TableHead className="w-[140px]">Unid.</TableHead>
+                          <TableHead className="w-[160px]">Referência</TableHead>
+                          <TableHead className="w-[180px]">QR</TableHead>
+                          <TableHead>Notas</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {request.items.filter((it) => it.role === "OLD").map((it, idx) => (
+                          <TableRow key={it.id}>
+                            <TableCell>{idx + 1}</TableCell>
+                            <TableCell>
+                              <div className="font-medium">{it.product?.name || it.productId}</div>
+                              {it.product?.sku ? <div className="text-xs text-muted-foreground">SKU: {it.product.sku}</div> : null}
+                            </TableCell>
+                            <TableCell>{it.quantity}</TableCell>
+                            <TableCell>{it.unit || ""}</TableCell>
+                            <TableCell>{it.reference || ""}</TableCell>
+                            <TableCell>{it.destination || ""}</TableCell>
+                            <TableCell>{it.notes || ""}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                  <div>
+                    <div className="mb-2 text-sm font-medium text-emerald-700 dark:text-emerald-300">Itens novos (a substituir)</div>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="w-[48px]">#</TableHead>
+                          <TableHead>Produto</TableHead>
+                          <TableHead className="w-[110px]">Qtd</TableHead>
+                          <TableHead className="w-[140px]">Unid.</TableHead>
+                          <TableHead className="w-[160px]">Referência</TableHead>
+                          <TableHead className="w-[180px]">QR</TableHead>
+                          <TableHead>Notas</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {request.items.filter((it) => it.role === "NEW").map((it, idx) => (
+                          <TableRow key={it.id}>
+                            <TableCell>{idx + 1}</TableCell>
+                            <TableCell>
+                              <div className="font-medium">{it.product?.name || it.productId}</div>
+                              {it.product?.sku ? <div className="text-xs text-muted-foreground">SKU: {it.product.sku}</div> : null}
+                            </TableCell>
+                            <TableCell>{it.quantity}</TableCell>
+                            <TableCell>{it.unit || ""}</TableCell>
+                            <TableCell>{it.reference || ""}</TableCell>
+                            <TableCell>{it.destination || ""}</TableCell>
+                            <TableCell>{it.notes || ""}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
+              ) : (
+                <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-[48px]">#</TableHead>
@@ -666,6 +769,7 @@ export default function RequestDetailsPage() {
                   ))}
                 </TableBody>
               </Table>
+              )}
             </div>
 
             <div className="space-y-2">

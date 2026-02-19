@@ -38,6 +38,13 @@ type NotificationItem = {
   data?: any;
 };
 
+function resolveRequestId(it: NotificationItem): string | null {
+  if (typeof it.request?.id === "string" && it.request.id.trim()) return it.request.id;
+  const fromData = it.data && typeof it.data === "object" ? (it.data as Record<string, unknown>).requestId : null;
+  if (typeof fromData === "string" && fromData.trim()) return fromData;
+  return null;
+}
+
 function kindLabel(kind: NotificationItem["kind"]) {
   switch (kind) {
     case "REQUEST_CREATED":
@@ -157,27 +164,35 @@ export function RequestsNotificationsBell() {
         ) : items.length === 0 ? (
           <div className="p-3 text-sm text-muted-foreground">Sem notificações.</div>
         ) : (
-          items.map((it) => (
-            <DropdownMenuItem
-              key={it.id}
-              className="flex flex-col items-start gap-1 py-2"
-              onSelect={(e) => {
-                e.preventDefault();
-                void markRead(it.id);
-                if (it.request?.id) router.push(`/requests/${it.request.id}`);
-              }}
-            >
-              <div className="flex w-full items-center justify-between gap-2">
-                <div className="text-xs text-muted-foreground">{kindLabel(it.kind)}</div>
-                {!it.readAt ? <span className="h-2 w-2 rounded-full bg-blue-600" /> : null}
-              </div>
-              <div className="text-sm font-medium line-clamp-1">{it.title}</div>
-              <div className="text-xs text-muted-foreground line-clamp-2">{it.message}</div>
-              <div className="text-[11px] text-muted-foreground">
-                {new Date(it.createdAt).toLocaleString("pt-PT")}
-              </div>
-            </DropdownMenuItem>
-          ))
+          items.map((it) => {
+            const requestId = resolveRequestId(it);
+            const canOpen = Boolean(requestId);
+
+            return (
+              <DropdownMenuItem
+                key={it.id}
+                className="flex cursor-pointer flex-col items-start gap-1 py-2"
+                onSelect={(e) => {
+                  e.preventDefault();
+                  void markRead(it.id);
+                  if (!canOpen || !requestId) return;
+                  setOpen(false);
+                  router.push(`/requests/${requestId}`);
+                }}
+              >
+                <div className="flex w-full items-center justify-between gap-2">
+                  <div className="text-xs text-muted-foreground">{kindLabel(it.kind)}</div>
+                  {!it.readAt ? <span className="h-2 w-2 rounded-full bg-blue-600" /> : null}
+                </div>
+                <div className="text-sm font-medium line-clamp-1">{it.title}</div>
+                <div className="text-xs text-muted-foreground line-clamp-2">{it.message}</div>
+                {canOpen ? <div className="text-[11px] font-medium text-blue-700">Abrir pedido</div> : null}
+                <div className="text-[11px] text-muted-foreground">
+                  {new Date(it.createdAt).toLocaleString("pt-PT")}
+                </div>
+              </DropdownMenuItem>
+            );
+          })
         )}
       </DropdownMenuContent>
     </DropdownMenu>

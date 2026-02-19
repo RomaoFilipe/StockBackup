@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Papa from "papaparse";
 
 import AuthenticatedLayout from "@/app/components/AuthenticatedLayout";
@@ -84,6 +84,7 @@ const isUuid = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]
 
 export default function MovementsPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { toast } = useToast();
   const { isLoggedIn, isAuthLoading, user } = useAuth();
 
@@ -100,16 +101,19 @@ export default function MovementsPage() {
   const [nextCursor, setNextCursor] = useState<string | null>(null);
 
   // Filters
-  const [q, setQ] = useState<string>("");
+  const [q, setQ] = useState<string>(() => searchParams?.get("q") ?? "");
   const [type, setType] = useState<
     "" | "IN" | "OUT" | "RETURN" | "REPAIR_OUT" | "REPAIR_IN" | "SCRAP" | "LOST"
-  >("");
+  >(() => {
+    const t = searchParams?.get("type") ?? "";
+    return t === "IN" || t === "OUT" || t === "RETURN" || t === "REPAIR_OUT" || t === "REPAIR_IN" || t === "SCRAP" || t === "LOST" ? t : "";
+  });
   const [productId, setProductId] = useState<string>("");
-  const [performedByUserId, setPerformedByUserId] = useState<string>("");
-  const [assignedToUserId, setAssignedToUserId] = useState<string>("");
+  const [performedByUserId, setPerformedByUserId] = useState<string>(() => searchParams?.get("performedByUserId") ?? "");
+  const [assignedToUserId, setAssignedToUserId] = useState<string>(() => searchParams?.get("assignedToUserId") ?? "");
   const [invoiceNumber, setInvoiceNumber] = useState<string>("");
-  const [reqNumber, setReqNumber] = useState<string>("");
-  const [requestId, setRequestId] = useState<string>("");
+  const [reqNumber, setReqNumber] = useState<string>(() => searchParams?.get("reqNumber") ?? "");
+  const [requestId, setRequestId] = useState<string>(() => searchParams?.get("requestId") ?? "");
   const [from, setFrom] = useState<string>("");
   const [to, setTo] = useState<string>("");
 

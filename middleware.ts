@@ -77,6 +77,7 @@ export function middleware(request: NextRequest) {
     "/",
     "/requests",
     "/scan",
+    "/reports",
   ];
 
   // Check if the current path is a protected route

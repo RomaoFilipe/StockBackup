@@ -249,6 +249,12 @@ export const ProductTable = React.memo(function ProductTable({
                     {product.quantity} unid.
                   </Badge>
                 </div>
+                <div className="mt-2 text-xs text-muted-foreground">
+                  {product.category || "Sem categoria"} • {product.supplier || "Sem fornecedor"}
+                </div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  Criado em {new Date(product.createdAt).toLocaleDateString("pt-PT")}
+                </div>
                 <div className="mt-4 flex items-center justify-between">
                   <span className="text-sm text-muted-foreground">Preço</span>
                   <span className="text-lg font-semibold">
@@ -257,6 +263,16 @@ export const ProductTable = React.memo(function ProductTable({
                       currency: "EUR",
                     })}
                   </span>
+                </div>
+                <div className="mt-3 flex items-center justify-end">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="rounded-lg"
+                    onClick={() => router.push(`/products/${product.id}`)}
+                  >
+                    Ver detalhe
+                  </Button>
                 </div>
               </article>
             );
@@ -297,7 +313,7 @@ export const ProductTable = React.memo(function ProductTable({
                 return (
                   <tr
                     key={product.id}
-                    className="border-t border-border/55 transition-all hover:bg-[hsl(var(--surface-2)/0.52)] hover:shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.18)]"
+                    className="border-t border-border/55 transition-all odd:bg-[hsl(var(--surface-2)/0.2)] hover:bg-[hsl(var(--surface-2)/0.52)] hover:shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.18)]"
                   >
                     <td className="px-[var(--table-cell-px)] py-[var(--table-cell-py)]">
                       <Checkbox
@@ -305,9 +321,29 @@ export const ProductTable = React.memo(function ProductTable({
                         onCheckedChange={(v) => toggleRow(product.id, Boolean(v))}
                       />
                     </td>
-                    <td className="px-[var(--table-cell-px)] py-[var(--table-cell-py)] font-medium">{product.name}</td>
-                    <td className="px-[var(--table-cell-px)] py-[var(--table-cell-py)]">{product.sku}</td>
-                    <td className="px-[var(--table-cell-px)] py-[var(--table-cell-py)]">{product.quantity}</td>
+                    <td className="px-[var(--table-cell-px)] py-[var(--table-cell-py)]">
+                      <button
+                        type="button"
+                        className="font-medium text-left hover:underline"
+                        onClick={() => router.push(`/products/${product.id}`)}
+                      >
+                        {product.name}
+                      </button>
+                    </td>
+                    <td className="px-[var(--table-cell-px)] py-[var(--table-cell-py)] font-mono text-xs">{product.sku}</td>
+                    <td className="px-[var(--table-cell-px)] py-[var(--table-cell-py)]">
+                      <span
+                        className={`inline-flex min-w-10 justify-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                          product.quantity > 20
+                            ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                            : product.quantity > 0
+                            ? "bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                            : "bg-rose-500/10 text-rose-700 dark:text-rose-300"
+                        }`}
+                      >
+                        {product.quantity}
+                      </span>
+                    </td>
                     <td className="px-[var(--table-cell-px)] py-[var(--table-cell-py)]">
                       {product.price.toLocaleString("pt-PT", {
                         style: "currency",

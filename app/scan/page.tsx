@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { BrowserMultiFormatReader } from "@zxing/browser";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
+import { parseScanIntent } from "@/utils/scanIntent";
 
 function getCameraErrorMessage(error: unknown, isSecureContext: boolean) {
   const err = error as { name?: string; message?: string } | null;
@@ -35,13 +36,12 @@ function getCameraErrorMessage(error: unknown, isSecureContext: boolean) {
   return message || "Não foi possível aceder à câmara.";
 }
 
-function isUuid(value: string) {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.trim());
-}
-
 export default function ScanCameraPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { toast } = useToast();
+  const pickField = searchParams?.get("pickField") ?? null;
+  const returnTo = searchParams?.get("returnTo") ?? null;
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const controlsRef = useRef<{ stop: () => void } | null>(null);
@@ -57,6 +57,7 @@ export default function ScanCameraPage() {
   const [cameraBootKey, setCameraBootKey] = useState(0);
   const [torchSupported, setTorchSupported] = useState(false);
   const [torchOn, setTorchOn] = useState(false);
+  const [isRouting, setIsRouting] = useState(false);
 
   const isSecureContext = useMemo(() => {
     if (typeof window === "undefined") return true;
@@ -99,22 +100,7 @@ export default function ScanCameraPage() {
             if (result && !scanLockRef.current) {
               scanLockRef.current = true;
               const text = result.getText?.() ?? String(result);
-              const trimmed = text.trim();
-              if (!isUuid(trimmed)) {
-                toast({
-                  title: "QR inválido",
-                  description: "Este QR não contém um UUID de unidade válido.",
-                  variant: "destructive",
-                });
-                scanLockTimerRef.current = setTimeout(() => {
-                  scanLockRef.current = false;
-                  scanLockTimerRef.current = null;
-                }, 1200);
-                return;
-              }
-              controls?.stop();
-              controlsRef.current = null;
-              router.replace(`/scan/${encodeURIComponent(trimmed)}`);
+              void navigateToCode(text, true, true);
             }
 
             // Ignore scan errors; keep scanning
@@ -154,27 +140,180 @@ export default function ScanCameraPage() {
       }
       videoTrackRef.current = null;
     };
-  }, [isSecureContext, router, cameraBootKey, toast]);
+  }, [isSecureContext, router, cameraBootKey, toast, pickField, returnTo]);
 
-  const navigateToCode = (rawCode: string) => {
-    const trimmed = rawCode.trim();
-    if (!trimmed) {
+  const routeWithUnitCode = (code: string, replace: boolean) => {
+    if (pickField && returnTo && typeof window !== "undefined") {
+      try {
+        const target = new URL(returnTo, window.location.origin);
+        target.searchParams.set(pickField, code);
+        const destination = `${target.pathname}${target.search}`;
+        router.replace(destination);
+        return;
+      } catch {
+        // Fallback to default route below.
+      }
+    }
+
+    const destination = `/scan/${encodeURIComponent(code)}`;
+    if (replace) router.replace(destination);
+    else router.push(destination);
+  };
+
+  const resolveRequestDestination = async (ref: string) => {
+    const requestsRes = await fetch(`/api/requests?paged=1&page=1&pageSize=25&q=${encodeURIComponent(ref)}`);
+    if (requestsRes.ok) {
+      const data = await requestsRes.json();
+      const items = Array.isArray(data?.items) ? data.items : [];
+      const exact = items.find(
+        (r: any) => typeof r?.gtmiNumber === "string" && String(r.gtmiNumber).toUpperCase() === ref.toUpperCase()
+      );
+      const first = exact ?? items[0];
+      if (first?.id) return `/requests/${encodeURIComponent(first.id)}`;
+    }
+
+    const moveRes = await fetch(`/api/stock-movements?limit=20&reqNumber=${encodeURIComponent(ref)}`);
+    if (moveRes.ok) {
+      const movementData = await moveRes.json();
+      const movementItems = Array.isArray(movementData?.items) ? movementData.items : [];
+      const withReq = movementItems.find((m: any) => typeof m?.requestId === "string");
+      if (withReq?.requestId) return `/requests/${encodeURIComponent(withReq.requestId)}`;
+    }
+
+    return null;
+  };
+
+  const resolveProductDestination = async (sku: string) => {
+    const productsRes = await fetch("/api/products");
+    if (!productsRes.ok) return null;
+
+    const products = await productsRes.json();
+    if (!Array.isArray(products)) return null;
+
+    const found = products.find(
+      (p: any) => typeof p?.sku === "string" && String(p.sku).trim().toUpperCase() === sku.toUpperCase()
+    );
+    if (!found?.id) return null;
+    return `/products/${encodeURIComponent(found.id)}`;
+  };
+
+  const navigateToCode = async (rawCode: string, replace: boolean, fromScanner = false) => {
+    if (!rawCode.trim()) {
       toast({ title: "Código em falta", description: "Introduz ou faz scan de um código." });
+      if (fromScanner) {
+        scanLockTimerRef.current = setTimeout(() => {
+          scanLockRef.current = false;
+          scanLockTimerRef.current = null;
+        }, 1200);
+      }
       return;
     }
-    if (!isUuid(trimmed)) {
+
+    const intent = parseScanIntent(rawCode);
+    setIsRouting(true);
+    let navigated = false;
+    try {
+      if (pickField && intent.kind !== "unit") {
+        toast({
+          title: "Código inválido para este campo",
+          description: "Neste formulário só é aceite QR de unidade/equipamento.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      if (intent.kind === "unit") {
+        controlsRef.current?.stop();
+        controlsRef.current = null;
+        navigated = true;
+        routeWithUnitCode(intent.code, replace);
+        return;
+      }
+
+      if (intent.kind === "request_id") {
+        const destination = `/requests/${encodeURIComponent(intent.id)}`;
+        controlsRef.current?.stop();
+        controlsRef.current = null;
+        navigated = true;
+        if (replace) router.replace(destination);
+        else router.push(destination);
+        return;
+      }
+
+      if (intent.kind === "substitution") {
+        const destination = `/scan/substitution/${encodeURIComponent(intent.id)}`;
+        controlsRef.current?.stop();
+        controlsRef.current = null;
+        navigated = true;
+        if (replace) router.replace(destination);
+        else router.push(destination);
+        return;
+      }
+
+      if (intent.kind === "movement") {
+        const destination = `/movements?q=${encodeURIComponent(intent.id)}`;
+        controlsRef.current?.stop();
+        controlsRef.current = null;
+        navigated = true;
+        if (replace) router.replace(destination);
+        else router.push(destination);
+        return;
+      }
+
+      if (intent.kind === "request") {
+        const destination = await resolveRequestDestination(intent.ref);
+        if (destination) {
+          controlsRef.current?.stop();
+          controlsRef.current = null;
+          navigated = true;
+          if (replace) router.replace(destination);
+          else router.push(destination);
+          return;
+        }
+        toast({
+          title: "Requisição não encontrada",
+          description: `Não foi possível resolver o código ${intent.ref}.`,
+          variant: "destructive",
+        });
+        return;
+      }
+
+      if (intent.kind === "product") {
+        const destination = await resolveProductDestination(intent.sku);
+        if (destination) {
+          controlsRef.current?.stop();
+          controlsRef.current = null;
+          navigated = true;
+          if (replace) router.replace(destination);
+          else router.push(destination);
+          return;
+        }
+        toast({
+          title: "Produto não encontrado",
+          description: `SKU ${intent.sku} não existe neste tenant.`,
+          variant: "destructive",
+        });
+        return;
+      }
+
       toast({
-        title: "Código inválido",
-        description: "Usa um UUID válido da unidade.",
+        title: "QR inválido",
+        description: "Formato não suportado. Tipos aceites: UUID, URL, REQ/GTMI, SKU, SUB, MOV e JSON.",
         variant: "destructive",
       });
-      return;
+    } finally {
+      if (fromScanner && !navigated) {
+        scanLockTimerRef.current = setTimeout(() => {
+          scanLockRef.current = false;
+          scanLockTimerRef.current = null;
+        }, 1200);
+      }
+      setIsRouting(false);
     }
-    router.push(`/scan/${encodeURIComponent(trimmed)}`);
   };
 
   const openManual = () => {
-    navigateToCode(manualCode);
+    void navigateToCode(manualCode, false);
   };
 
   const retryCamera = () => {
@@ -223,9 +362,7 @@ export default function ScanCameraPage() {
         const reader = new BrowserMultiFormatReader();
         const result = await (reader as any).decodeFromImageUrl(url);
         const text = result?.getText?.() ?? String(result);
-        const trimmed = text?.trim();
-        if (!trimmed || !isUuid(trimmed)) throw new Error("QR inválido: não contém UUID válido");
-        router.replace(`/scan/${encodeURIComponent(trimmed)}`);
+        await navigateToCode(text ?? "", true);
       } finally {
         URL.revokeObjectURL(url);
       }
@@ -306,19 +443,22 @@ export default function ScanCameraPage() {
 
           <div className="flex flex-col gap-2 sm:flex-row">
             <Input
-              placeholder="Ou introduz o código manualmente (UUID)"
+              placeholder="Ou introduz código (UUID, REQ/GTMI, SKU, SUB, MOV, JSON)"
               value={manualCode}
               onChange={(e) => setManualCode(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") openManual();
               }}
             />
-            <Button onClick={openManual} className="sm:w-[180px]">
-              Abrir
+            <Button onClick={openManual} className="sm:w-[180px]" disabled={isRouting}>
+              {isRouting ? "A abrir…" : "Abrir"}
             </Button>
           </div>
 
-          <div className="flex items-center justify-end">
+          <div className="flex items-center justify-end gap-2">
+            <Button variant="outline" onClick={() => router.push("/scan/substitution")}>
+              Requisição de Substituição
+            </Button>
             <Button variant="outline" onClick={() => router.push("/movements")}
             >
               Ver movimentos

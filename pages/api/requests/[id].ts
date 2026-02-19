@@ -240,6 +240,7 @@ const updateSchema = z.object({
       z.null(),
     ])
     .optional(),
+  requestType: z.enum(["STANDARD", "RETURN"]).optional(),
 
   requestingServiceId: z.number().int().optional(),
   requesterName: z.string().max(120).nullable().optional(),
@@ -280,6 +281,7 @@ const updateSchema = z.object({
         unit: z.string().max(60).nullable().optional(),
         reference: z.string().max(120).nullable().optional(),
         destination: z.string().max(120).nullable().optional(),
+        role: z.enum(["NORMAL", "OLD", "NEW"]).optional(),
       })
     )
     .optional(),
@@ -293,6 +295,7 @@ const updateSchema = z.object({
         unit: z.string().max(60).nullable().optional(),
         reference: z.string().max(120).nullable().optional(),
         destination: z.string().max(120).nullable().optional(),
+        role: z.enum(["NORMAL", "OLD", "NEW"]).optional(),
       })
     )
     .optional(),
@@ -485,7 +488,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const updateData: any = { ...rest };
       const existingBefore = await prisma.request.findFirst({
         where: { id, tenantId },
-        select: { status: true, userId: true, gtmiNumber: true },
+        select: { status: true, userId: true, gtmiNumber: true, requestType: true, pickupSignedAt: true },
       });
       if (!existingBefore) {
         return res.status(404).json({ error: "Request not found" });
@@ -509,6 +512,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             error: "Request is signed and cannot be edited. Void the signature to make changes.",
           });
         }
+      }
+
+      if (
+        Object.prototype.hasOwnProperty.call(updateData, "status") &&
+        updateData.status === "FULFILLED" &&
+        existingBefore.requestType === "RETURN" &&
+        !pickupSign &&
+        !existingBefore.pickupSignedAt
+      ) {
+        return res.status(400).json({
+          error: "Requisição de devolução exige assinatura de levantamento antes de marcar como cumprida.",
+        });
       }
 
       if (Object.prototype.hasOwnProperty.call(updateData, "title")) {
@@ -703,6 +718,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                 const v = it.destination;
                 data.destination = typeof v === "string" ? (v.trim() ? v.trim() : null) : v === null ? null : undefined;
               }
+              if (Object.prototype.hasOwnProperty.call(it, "role")) {
+                const v = it.role;
+                data.role = typeof v === "string" ? v : undefined;
+              }
 
               // No-op updates are allowed.
               return tx.requestItem.updateMany({
@@ -730,6 +749,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             select: {
               id: true,
               userId: true,
+              requestType: true,
               gtmiNumber: true,
               items: {
                 select: {
@@ -737,12 +757,53 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                   productId: true,
                   quantity: true,
                   destination: true,
+                  role: true,
                 },
               },
             },
           });
           if (!existingRequest) {
             return { updatedCount: 0 };
+          }
+
+          const targetRequestType = (updateData.requestType ?? existingRequest.requestType) as "STANDARD" | "RETURN";
+
+          if (targetRequestType === "RETURN") {
+            const hasOld = replaceItems.some((it) => (it.role ?? "NORMAL") === "OLD");
+            const hasNew = replaceItems.some((it) => (it.role ?? "NORMAL") === "NEW");
+            if (!hasOld || !hasNew) {
+              throw new Error("Requisição de devolução exige itens ANTIGOS e NOVOS.");
+            }
+
+            const nextProductIds = replaceItems.map((it) => it.productId);
+            const products = await tx.product.findMany({
+              where: { tenantId, id: { in: Array.from(new Set(nextProductIds)) } },
+              select: { id: true },
+            });
+            const productIds = new Set(products.map((p) => p.id));
+            for (const item of replaceItems) {
+              if (!productIds.has(item.productId)) {
+                throw new Error("One or more products were not found");
+              }
+            }
+
+            await tx.requestItem.deleteMany({ where: { requestId: existingRequest.id } });
+            await tx.requestItem.createMany({
+              data: replaceItems.map((it) => ({
+                requestId: existingRequest.id,
+                productId: it.productId,
+                quantity: BigInt(it.quantity) as any,
+                notes: typeof it.notes === "string" ? (it.notes.trim() ? it.notes.trim() : null) : it.notes ?? null,
+                unit: typeof it.unit === "string" ? (it.unit.trim() ? it.unit.trim() : null) : it.unit ?? null,
+                reference:
+                  typeof it.reference === "string" ? (it.reference.trim() ? it.reference.trim() : null) : it.reference ?? null,
+                destination:
+                  typeof it.destination === "string" ? (it.destination.trim() ? it.destination.trim() : null) : it.destination ?? null,
+                role: it.role ?? "NORMAL",
+              })),
+            });
+
+            return { updatedCount: updatedRequest.count };
           }
 
           const performerUserId = session.id;
@@ -862,6 +923,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             unit?: string | null;
             reference?: string | null;
             destination?: string | null;
+            role?: "NORMAL" | "OLD" | "NEW";
           }> = [];
 
           // === Allocate stock for new items ===
@@ -947,6 +1009,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                 reference:
                   typeof item.reference === "string" ? (item.reference.trim() ? item.reference.trim() : null) : item.reference ?? null,
                 destination: unit.code,
+                role: item.role ?? "NORMAL",
               });
             } else {
               const product = await tx.product.findUnique({ where: { id: item.productId }, select: { quantity: true } });
@@ -988,6 +1051,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                   typeof item.reference === "string" ? (item.reference.trim() ? item.reference.trim() : null) : item.reference ?? null,
                 destination:
                   typeof item.destination === "string" ? (item.destination.trim() ? item.destination.trim() : null) : item.destination ?? null,
+                role: item.role ?? "NORMAL",
               });
             }
           }
@@ -1001,8 +1065,141 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
               unit: it.unit ?? null,
               reference: it.reference ?? null,
               destination: it.destination ?? null,
+              role: it.role ?? "NORMAL",
             })),
           });
+        }
+
+        // For RETURN requests, restock OLD items only when the request is finalized.
+        // This runs once on transition to FULFILLED (e.g., after pickup signature).
+        if (existingBefore.status !== "FULFILLED") {
+          const finalized = await tx.request.findFirst({
+            where: { id, tenantId },
+            select: {
+              id: true,
+              gtmiNumber: true,
+              status: true,
+              requestType: true,
+              userId: true,
+              items: {
+                select: {
+                  id: true,
+                  productId: true,
+                  quantity: true,
+                  destination: true,
+                  role: true,
+                  notes: true,
+                },
+              },
+            },
+          });
+
+          if (finalized && finalized.status === "FULFILLED" && finalized.requestType === "RETURN") {
+            const txAny = tx as any;
+            const oldItems = finalized.items.filter((it) => (it.role ?? "NORMAL") === "OLD");
+            const targetItems = oldItems.length > 0 ? oldItems : finalized.items;
+            const stockReason = `Requisição ${finalized.gtmiNumber} (devolução concluída)`;
+
+            for (const it of targetItems) {
+              const qty = Number(it.quantity);
+              if (!Number.isFinite(qty) || qty <= 0) continue;
+
+              const unitCount = Number(
+                await txAny.productUnit.count({
+                  where: { tenantId, productId: it.productId },
+                })
+              );
+              const isUnitTracked = unitCount > 0;
+
+              if (isUnitTracked) {
+                if (qty !== 1) {
+                  throw new Error("Para devolução de itens com QR, use uma linha por unidade (Qtd=1).");
+                }
+
+                const code = typeof it.destination === "string" ? it.destination.trim() : "";
+                if (!code) {
+                  throw new Error("Item devolvido sem código de unidade (destination).");
+                }
+
+                const unit = await txAny.productUnit.findFirst({
+                  where: { tenantId, productId: it.productId, code },
+                  select: { id: true, status: true, invoiceId: true, assignedToUserId: true },
+                });
+                if (!unit) {
+                  throw new Error("Unidade devolvida não encontrada para reposição de stock.");
+                }
+
+                // Idempotency/compatibility guard:
+                // - IN_STOCK: already restocked, skip
+                // - SCRAPPED/LOST: old unit was disposed during substitution, do not restock again
+                // - ACQUIRED/IN_REPAIR: can be brought back to stock
+                if (unit.status !== "IN_STOCK") {
+                  if (unit.status === "SCRAPPED" || unit.status === "LOST") {
+                    continue;
+                  }
+                  if (unit.status !== "ACQUIRED" && unit.status !== "IN_REPAIR") {
+                    throw new Error("Estado da unidade não permite reposição para stock.");
+                  }
+
+                  await txAny.productUnit.update({
+                    where: { id: unit.id },
+                    data: { status: "IN_STOCK", assignedToUserId: null },
+                    select: { id: true },
+                  });
+
+                  await txAny.stockMovement.create({
+                    data: {
+                      type: "RETURN",
+                      quantity: BigInt(1) as any,
+                      tenantId,
+                      productId: it.productId,
+                      unitId: unit.id,
+                      invoiceId: unit.invoiceId ?? null,
+                      requestId: finalized.id,
+                      performedByUserId: session.id,
+                      assignedToUserId: unit.assignedToUserId ?? finalized.userId,
+                      reason: it.notes?.trim() || stockReason,
+                    },
+                    select: { id: true },
+                  });
+
+                  const productAfter = await tx.product.update({
+                    where: { id: it.productId },
+                    data: { quantity: { increment: BigInt(1) as any } },
+                    select: { quantity: true },
+                  });
+                  await tx.product.update({
+                    where: { id: it.productId },
+                    data: { status: computeProductStatus(Number(productAfter.quantity)) },
+                  });
+                }
+              } else {
+                await txAny.stockMovement.create({
+                  data: {
+                    type: "RETURN",
+                    quantity: BigInt(qty) as any,
+                    tenantId,
+                    productId: it.productId,
+                    requestId: finalized.id,
+                    performedByUserId: session.id,
+                    assignedToUserId: finalized.userId,
+                    reason: it.notes?.trim() || stockReason,
+                  },
+                  select: { id: true },
+                });
+
+                const productAfter = await tx.product.update({
+                  where: { id: it.productId },
+                  data: { quantity: { increment: BigInt(qty) as any } },
+                  select: { quantity: true },
+                });
+                await tx.product.update({
+                  where: { id: it.productId },
+                  data: { status: computeProductStatus(Number(productAfter.quantity)) },
+                });
+              }
+            }
+          }
         }
 
         return { updatedCount: updatedRequest.count };
@@ -1199,8 +1396,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           error.message === "Stock insuficiente para um dos produtos selecionados." ||
           error.message === "Sem unidades em stock para um dos produtos selecionados." ||
           error.message === "Para produtos com QR (unidades), use linhas separadas (Qtd=1 por unidade)." ||
+          error.message === "Para devolução de itens com QR, use uma linha por unidade (Qtd=1)." ||
           error.message === "Cannot restore unit-tracked item without destination code" ||
-          error.message === "Cannot restore unit (not found or not acquired)"
+          error.message === "Cannot restore unit (not found or not acquired)" ||
+          error.message === "Item devolvido sem código de unidade (destination)." ||
+          error.message === "Unidade devolvida não encontrada para reposição de stock." ||
+          error.message === "Estado da unidade não permite reposição para stock."
         ) {
           return res.status(400).json({ error: error.message });
         }

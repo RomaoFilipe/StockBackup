@@ -20,7 +20,8 @@
     "test:user-intake": "bash scripts/test-user-intake.sh",
     "test:admin-workflows": "bash scripts/test-admin-workflows.sh",
     "test:scan-workflow": "bash scripts/test-scan-workflow.sh",
-    "backfill:request-owners": "node scripts/backfill-request-owners.js"
+    "backfill:request-owners": "node scripts/backfill-request-owners.js",
+    "test:return-flow": "bash scripts/test-return-signature-restock.sh"
   },
   "dependencies": {
     "@clerk/clerk-sdk-node": "^5.1.6",
@@ -65,6 +66,7 @@
     "nodemailer": "^6.9.4",
     "papaparse": "^5.5.3",
     "pdf-lib": "^1.17.1",
+    "puppeteer": "^24.2.0",
     "qrcode": "^1.5.4",
     "react": "19.1.2",
     "react-dom": "19.1.2",
