@@ -701,6 +701,25 @@ export default function ApiDocsPage() {
             success: { status: 200, data: "application/pdf" },
             error: { status: 401, data: "{ error: string }" }
           }
+        },
+        {
+          method: "GET",
+          path: "/api/reports/ticket-operations",
+          description: "Relatório consolidado de tickets, requisições associadas e intervenções/auditoria (ADMIN only)",
+          parameters: [
+            { name: "query.from", type: "string", required: false, description: "ISO date (start)" },
+            { name: "query.to", type: "string", required: false, description: "ISO date (end)" },
+            { name: "query.status", type: "OPEN|IN_PROGRESS|WAITING_CUSTOMER|ESCALATED|RESOLVED|CLOSED", required: false, description: "Filtro por estado do ticket" },
+            { name: "query.level", type: "L1|L2|L3", required: false, description: "Filtro por nível N1/N2/N3" },
+            { name: "query.priority", type: "LOW|NORMAL|HIGH|CRITICAL", required: false, description: "Filtro por prioridade" },
+            { name: "query.assignedToUserId", type: "string", required: false, description: "UUID do técnico responsável" },
+            { name: "query.includeClosed", type: "boolean", required: false, description: "Por omissão fechado = não incluído" },
+            { name: "query.limit", type: "number", required: false, description: "1-1000 (default 200)" }
+          ],
+          response: {
+            success: { status: 200, data: "{ summary, breakdowns, items[] }" },
+            error: { status: 403, data: "{ error: string }" }
+          }
         }
       ]
     },
@@ -1023,9 +1042,9 @@ export default function ApiDocsPage() {
       <div className="container mx-auto p-6 space-y-6">
         {/* Header */}
         <div className="text-center space-y-4">
-          <h1 className="text-4xl font-bold text-primary">Stockly API Documentation</h1>
+          <h1 className="text-4xl font-bold text-primary">CMCHUB API Documentation</h1>
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-            Comprehensive API documentation for the Stockly inventory management system.
+            Comprehensive API documentation for the CMCHUB inventory management system.
             Most endpoints require authentication via an HTTP-only session cookie.
           </p>
         </div>

@@ -310,7 +310,7 @@ export default function StoragePage() {
           <div className="storage-topbar-left">
             <div className="storage-avatar-chip">
               <UserRound className="h-4 w-4" />
-              <span>Stockly Team</span>
+              <span>CMCHUB Team</span>
             </div>
           </div>
           <div className="storage-topbar-search">

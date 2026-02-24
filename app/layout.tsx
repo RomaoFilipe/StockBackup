@@ -20,9 +20,9 @@ const geistMono = localFont({
 });
 
 export const metadata = {
-  title: "Stockly - Inventory Management System",
+  title: "CMCHUB - Inventory Management System",
   description:
-    "Stockly is a modern Next.js web application for efficient product inventory management. Features include product listing, filtering, sorting, secure authentication, and responsive design.",
+    "CMCHUB is a modern Next.js web application for efficient product inventory management. Features include product listing, filtering, sorting, secure authentication, and responsive design.",
   authors: [
     {
       name: "Arnob Mahmud",
@@ -31,7 +31,7 @@ export const metadata = {
     },
   ],
   keywords: [
-    "Stockly",
+    "CMCHUB",
     "Inventory Management",
     "Next.js",
     "React",
@@ -45,31 +45,31 @@ export const metadata = {
     "Arnob Mahmud",
   ],
   icons: {
-    icon: "/favicon.ico",
-    apple: "/favicon.ico",
+    icon: "/branding/favicon.ico",
+    apple: "/branding/favicon.ico",
     other: [
-      { rel: "icon", url: "/favicon.ico" },
+      { rel: "icon", url: "/branding/favicon.ico" },
     ],
   },
   openGraph: {
-    title: "Stockly - Inventory Management System",
+    title: "CMCHUB - Inventory Management System",
     description:
-      "Efficiently manage your product inventory with Stockly, a secure and responsive Next.js web application.",
+      "Efficiently manage your product inventory with CMCHUB, a secure and responsive Next.js web application.",
     url: "https://stockly-inventory.vercel.app/",
     images: [
       {
         url: "https://github.com/user-attachments/assets/7495dcfb-c7cb-44e6-a1ef-d82930a8ada7",
         width: 1200,
         height: 630,
-        alt: "Stockly Screenshot",
+        alt: "CMCHUB Screenshot",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "Stockly - Inventory Management System",
+    title: "CMCHUB - Inventory Management System",
     description:
-      "Efficiently manage your product inventory with Stockly, a secure and responsive Next.js web application.",
+      "Efficiently manage your product inventory with CMCHUB, a secure and responsive Next.js web application.",
     images: [
       "https://github.com/user-attachments/assets/7495dcfb-c7cb-44e6-a1ef-d82930a8ada7",
     ],

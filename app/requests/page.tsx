@@ -232,6 +232,7 @@ export default function RequestsPage() {
 
   const [origin, setOrigin] = useState("");
   const focusId = searchParams?.get("focus");
+  const ticketIdFromQuery = searchParams?.get("ticketId") || "";
 
   const isAdmin = user?.role === "ADMIN";
 
@@ -738,6 +739,10 @@ export default function RequestsPage() {
       router.replace(`/login?redirect=${encodeURIComponent("/requests")}`);
       return;
     }
+    if (user?.role === "USER") {
+      router.replace("/requests/estado");
+      return;
+    }
 
     const envBase = String(process.env.NEXT_PUBLIC_APP_URL ?? "")
       .trim()
@@ -755,7 +760,7 @@ export default function RequestsPage() {
 
     void loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAuthLoading, isLoggedIn, isAdmin, loadAll]);
+  }, [isAuthLoading, isLoggedIn, isAdmin, loadAll, router, user?.role]);
 
   useEffect(() => {
     if (isAuthLoading || !isLoggedIn) return;
@@ -922,6 +927,7 @@ export default function RequestsPage() {
         supplierOption1: supplierOption1 ? supplierOption1.trim() : undefined,
         supplierOption2: supplierOption2 ? supplierOption2.trim() : undefined,
         supplierOption3: supplierOption3 ? supplierOption3.trim() : undefined,
+        ticketId: ticketIdFromQuery || undefined,
         items: submitItems.map((it) => ({
           productId: it.productId,
           quantity: it.quantity,

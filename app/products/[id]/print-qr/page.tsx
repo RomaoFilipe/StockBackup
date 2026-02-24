@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
+import Image from "next/image";
 import QRCode from "qrcode";
 import axiosInstance from "@/utils/axiosInstance";
 import { Button } from "@/components/ui/button";
@@ -195,7 +196,7 @@ export default function PrintProductUnitsQrPage() {
           height: 68px;
         }
 
-        .label-qr img {
+        .label-qr-img {
           width: 68px;
           height: 68px;
           display: block;
@@ -267,7 +268,16 @@ export default function PrintProductUnitsQrPage() {
           {units.map((u) => (
             <div className="label" key={u.id}>
               <div className="label-qr">
-                {qrDataUrlByCode[u.code] ? <img src={qrDataUrlByCode[u.code]} alt={u.code} /> : null}
+                {qrDataUrlByCode[u.code] ? (
+                  <Image
+                    src={qrDataUrlByCode[u.code]}
+                    alt={u.code}
+                    width={68}
+                    height={68}
+                    unoptimized
+                    className="label-qr-img"
+                  />
+                ) : null}
               </div>
               <div className="label-meta">
                 <div className="label-product">{product?.name ?? "Produto"}</div>

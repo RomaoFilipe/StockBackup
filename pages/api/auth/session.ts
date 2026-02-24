@@ -2,6 +2,9 @@ import { NextApiRequest, NextApiResponse } from "next";
 import { getSessionServer } from "@/utils/auth";
 import Cookies from "cookies";
 import crypto from "crypto";
+import { prisma } from "@/prisma/client";
+import { ensureTenantRbacBootstrap, getUserPermissionGrants } from "@/utils/rbac";
+import { ensureRequestWorkflowDefinition } from "@/utils/workflow";
 
 export default async function handler(
   req: NextApiRequest,
@@ -59,6 +62,17 @@ export default async function handler(
       });
     }
 
+    await ensureTenantRbacBootstrap(prisma, (user as any).tenantId);
+    await ensureRequestWorkflowDefinition(prisma, (user as any).tenantId);
+    const permissionGrants = await getUserPermissionGrants(prisma, {
+      id: user.id,
+      tenantId: (user as any).tenantId,
+      role: user.role,
+    });
+    const permissions = Array.from(
+      new Set(permissionGrants.map((grant) => grant.key).filter((key) => key !== "*"))
+    );
+
     // Return user data without sensitive information
     res.status(200).json({
       id: user.id,
@@ -69,6 +83,8 @@ export default async function handler(
       isActive: (user as any).isActive,
       mustChangePassword: (user as any).mustChangePassword || false,
       requestingServiceId: (user as any).requestingServiceId || null,
+      permissions,
+      permissionGrants,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
     });

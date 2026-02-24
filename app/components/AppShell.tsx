@@ -1,107 +1,275 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
+import Image from "next/image";
 import { usePathname, useRouter, useSearchParams, type ReadonlyURLSearchParams } from "next/navigation";
 import {
   Activity,
   Archive,
   BarChart3,
   BookOpen,
+  Building2,
   Boxes,
+  BriefcaseBusiness,
+  ChevronDown,
+  ClipboardList,
   Database,
-  LayoutGrid,
-  ScanLine,
+  ListTodo,
   LogOut,
   Menu,
   Package,
+  PlusCircle,
+  Shield,
+  KeyRound,
+  Ticket,
   Users,
-  Plus,
-  FileText,
+  UserCircle2,
+  UserRoundCheck,
   Rows3,
   StretchHorizontal,
+  MessageCircle,
+  HandCoins,
+  FileCheck,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
   DialogDescription,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import axiosInstance from "@/utils/axiosInstance";
 import { useAuth } from "@/app/authContext";
 import { ModeToggle } from "@/app/AppHeader/ModeToggle";
 import { RequestsNotificationsBell } from "@/app/AppHeader/RequestsNotificationsBell";
+import PresenceWidget from "@/app/components/PresenceWidget";
+import TicketMessageNotifier from "@/app/components/TicketMessageNotifier";
+import { Separator } from "@/components/ui/separator";
 
 interface AppShellProps {
   children: React.ReactNode;
 }
 
 type NavItem = {
+  id: string;
   label: string;
-  href: string;
+  href?: string;
   icon: React.ElementType;
+  roles?: Array<"ADMIN" | "USER">;
+  disabled?: boolean;
+  onSelect?: () => void;
   active?: (pathname: string, searchParams: ReadonlyURLSearchParams | null) => boolean;
 };
 
-const navItemsBase: NavItem[] = [
+type NavSection = {
+  id: string;
+  label: string;
+  icon: React.ElementType;
+  roles?: Array<"ADMIN" | "USER">;
+  defaultOpen?: boolean;
+  items: NavItem[];
+};
+
+const navSections: NavSection[] = [
   {
-    label: "Produtos",
-    href: "/",
-    icon: Package,
+    id: "work",
+    label: "Trabalho",
+    icon: BriefcaseBusiness,
+    defaultOpen: true,
+    items: [
+      {
+        id: "backlog",
+        label: "Backlog",
+        href: "/requests/estado",
+        icon: ListTodo,
+      },
+      {
+        id: "requests",
+        label: "Requisições",
+        href: "/requests",
+        icon: ClipboardList,
+        roles: ["ADMIN"],
+      },
+      {
+        id: "tickets",
+        label: "Tickets",
+        href: "/tickets",
+        icon: Ticket,
+      },
+      {
+        id: "my-items",
+        label: "Meus Itens",
+        href: "/requests/estado",
+        icon: UserRoundCheck,
+      },
+      {
+        id: "mydesktop",
+        label: "Recebidos",
+        href: "/mydesktop",
+        icon: StretchHorizontal,
+        roles: ["USER"],
+      },
+      {
+        id: "new",
+        label: "Criar Novo",
+        href: "/requests/novo",
+        icon: PlusCircle,
+      },
+    ],
   },
   {
-    label: "Requisições",
-    href: "/requests",
-    icon: LayoutGrid,
-  },
-  {
-    label: "Equipamentos",
-    href: "/equipamentos",
+    id: "inventory",
+    label: "Inventário & Ativos",
     icon: Boxes,
+    roles: ["ADMIN"],
+    items: [
+      {
+        id: "products",
+        label: "Produtos",
+        href: "/",
+        icon: Package,
+      },
+      {
+        id: "equipment",
+        label: "Equipamentos",
+        href: "/equipamentos",
+        icon: Boxes,
+      },
+      {
+        id: "storage",
+        label: "Armazém",
+        href: "/storage",
+        icon: Archive,
+        active: (pathname, currentSearchParams) =>
+          pathname === "/storage" && currentSearchParams?.get("tab") !== "documents",
+      },
+    ],
   },
   {
-    label: "Storage",
-    href: "/storage",
-    icon: Archive,
-    active: (pathname, searchParams) =>
-      pathname === "/storage" && searchParams?.get("tab") !== "documents",
+    id: "municipal-governance",
+    label: "Governança Municipal",
+    icon: Building2,
+    defaultOpen: true,
+    items: [
+      {
+        id: "governance",
+        label: "Visão Geral",
+        href: "/governanca",
+        icon: Building2,
+      },
+      {
+        id: "assets",
+        label: "Património",
+        href: "/governanca/patrimonio",
+        icon: Archive,
+      },
+      {
+        id: "finance",
+        label: "Financiamento",
+        href: "/governanca/financiamento",
+        icon: HandCoins,
+      },
+      {
+        id: "external-internal-requests",
+        label: "Requerimentos",
+        href: "/governanca/requerimentos",
+        icon: FileCheck,
+      },
+      {
+        id: "rbac",
+        label: "Permissões",
+        href: "/governanca/permissoes",
+        icon: KeyRound,
+        roles: ["ADMIN"],
+      },
+    ],
   },
   {
-    label: "Scan",
-    href: "/scan",
-    icon: ScanLine,
+    id: "people",
+    label: "Pessoas & Análise",
+    icon: Users,
+    items: [
+      {
+        id: "people",
+        label: "Pessoas",
+        href: "/users",
+        icon: Users,
+        roles: ["ADMIN"],
+      },
+      {
+        id: "insights",
+        label: "Insights",
+        href: "/business-insights",
+        icon: BarChart3,
+      },
+      {
+        id: "reports",
+        label: "Relatórios",
+        href: "/reports/ticket-operations",
+        icon: Rows3,
+        roles: ["ADMIN"],
+      },
+    ],
   },
   {
-    label: "Insights",
-    href: "/business-insights",
-    icon: BarChart3,
-  },
-  {
-    label: "Documentação API",
-    href: "/api-docs",
-    icon: BookOpen,
-  },
-  {
-    label: "Estado da API",
-    href: "/api-status",
-    icon: Activity,
+    id: "system",
+    label: "Sistema",
+    icon: Shield,
+    roles: ["ADMIN"],
+    items: [
+      {
+        id: "database",
+        label: "Base de Dados",
+        href: "/DB",
+        icon: Database,
+      },
+      {
+        id: "api-docs",
+        label: "Documentação da API",
+        href: "/api-docs",
+        icon: BookOpen,
+      },
+      {
+        id: "api-status",
+        label: "Estado da API",
+        href: "/api-status",
+        icon: Activity,
+      },
+      {
+        id: "logs",
+        label: "Logs (em breve)",
+        icon: Archive,
+        disabled: true,
+      },
+    ],
   },
 ];
 
-const navItemsUserOnly: NavItem[] = [
+const getPersonalItems = (openProfile: () => void): NavItem[] => [
   {
-    label: "Estado do Pedido",
-    href: "/requests/estado",
-    icon: FileText,
+    id: "profile",
+    label: "Perfil",
+    icon: UserCircle2,
+    onSelect: openProfile,
   },
   {
-    label: "Novo Pedido",
-    href: "/requests/novo",
-    icon: Plus,
+    id: "my-items",
+    label: "Meus Itens",
+    href: "/requests/estado",
+    icon: UserRoundCheck,
+  },
+  {
+    id: "presence",
+    label: "Estado Pessoal (em breve)",
+    icon: Activity,
+    disabled: true,
   },
 ];
 
@@ -117,6 +285,15 @@ export default function AppShell({ children }: AppShellProps) {
   const [changing, setChanging] = React.useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [density, setDensity] = useState<"comfortable" | "compact">("comfortable");
+  const [userTicketCreateOpen, setUserTicketCreateOpen] = useState(false);
+  const [creatingUserTicket, setCreatingUserTicket] = useState(false);
+  const [userTicketTitle, setUserTicketTitle] = useState("");
+  const [userTicketDescription, setUserTicketDescription] = useState("");
+  const [userTicketPriority, setUserTicketPriority] = useState<"LOW" | "NORMAL" | "HIGH" | "CRITICAL">("NORMAL");
+  const [userTicketType, setUserTicketType] = useState<"INCIDENT" | "REQUEST" | "QUESTION" | "CHANGE">("QUESTION");
+  const [sectionOpen, setSectionOpen] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(navSections.map((section) => [section.id, section.defaultOpen ?? false])),
+  );
 
   React.useEffect(() => {
     const stored = window.localStorage.getItem("ui-density");
@@ -131,84 +308,71 @@ export default function AppShell({ children }: AppShellProps) {
     window.localStorage.setItem("ui-density", density);
   }, [density]);
 
-  const navItems = useMemo(() => {
-    // USER (desktop/sidebar)
-    if (user?.role === "USER") {
-      return [...navItemsUserOnly];
-    }
-
-    // ADMIN (desktop/sidebar)
-    const items = [...navItemsBase];
-    
-    if (user?.role === "ADMIN") {
-      const scanIndex = items.findIndex((i) => i.href === "/scan");
-      const insertDbAt = scanIndex >= 0 ? scanIndex : items.length;
-      items.splice(insertDbAt, 0, {
-        label: "DB",
-        href: "/DB",
-        icon: Database,
-      });
-
-      const insightsIndex = items.findIndex((i) => i.href === "/business-insights");
-      const insertUsersAt = insightsIndex >= 0 ? insightsIndex : items.length;
-      items.splice(insertUsersAt, 0, {
-        label: "Pessoas",
-        href: "/users",
-        icon: Users,
-      });
-    }
-
-    // Keep access to request state/new on desktop too
-    items.push(...navItemsUserOnly);
-
-    return items;
+  const visibleSections = useMemo(() => {
+    const role = user?.role;
+    if (!role) return [];
+    return navSections
+      .filter((section) => !section.roles || section.roles.includes(role))
+      .map((section) => ({
+        ...section,
+        items: section.items.filter((item) => !item.roles || item.roles.includes(role)),
+      }))
+      .filter((section) => section.items.length > 0);
   }, [user?.role]);
+
+  const personalItems = useMemo(() => getPersonalItems(() => setPwOpen(true)), []);
+
+  React.useEffect(() => {
+    const defaults = Object.fromEntries(visibleSections.map((section) => [section.id, section.defaultOpen ?? false]));
+    setSectionOpen((current) => ({ ...defaults, ...current }));
+  }, [visibleSections]);
 
   const mobilePrimaryNav = useMemo<NavItem[]>(() => {
     if (user?.role === "USER") {
       return [
-        { label: "Estado do Pedido", href: "/requests/estado", icon: FileText },
-        { label: "Novo Pedido", href: "/requests/novo", icon: Plus },
+        { id: "backlog", label: "Backlog", href: "/requests/estado", icon: ListTodo },
+        { id: "mydesktop", label: "Recebidos", href: "/mydesktop", icon: StretchHorizontal },
+        { id: "tickets", label: "Tickets", href: "/tickets", icon: MessageCircle },
+        { id: "new", label: "Criar", href: "/requests/novo", icon: PlusCircle },
       ];
     }
 
-    // Admin: Scan fixed in the middle
     return [
-      { label: "Produtos", href: "/", icon: Package },
-      { label: "Requisições", href: "/requests", icon: LayoutGrid },
-      { label: "Scan", href: "/scan", icon: ScanLine },
-      { label: "Equipamentos", href: "/equipamentos", icon: Boxes },
+      { id: "backlog", label: "Backlog", href: "/requests", icon: ListTodo },
+      { id: "tickets", label: "Tickets", href: "/tickets", icon: MessageCircle },
+      { id: "products", label: "Produtos", href: "/", icon: Package },
+      { id: "new", label: "Criar", href: "/requests/novo", icon: PlusCircle },
     ];
   }, [user?.role]);
 
   const mobileSecondaryNav = useMemo<NavItem[]>(() => {
-    if (user?.role === "USER") return [];
-    return [
-      {
-        label: "Storage",
-        href: "/storage",
-        icon: Archive,
-        active: (pathname, searchParams) =>
-          pathname === "/storage" && searchParams?.get("tab") !== "documents",
-      },
-      { label: "DB", href: "/DB", icon: Database },
-      { label: "Estado do Pedido", href: "/requests/estado", icon: FileText },
-      { label: "Novo Pedido", href: "/requests/novo", icon: Plus },
-      { label: "Pessoas", href: "/users", icon: Users },
-      { label: "Insights", href: "/business-insights", icon: BarChart3 },
-      { label: "Documentação API", href: "/api-docs", icon: BookOpen },
-      { label: "Estado da API", href: "/api-status", icon: Activity },
-    ];
-  }, [user?.role]);
+    return [...visibleSections.flatMap((section) => section.items), ...personalItems].filter((item) => !item.disabled);
+  }, [visibleSections, personalItems]);
 
   const isActive = (item: NavItem) => {
     if (item.active) return item.active(pathname || "", searchParams);
+    if (!item.href) return false;
     if (!pathname) return false;
     return pathname === item.href || pathname.startsWith(`${item.href}/`);
   };
 
   const handleNavigation = (href: string) => {
     router.push(href);
+  };
+
+  const handleItemSelect = (item: NavItem) => {
+    if (item.disabled) return;
+    if (item.onSelect) {
+      item.onSelect();
+      return;
+    }
+    if (item.href) {
+      handleNavigation(item.href);
+    }
+  };
+
+  const toggleSection = (sectionId: string) => {
+    setSectionOpen((current) => ({ ...current, [sectionId]: !current[sectionId] }));
   };
 
   const handleLogout = async () => {
@@ -230,6 +394,46 @@ export default function AppShell({ children }: AppShellProps) {
       });
     } finally {
       setIsLoggingOut(false);
+    }
+  };
+
+  const handleCreateUserTicket = async () => {
+    if (!userTicketTitle.trim()) {
+      toast({
+        title: "Título obrigatório",
+        description: "Preenche o título do ticket.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setCreatingUserTicket(true);
+    try {
+      const res = await axiosInstance.post("/tickets", {
+        title: userTicketTitle.trim(),
+        description: userTicketDescription.trim() || undefined,
+        priority: userTicketPriority,
+        type: userTicketType,
+      });
+
+      const ticketId = res?.data?.id as string | undefined;
+      setUserTicketCreateOpen(false);
+      setUserTicketTitle("");
+      setUserTicketDescription("");
+      setUserTicketPriority("NORMAL");
+      setUserTicketType("QUESTION");
+
+      if (ticketId) {
+        router.push(`/tickets/${ticketId}`);
+        return;
+      }
+
+      toast({ title: "Ticket criado" });
+    } catch (error: any) {
+      const msg = error?.response?.data?.error || "Não foi possível criar ticket.";
+      toast({ title: "Erro", description: msg, variant: "destructive" });
+    } finally {
+      setCreatingUserTicket(false);
     }
   };
 
@@ -271,66 +475,101 @@ export default function AppShell({ children }: AppShellProps) {
       <div className="flex min-h-screen min-w-0">
         <aside className="hidden lg:flex lg:w-72 lg:flex-col lg:border-r lg:border-border/50 lg:bg-[hsl(var(--surface-1)/0.82)] lg:backdrop-blur-xl">
           <div className="flex items-center gap-3 px-6 py-6">
-            <div className="flex size-11 items-center justify-center rounded-2xl bg-primary/16 text-primary electric-ring">
-              <Boxes className="h-5 w-5" />
+            <div className="flex size-11 items-center justify-center overflow-hidden rounded-2xl bg-primary/16 text-primary electric-ring">
+              <Image
+                src="/branding/favicon.ico"
+                alt="CMCHUB Logo"
+                width={44}
+                height={44}
+                className="h-full w-full object-contain"
+                priority
+              />
             </div>
             <div>
-              <div className="text-lg font-semibold tracking-tight">Stockly</div>
+              <div className="text-lg font-semibold tracking-tight">CMCHUB</div>
               <div className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Inventory Suite</div>
             </div>
           </div>
 
-          <nav className="flex-1 space-y-4 px-4 pb-6">
-            <div className="space-y-1 animate-fade-up">
-              {navItems.map((item) => {
-                const Icon = item.icon;
-                const active = isActive(item);
+          <nav className="flex flex-1 flex-col px-4 pb-6">
+            <div className="space-y-3 animate-fade-up">
+              {visibleSections.map((section) => {
+                const SectionIcon = section.icon;
+                const isOpen = sectionOpen[section.id] ?? false;
                 return (
-                  <button
-                    key={item.label}
-                    type="button"
-                    onClick={() => handleNavigation(item.href)}
-                    className={`flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm transition-all ${
-                      active
-                        ? "bg-primary/15 text-primary shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.28)]"
-                        : "text-muted-foreground hover:bg-muted/65 hover:text-foreground"
-                    }`}
-                    aria-current={active ? "page" : undefined}
-                  >
-                    <Icon className={`h-4 w-4 ${active ? "scale-105" : ""}`} />
-                    <span>{item.label}</span>
-                  </button>
+                  <section key={section.id} className="space-y-1">
+                    <button
+                      type="button"
+                      onClick={() => toggleSection(section.id)}
+                      className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground hover:bg-muted/45 hover:text-foreground"
+                      aria-expanded={isOpen}
+                    >
+                      <span className="flex items-center gap-2">
+                        <SectionIcon className="h-3.5 w-3.5" />
+                        {section.label}
+                      </span>
+                      <ChevronDown className={`h-3.5 w-3.5 transition-transform ${isOpen ? "rotate-180" : ""}`} />
+                    </button>
+                    {isOpen ? (
+                      <div className="space-y-1 pl-1">
+                        {section.items.map((item) => {
+                          const Icon = item.icon;
+                          const active = isActive(item);
+                          return (
+                            <button
+                              key={item.id}
+                              type="button"
+                              onClick={() => handleItemSelect(item)}
+                              disabled={item.disabled}
+                              className={`flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm transition-all ${
+                                active
+                                  ? "bg-primary/15 text-primary shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.28)]"
+                                  : "text-muted-foreground hover:bg-muted/65 hover:text-foreground"
+                              } ${item.disabled ? "cursor-not-allowed opacity-45 hover:bg-transparent hover:text-muted-foreground" : ""}`}
+                              aria-current={active ? "page" : undefined}
+                            >
+                              <Icon className={`h-4 w-4 ${active ? "scale-105" : ""}`} />
+                              <span>{item.label}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+                  </section>
                 );
               })}
             </div>
+            <div className="mt-auto pt-4">
+              <Separator className="mb-3 opacity-60" />
+              <div className="space-y-1">
+                <div className="px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+                  Área Pessoal
+                </div>
+                {personalItems.map((item) => {
+                  const Icon = item.icon;
+                  const active = isActive(item);
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => handleItemSelect(item)}
+                      disabled={item.disabled}
+                      className={`flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm transition-all ${
+                        active
+                          ? "bg-primary/15 text-primary shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.28)]"
+                          : "text-muted-foreground hover:bg-muted/65 hover:text-foreground"
+                      } ${item.disabled ? "cursor-not-allowed opacity-45 hover:bg-transparent hover:text-muted-foreground" : ""}`}
+                      aria-current={active ? "page" : undefined}
+                    >
+                      <Icon className={`h-4 w-4 ${active ? "scale-105" : ""}`} />
+                      <span>{item.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           </nav>
 
-          <div className="border-t border-border/60 px-4 py-4">
-            <div className="flex items-center gap-3 rounded-xl bg-[hsl(var(--surface-2)/0.75)] px-3 py-2">
-              <div className="flex size-9 items-center justify-center rounded-full bg-primary/15 text-sm font-semibold text-primary">
-                {user?.name?.slice(0, 1) || "S"}
-              </div>
-              <div className="min-w-0">
-                <div className="truncate text-sm font-medium">
-                  {user?.name || "Utilizador"}
-                </div>
-                <div className="truncate text-xs text-muted-foreground">
-                  {user?.email || ""}
-                </div>
-              </div>
-            </div>
-          <div className="mt-3 flex items-center gap-2">
-              <ModeToggle />
-              <Button
-                variant="outline"
-                className="w-full"
-                onClick={handleLogout}
-                disabled={isLoggingOut}
-              >
-                {isLoggingOut ? "A sair..." : "Sair"}
-              </Button>
-            </div>
-          </div>
         </aside>
 
         <div className="flex min-h-screen min-w-0 flex-1 flex-col overflow-x-hidden">
@@ -392,19 +631,20 @@ export default function AppShell({ children }: AppShellProps) {
                       <DialogTitle className="text-base">Navegação</DialogTitle>
                     </DialogHeader>
                     <div className="mt-2 grid gap-2">
-                      {[...mobilePrimaryNav, ...mobileSecondaryNav].map((item) => {
+                      {mobileSecondaryNav.map((item) => {
                         const Icon = item.icon;
                         const active = isActive(item);
                         return (
                           <button
-                            key={item.label}
+                            key={item.id}
                             type="button"
-                            onClick={() => handleNavigation(item.href)}
+                            onClick={() => handleItemSelect(item)}
+                            disabled={item.disabled}
                             className={`flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm transition-colors ${
                               active
                                 ? "bg-primary/12 text-primary"
                                 : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
-                            }`}
+                            } ${item.disabled ? "cursor-not-allowed opacity-45 hover:bg-transparent hover:text-muted-foreground" : ""}`}
                           >
                             <Icon className="h-4 w-4" />
                             {item.label}
@@ -499,9 +739,9 @@ export default function AppShell({ children }: AppShellProps) {
             const active = isActive(item);
             return (
               <button
-                key={item.label}
+                key={item.id}
                 type="button"
-                onClick={() => handleNavigation(item.href)}
+                onClick={() => handleItemSelect(item)}
                 className={`flex flex-col items-center gap-1 rounded-xl px-2 py-2 text-[11px] font-medium ${
                   active
                     ? "bg-primary/12 text-primary"
@@ -533,14 +773,15 @@ export default function AppShell({ children }: AppShellProps) {
                   const active = isActive(item);
                   return (
                     <button
-                      key={item.label}
+                      key={item.id}
                       type="button"
-                      onClick={() => handleNavigation(item.href)}
+                      onClick={() => handleItemSelect(item)}
+                      disabled={item.disabled}
                       className={`flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm transition-colors ${
                         active
                           ? "bg-primary/12 text-primary"
                           : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
-                      }`}
+                      } ${item.disabled ? "cursor-not-allowed opacity-45 hover:bg-transparent hover:text-muted-foreground" : ""}`}
                     >
                       <Icon className="h-4 w-4" />
                       {item.label}
@@ -570,6 +811,73 @@ export default function AppShell({ children }: AppShellProps) {
           </Dialog>
         </div>
       </nav>
+
+      {user?.role === "USER" ? (
+        <button
+          type="button"
+          onClick={() => setUserTicketCreateOpen(true)}
+          className="fixed bottom-24 right-4 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-xl ring-1 ring-primary/35 transition hover:scale-[1.03] hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-70 lg:bottom-24 lg:right-6"
+          aria-label="Criar ticket"
+          title="Criar ticket"
+        >
+          <MessageCircle className="h-6 w-6" />
+        </button>
+      ) : null}
+
+      <PresenceWidget />
+      <TicketMessageNotifier />
+
+      <Dialog open={userTicketCreateOpen} onOpenChange={setUserTicketCreateOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Criar Ticket</DialogTitle>
+            <DialogDescription>Abre um ticket para suporte técnico.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Input
+              value={userTicketTitle}
+              onChange={(e) => setUserTicketTitle(e.target.value)}
+              placeholder="Título do problema"
+            />
+            <Textarea
+              value={userTicketDescription}
+              onChange={(e) => setUserTicketDescription(e.target.value)}
+              placeholder="Descreve o problema"
+              rows={4}
+            />
+            <div className="grid grid-cols-2 gap-2">
+              <select
+                className="h-10 rounded-md border bg-background px-2 text-sm"
+                value={userTicketPriority}
+                onChange={(e) => setUserTicketPriority(e.target.value as typeof userTicketPriority)}
+              >
+                <option value="LOW">Baixa</option>
+                <option value="NORMAL">Normal</option>
+                <option value="HIGH">Alta</option>
+                <option value="CRITICAL">Crítica</option>
+              </select>
+              <select
+                className="h-10 rounded-md border bg-background px-2 text-sm"
+                value={userTicketType}
+                onChange={(e) => setUserTicketType(e.target.value as typeof userTicketType)}
+              >
+                <option value="QUESTION">Dúvida</option>
+                <option value="INCIDENT">Incidente</option>
+                <option value="REQUEST">Pedido</option>
+                <option value="CHANGE">Mudança</option>
+              </select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setUserTicketCreateOpen(false)} disabled={creatingUserTicket}>
+              Cancelar
+            </Button>
+            <Button onClick={() => void handleCreateUserTicket()} disabled={creatingUserTicket || !userTicketTitle.trim()}>
+              {creatingUserTicket ? "A criar..." : "Criar ticket"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

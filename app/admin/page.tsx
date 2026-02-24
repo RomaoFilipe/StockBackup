@@ -135,6 +135,27 @@ type PublicRequestRow = {
   }>;
 };
 
+type AdminTicketRow = {
+  id: string;
+  code: string;
+  title: string;
+  description: string | null;
+  status: "OPEN" | "IN_PROGRESS" | "WAITING_CUSTOMER" | "ESCALATED" | "RESOLVED" | "CLOSED";
+  priority: "LOW" | "NORMAL" | "HIGH" | "CRITICAL";
+  type: "INCIDENT" | "REQUEST" | "QUESTION" | "CHANGE";
+  level: "L1" | "L2" | "L3";
+  createdAt: string;
+  updatedAt: string;
+  firstResponseDueAt?: string | null;
+  resolutionDueAt?: string | null;
+  slaBreachedAt?: string | null;
+  lastEscalatedAt?: string | null;
+  slaEscalationCount?: number;
+  assignedTo?: { id: string; name?: string | null; email: string } | null;
+  createdBy?: { id: string; name?: string | null; email: string } | null;
+  _count?: { messages?: number };
+};
+
 const formatPublicStatus = (status: PublicRequestStatus) => {
   switch (status) {
     case "RECEIVED":
@@ -158,6 +179,38 @@ function formatDateTimePt(iso?: string | null) {
   return d.toLocaleString("pt-PT");
 }
 
+const formatTicketStatus = (status: AdminTicketRow["status"]) => {
+  switch (status) {
+    case "OPEN":
+      return { label: "Aberto", className: "bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-500/20" };
+    case "IN_PROGRESS":
+      return { label: "Em progresso", className: "bg-cyan-500/10 text-cyan-700 dark:text-cyan-300 border-cyan-500/20" };
+    case "WAITING_CUSTOMER":
+      return { label: "A aguardar", className: "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20" };
+    case "ESCALATED":
+      return { label: "Escalado", className: "bg-fuchsia-500/10 text-fuchsia-700 dark:text-fuchsia-300 border-fuchsia-500/20" };
+    case "RESOLVED":
+      return { label: "Resolvido", className: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20" };
+    case "CLOSED":
+      return { label: "Fechado", className: "bg-slate-500/10 text-slate-700 dark:text-slate-300 border-slate-500/20" };
+    default:
+      return { label: status, className: "bg-muted/50 text-muted-foreground border-border/60" };
+  }
+};
+
+const formatTicketPriority = (priority: AdminTicketRow["priority"]) => {
+  switch (priority) {
+    case "LOW":
+      return { label: "Baixa", className: "bg-slate-500/10 text-slate-700 border-slate-500/20" };
+    case "HIGH":
+      return { label: "Alta", className: "bg-orange-500/10 text-orange-700 border-orange-500/20" };
+    case "CRITICAL":
+      return { label: "Crítica", className: "bg-rose-500/10 text-rose-700 border-rose-500/20" };
+    default:
+      return { label: "Normal", className: "bg-blue-500/10 text-blue-700 border-blue-500/20" };
+  }
+};
+
 export default function AdminPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -172,12 +225,16 @@ export default function AdminPage() {
     if (typeof window !== "undefined") setOrigin(window.location.origin);
   }, []);
 
-  const [tab, setTab] = useState<"services" | "categories" | "suppliers" | "received">("services");
+  const [tab, setTab] = useState<"services" | "categories" | "suppliers" | "tickets" | "received">("services");
 
   useEffect(() => {
     const tabParam = searchParams?.get("tab");
     if (tabParam === "received") {
       setTab("received");
+      return;
+    }
+    if (tabParam === "tickets") {
+      setTab("tickets");
     }
   }, [searchParams]);
 
@@ -185,6 +242,7 @@ export default function AdminPage() {
   const [servicesPage, setServicesPage] = useState<number>(1);
   const [categoriesPage, setCategoriesPage] = useState<number>(1);
   const [suppliersPage, setSuppliersPage] = useState<number>(1);
+  const [ticketsPage, setTicketsPage] = useState<number>(1);
 
   const [services, setServices] = useState<RequestingServiceRow[]>([]);
   const [servicesLoading, setServicesLoading] = useState(true);
@@ -277,6 +335,20 @@ export default function AdminPage() {
   const [publicRequestsLoading, setPublicRequestsLoading] = useState(false);
   const [publicRequestsLoadedOnce, setPublicRequestsLoadedOnce] = useState(false);
   const [publicRequestsStatus, setPublicRequestsStatus] = useState<PublicRequestStatus>("RECEIVED");
+  const [tickets, setTickets] = useState<AdminTicketRow[]>([]);
+  const [ticketsLoading, setTicketsLoading] = useState(false);
+  const [ticketsLoadedOnce, setTicketsLoadedOnce] = useState(false);
+  const [ticketsFilter, setTicketsFilter] = useState("");
+  const [ticketsStatusFilter, setTicketsStatusFilter] = useState<
+    "ALL" | "OPEN" | "IN_PROGRESS" | "WAITING_CUSTOMER" | "ESCALATED" | "RESOLVED" | "CLOSED"
+  >("ALL");
+  const [runningTicketSla, setRunningTicketSla] = useState(false);
+  const [createTicketTitle, setCreateTicketTitle] = useState("");
+  const [createTicketDescription, setCreateTicketDescription] = useState("");
+  const [createTicketPriority, setCreateTicketPriority] = useState<"LOW" | "NORMAL" | "HIGH" | "CRITICAL">("NORMAL");
+  const [createTicketType, setCreateTicketType] = useState<"INCIDENT" | "REQUEST" | "QUESTION" | "CHANGE">("QUESTION");
+  const [creatingTicket, setCreatingTicket] = useState(false);
+  const [closingTicketId, setClosingTicketId] = useState<string | null>(null);
 
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [detailsRow, setDetailsRow] = useState<PublicRequestRow | null>(null);
@@ -387,6 +459,78 @@ export default function AdminPage() {
     }
   };
 
+  const loadTickets = async () => {
+    setTicketsLoading(true);
+    try {
+      const res = await axiosInstance.get("/tickets");
+      const rows = Array.isArray(res.data) ? (res.data as AdminTicketRow[]) : [];
+      setTickets(rows);
+      setTicketsLoadedOnce(true);
+    } catch (error: any) {
+      const msg = error?.response?.data?.error || "Não foi possível carregar tickets.";
+      toast({ title: "Erro", description: msg, variant: "destructive" });
+      setTickets([]);
+    } finally {
+      setTicketsLoading(false);
+    }
+  };
+
+  const runTicketSlaNow = async () => {
+    setRunningTicketSla(true);
+    try {
+      await axiosInstance.post("/tickets/sla/run");
+      await loadTickets();
+      toast({ title: "SLA executado", description: "Escalonamento automático atualizado." });
+    } catch (error: any) {
+      const msg = error?.response?.data?.error || "Não foi possível executar SLA.";
+      toast({ title: "Erro", description: msg, variant: "destructive" });
+    } finally {
+      setRunningTicketSla(false);
+    }
+  };
+
+  const createTicket = async () => {
+    if (!createTicketTitle.trim()) return;
+    setCreatingTicket(true);
+    try {
+      await axiosInstance.post("/tickets", {
+        title: createTicketTitle.trim(),
+        description: createTicketDescription.trim() || undefined,
+        priority: createTicketPriority,
+        type: createTicketType,
+      });
+      setCreateTicketTitle("");
+      setCreateTicketDescription("");
+      setCreateTicketPriority("NORMAL");
+      setCreateTicketType("QUESTION");
+      await loadTickets();
+      toast({ title: "Ticket criado" });
+    } catch (error: any) {
+      const msg = error?.response?.data?.error || "Não foi possível criar ticket.";
+      toast({ title: "Erro", description: msg, variant: "destructive" });
+    } finally {
+      setCreatingTicket(false);
+    }
+  };
+
+  const closeTicket = async (ticketId: string) => {
+    if (closingTicketId) return;
+    setClosingTicketId(ticketId);
+    try {
+      await axiosInstance.patch(`/tickets/${ticketId}`, {
+        status: "CLOSED",
+        closeNote: "Encerrado pelo ADMIN na lista de tickets.",
+      });
+      await loadTickets();
+      toast({ title: "Ticket encerrado" });
+    } catch (error: any) {
+      const msg = error?.response?.data?.error || "Não foi possível encerrar ticket.";
+      toast({ title: "Erro", description: msg, variant: "destructive" });
+    } finally {
+      setClosingTicketId(null);
+    }
+  };
+
   useEffect(() => {
     if (isAuthLoading) return;
     if (!isLoggedIn || !isAdmin) return;
@@ -394,6 +538,15 @@ export default function AdminPage() {
     loadPublicRequests();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, publicRequestsStatus, isAuthLoading, isLoggedIn, isAdmin]);
+
+  useEffect(() => {
+    if (isAuthLoading) return;
+    if (!isLoggedIn || !isAdmin) return;
+    if (tab !== "tickets") return;
+    if (ticketsLoadedOnce) return;
+    loadTickets();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, isAuthLoading, isLoggedIn, isAdmin, ticketsLoadedOnce]);
 
   useEffect(() => {
     if (tab !== "received") return;
@@ -580,6 +733,23 @@ export default function AdminPage() {
     });
   }, [suppliers, suppliersFilter]);
 
+  const filteredTickets = useMemo(() => {
+    const q = ticketsFilter.trim().toLowerCase();
+    return tickets.filter((t) => {
+      if (ticketsStatusFilter !== "ALL" && t.status !== ticketsStatusFilter) return false;
+      if (!q) return true;
+      return (
+        t.code.toLowerCase().includes(q) ||
+        t.title.toLowerCase().includes(q) ||
+        String(t.description ?? "").toLowerCase().includes(q) ||
+        String(t.createdBy?.name ?? "").toLowerCase().includes(q) ||
+        String(t.createdBy?.email ?? "").toLowerCase().includes(q) ||
+        String(t.assignedTo?.name ?? "").toLowerCase().includes(q) ||
+        String(t.assignedTo?.email ?? "").toLowerCase().includes(q)
+      );
+    });
+  }, [tickets, ticketsFilter, ticketsStatusFilter]);
+
   const servicesTotalPages = useMemo(() => {
     return Math.max(1, Math.ceil(filteredServices.length / pageSize));
   }, [filteredServices.length, pageSize]);
@@ -591,6 +761,10 @@ export default function AdminPage() {
   const suppliersTotalPages = useMemo(() => {
     return Math.max(1, Math.ceil(filteredSuppliers.length / pageSize));
   }, [filteredSuppliers.length, pageSize]);
+
+  const ticketsTotalPages = useMemo(() => {
+    return Math.max(1, Math.ceil(filteredTickets.length / pageSize));
+  }, [filteredTickets.length, pageSize]);
 
   const pagedServices = useMemo(() => {
     const currentPage = Math.min(Math.max(1, servicesPage), servicesTotalPages);
@@ -610,6 +784,12 @@ export default function AdminPage() {
     return filteredSuppliers.slice(start, start + pageSize);
   }, [filteredSuppliers, pageSize, suppliersPage, suppliersTotalPages]);
 
+  const pagedTickets = useMemo(() => {
+    const currentPage = Math.min(Math.max(1, ticketsPage), ticketsTotalPages);
+    const start = (currentPage - 1) * pageSize;
+    return filteredTickets.slice(start, start + pageSize);
+  }, [filteredTickets, pageSize, ticketsPage, ticketsTotalPages]);
+
   useEffect(() => {
     setServicesPage(1);
   }, [servicesFilter, servicesActiveFilter, servicesSort]);
@@ -623,6 +803,10 @@ export default function AdminPage() {
   }, [suppliersFilter]);
 
   useEffect(() => {
+    setTicketsPage(1);
+  }, [ticketsFilter, ticketsStatusFilter]);
+
+  useEffect(() => {
     if (!expandedSupplierId) return;
     if (suppliers.some((s) => s.id === expandedSupplierId)) return;
     setExpandedSupplierId(null);
@@ -632,6 +816,7 @@ export default function AdminPage() {
     setServicesPage(1);
     setCategoriesPage(1);
     setSuppliersPage(1);
+    setTicketsPage(1);
   }, [tab, pageSize]);
 
   useEffect(() => {
@@ -644,9 +829,10 @@ export default function AdminPage() {
       services: services.length,
       categories: categories.length,
       suppliers: suppliers.length,
+      tickets: tickets.length,
       received: publicRequests.length,
     }),
-    [services.length, categories.length, suppliers.length, publicRequests.length]
+    [services.length, categories.length, suppliers.length, tickets.length, publicRequests.length]
   );
 
   const PaginationBar = (props: {
@@ -1140,6 +1326,8 @@ export default function AdminPage() {
                       ? categoriesFilter
                       : tab === "suppliers"
                         ? suppliersFilter
+                        : tab === "tickets"
+                          ? ticketsFilter
                         : ""
                 }
                 onChange={(e) => {
@@ -1147,6 +1335,7 @@ export default function AdminPage() {
                   if (tab === "services") setServicesFilter(value);
                   if (tab === "categories") setCategoriesFilter(value);
                   if (tab === "suppliers") setSuppliersFilter(value);
+                  if (tab === "tickets") setTicketsFilter(value);
                 }}
                 placeholder="Pesquisa rápida no separador atual..."
                 className="min-w-0 border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
@@ -1174,6 +1363,7 @@ export default function AdminPage() {
               { key: "services", label: "Serviços", count: tabCounts.services },
               { key: "categories", label: "Categorias", count: tabCounts.categories },
               { key: "suppliers", label: "Fornecedores", count: tabCounts.suppliers },
+              { key: "tickets", label: "Tickets", count: tabCounts.tickets },
               { key: "received", label: "Recebidos", count: tabCounts.received },
             ].map((item) => (
               <button
@@ -1781,6 +1971,200 @@ export default function AdminPage() {
                 </div>
               ) : null}
             </div>
+          </section>
+        ) : null}
+
+        {tab === "tickets" ? (
+          <section className="rounded-2xl border border-border/60 bg-[hsl(var(--surface-1)/0.82)] p-4">
+            <div className="mb-3 grid gap-2 md:grid-cols-[1fr,1fr,160px,160px,140px]">
+              <Input
+                value={createTicketTitle}
+                onChange={(e) => setCreateTicketTitle(e.target.value)}
+                placeholder="Título do ticket"
+                className="h-10"
+              />
+              <Input
+                value={createTicketDescription}
+                onChange={(e) => setCreateTicketDescription(e.target.value)}
+                placeholder="Descrição (opcional)"
+                className="h-10"
+              />
+              <select
+                className="h-10 rounded-md border bg-background px-2 text-sm"
+                value={createTicketPriority}
+                onChange={(e) => setCreateTicketPriority(e.target.value as typeof createTicketPriority)}
+              >
+                <option value="LOW">Baixa</option>
+                <option value="NORMAL">Normal</option>
+                <option value="HIGH">Alta</option>
+                <option value="CRITICAL">Crítica</option>
+              </select>
+              <select
+                className="h-10 rounded-md border bg-background px-2 text-sm"
+                value={createTicketType}
+                onChange={(e) => setCreateTicketType(e.target.value as typeof createTicketType)}
+              >
+                <option value="QUESTION">Dúvida</option>
+                <option value="INCIDENT">Incidente</option>
+                <option value="REQUEST">Pedido</option>
+                <option value="CHANGE">Mudança</option>
+              </select>
+              <Button onClick={createTicket} disabled={creatingTicket || !createTicketTitle.trim()} className="h-10">
+                {creatingTicket ? "A criar..." : "Novo Ticket"}
+              </Button>
+            </div>
+
+            <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-2">
+                <div className="text-sm text-muted-foreground">Estado</div>
+                <select
+                  className="h-9 rounded-md border bg-background px-3 text-sm"
+                  value={ticketsStatusFilter}
+                  onChange={(e) => setTicketsStatusFilter(e.target.value as typeof ticketsStatusFilter)}
+                >
+                  <option value="ALL">Todos</option>
+                  <option value="OPEN">Aberto</option>
+                  <option value="IN_PROGRESS">Em progresso</option>
+                  <option value="WAITING_CUSTOMER">A aguardar cliente</option>
+                  <option value="ESCALATED">Escalado</option>
+                  <option value="RESOLVED">Resolvido</option>
+                  <option value="CLOSED">Fechado</option>
+                </select>
+              </div>
+              <Button variant="outline" onClick={loadTickets} disabled={ticketsLoading}>
+                Recarregar
+              </Button>
+              <Button variant="outline" onClick={runTicketSlaNow} disabled={runningTicketSla || ticketsLoading}>
+                {runningTicketSla ? "A processar..." : "Executar SLA"}
+              </Button>
+            </div>
+
+            <div className="hidden overflow-auto rounded-xl border border-border/60 md:block">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[170px]">Nº Ticket</TableHead>
+                    <TableHead>Título / Criador</TableHead>
+                    <TableHead className="w-[110px]">Nível</TableHead>
+                    <TableHead className="w-[140px]">Estado</TableHead>
+                    <TableHead className="w-[120px]">Prioridade</TableHead>
+                    <TableHead className="w-[170px]">Data</TableHead>
+                    <TableHead className="w-[170px]">SLA Resolução</TableHead>
+                    <TableHead className="w-[230px] text-right">Ações</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {pagedTickets.map((ticket) => {
+                    const statusMeta = formatTicketStatus(ticket.status);
+                    const priorityMeta = formatTicketPriority(ticket.priority);
+                    return (
+                      <TableRow key={ticket.id}>
+                        <TableCell className="font-mono text-xs">{ticket.code}</TableCell>
+                        <TableCell>
+                          <div className="text-sm font-medium">{ticket.title}</div>
+                          <div className="text-xs text-muted-foreground">
+                            {ticket.createdBy?.name || ticket.createdBy?.email || "Sem criador"}
+                            {ticket.assignedTo ? ` · ${ticket.assignedTo.name || ticket.assignedTo.email}` : " · sem responsável"}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline">{ticket.level}</Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className={statusMeta.className}>
+                            {statusMeta.label}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className={priorityMeta.className}>
+                            {priorityMeta.label}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">{formatDateTimePt(ticket.createdAt)}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {ticket.resolutionDueAt ? formatDateTimePt(ticket.resolutionDueAt) : "-"}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex justify-end gap-2">
+                            {ticket.status !== "CLOSED" ? (
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                disabled={closingTicketId === ticket.id}
+                                onClick={() => closeTicket(ticket.id)}
+                              >
+                                {closingTicketId === ticket.id ? "A encerrar..." : "Encerrar"}
+                              </Button>
+                            ) : null}
+                            <Button size="sm" variant="outline" onClick={() => router.push(`/tickets/${ticket.id}`)}>
+                              Ver
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+
+            <div className="space-y-2 md:hidden">
+              {pagedTickets.map((ticket) => {
+                const statusMeta = formatTicketStatus(ticket.status);
+                const priorityMeta = formatTicketPriority(ticket.priority);
+                return (
+                  <article key={ticket.id} className="rounded-xl border border-border/60 bg-[hsl(var(--surface-1)/0.8)] p-4 shadow-sm">
+                    <div className="font-mono text-xs text-muted-foreground">{ticket.code}</div>
+                    <div className="mt-1 text-base font-semibold">{ticket.title}</div>
+                    <div className="mt-1 text-xs text-muted-foreground">{ticket.createdBy?.name || ticket.createdBy?.email || "Sem criador"}</div>
+                    <div className="mt-2 flex items-center gap-2">
+                      <Badge variant="outline">{ticket.level}</Badge>
+                      <Badge variant="outline" className={statusMeta.className}>
+                        {statusMeta.label}
+                      </Badge>
+                      <Badge variant="outline" className={priorityMeta.className}>
+                        {priorityMeta.label}
+                      </Badge>
+                    </div>
+                    <div className="mt-2 text-xs text-muted-foreground">{formatDateTimePt(ticket.createdAt)}</div>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      SLA resolução: {ticket.resolutionDueAt ? formatDateTimePt(ticket.resolutionDueAt) : "-"}
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                      <Button size="sm" variant="outline" className="h-9 rounded-lg" onClick={() => router.push(`/tickets/${ticket.id}`)}>
+                        Ver ticket
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        className="h-9 rounded-lg"
+                        disabled={ticket.status === "CLOSED" || closingTicketId === ticket.id}
+                        onClick={() => closeTicket(ticket.id)}
+                      >
+                        {ticket.status === "CLOSED" ? "Encerrado" : closingTicketId === ticket.id ? "A encerrar..." : "Encerrar"}
+                      </Button>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+
+            {ticketsLoading ? (
+              <div className="mt-3 text-sm text-muted-foreground">A carregar tickets...</div>
+            ) : null}
+
+            {!ticketsLoading && !filteredTickets.length ? (
+              <div className="mt-3 rounded-xl border border-dashed border-border/80 p-8 text-center text-sm text-muted-foreground">
+                Sem tickets para os filtros selecionados.
+              </div>
+            ) : null}
+
+            <PaginationBar
+              page={ticketsPage}
+              setPage={setTicketsPage}
+              totalPages={ticketsTotalPages}
+              totalItems={filteredTickets.length}
+            />
           </section>
         ) : null}
 

@@ -3,6 +3,8 @@ export interface SessionUser {
   name?: string | null;
   email: string;
   role?: "USER" | "ADMIN";
+  permissions?: string[];
+  permissionGrants?: Array<{ key: string; requestingServiceId: number | null }>;
   createdAt?: string;
   updatedAt?: string;
 }

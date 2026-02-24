@@ -70,6 +70,7 @@ export function middleware(request: NextRequest) {
     "/api-docs",
     "/api-status",
     "/business-insights",
+    "/tickets",
     "/users",
     "/storage",
     "/DB",
@@ -78,6 +79,8 @@ export function middleware(request: NextRequest) {
     "/requests",
     "/scan",
     "/reports",
+    "/mydesktop",
+    "/governanca",
   ];
 
   // Check if the current path is a protected route
@@ -93,6 +96,25 @@ export function middleware(request: NextRequest) {
       loginUrl.searchParams.set("redirect", path);
       return withRequestId(NextResponse.redirect(loginUrl), requestId);
     }
+  }
+
+  // USER role must not access /requests list page directly.
+  if ((path === "/requests" || path === "/requests/") && request.cookies.get("user_role")?.value === "USER") {
+    const url = request.nextUrl.clone();
+    url.pathname = "/requests/estado";
+    url.search = request.nextUrl.search;
+    return withRequestId(NextResponse.redirect(url), requestId);
+  }
+
+  // USER role must not access inventory pages.
+  if (
+    request.cookies.get("user_role")?.value === "USER" &&
+    (path === "/" || path === "/equipamentos" || path === "/equipamentos/" || path === "/storage" || path === "/storage/")
+  ) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/requests/estado";
+    url.search = request.nextUrl.search;
+    return withRequestId(NextResponse.redirect(url), requestId);
   }
 
   return withRequestId(NextResponse.next({ request: { headers: requestHeaders } }), requestId);

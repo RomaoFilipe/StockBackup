@@ -9,6 +9,8 @@ import { getClientIp, ipMatches } from "@/utils/ip";
 import { notifyAdmin } from "@/utils/notifications";
 import { checkLoginLockout, clearLoginFailures, registerLoginFailure } from "@/utils/loginLockout";
 import { logError, logInfo, logWarn } from "@/utils/logger";
+import { ensureTenantRbacBootstrap } from "@/utils/rbac";
+import { ensureRequestWorkflowDefinition } from "@/utils/workflow";
 
 function resolveTenantSlug(req: NextApiRequest): string {
   const header = req.headers["x-tenant-slug"];
@@ -150,6 +152,9 @@ export default async function login(req: NextApiRequest, res: NextApiResponse) {
       logWarn("Login denied: invalid password", { tenantId: tenant.id, userId: user.id, clientIp }, req);
       return res.status(401).json({ error: "Invalid email or password" });
     }
+
+    await ensureTenantRbacBootstrap(prisma, tenant.id);
+    await ensureRequestWorkflowDefinition(prisma, tenant.id);
 
     const allowed = await prisma.allowedIp.findMany({
       where: {

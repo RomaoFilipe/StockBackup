@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
+import Image from "next/image";
 import axiosInstance from "@/utils/axiosInstance";
 import { Button } from "@/components/ui/button";
 import QRCode from "qrcode";
@@ -490,10 +491,13 @@ export default function PrintRequestPage() {
           <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginBottom: 10 }}>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               {logoOk ? (
-                <img
+                <Image
                   src={printLogoUrl}
                   alt="Logo do serviço"
                   className="print-logo"
+                  width={360}
+                  height={68}
+                  unoptimized
                   onError={() => setLogoOk(false)}
                 />
               ) : null}
@@ -503,7 +507,16 @@ export default function PrintRequestPage() {
               </div>
             </div>
             <div className="qr-box">
-              {verifyQrDataUrl ? <img src={verifyQrDataUrl} alt="QR de verificação" className="qr-img" /> : null}
+              {verifyQrDataUrl ? (
+                <Image
+                  src={verifyQrDataUrl}
+                  alt="QR de verificação"
+                  className="qr-img"
+                  width={92}
+                  height={92}
+                  unoptimized
+                />
+              ) : null}
               {checksum ? <div className="checksum">Código: {checksum}</div> : null}
               <div style={{ textAlign: "right" }}>
                 <div className="subtitle">Data/Hora do pedido</div>
@@ -620,10 +633,13 @@ export default function PrintRequestPage() {
                         <td>
                           {it.destination?.trim() ? (
                             <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                              {itemQrByCode[it.destination.trim()] ? (
-                                <img
+                          {itemQrByCode[it.destination.trim()] ? (
+                                <Image
                                   src={itemQrByCode[it.destination.trim()]}
                                   alt={`QR ${it.destination.trim()}`}
+                                  width={44}
+                                  height={44}
+                                  unoptimized
                                   style={{ width: 44, height: 44, imageRendering: "pixelated" }}
                                 />
                               ) : null}
@@ -666,9 +682,12 @@ export default function PrintRequestPage() {
                       {it.destination?.trim() ? (
                         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                           {itemQrByCode[it.destination.trim()] ? (
-                            <img
+                            <Image
                               src={itemQrByCode[it.destination.trim()]}
                               alt={`QR ${it.destination.trim()}`}
+                              width={44}
+                              height={44}
+                              unoptimized
                               style={{ width: 44, height: 44, imageRendering: "pixelated" }}
                             />
                           ) : null}
@@ -745,10 +764,13 @@ export default function PrintRequestPage() {
                 </div>
               ) : null}
               {request.pickupSignatureDataUrl ? (
-                <img
+                <Image
                   src={request.pickupSignatureDataUrl}
                   alt="Assinatura do responsável do pedido"
                   className="signature-img"
+                  width={420}
+                  height={120}
+                  unoptimized
                 />
               ) : null}
             </div>

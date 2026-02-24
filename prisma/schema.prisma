@@ -13,6 +13,35 @@ enum UserRole {
   ADMIN
 }
 
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  WAITING_CUSTOMER
+  ESCALATED
+  RESOLVED
+  CLOSED
+}
+
+enum TicketPriority {
+  LOW
+  NORMAL
+  HIGH
+  CRITICAL
+}
+
+enum TicketType {
+  INCIDENT
+  REQUEST
+  QUESTION
+  CHANGE
+}
+
+enum TicketLevel {
+  L1
+  L2
+  L3
+}
+
 enum IpAccessRequestStatus {
   PENDING
   APPROVED
@@ -42,6 +71,26 @@ model Tenant {
   notifications Notification[]
   storedFiles    StoredFile[]
   stockMovements StockMovement[]
+  tickets        Ticket[]
+  ticketMessages TicketMessage[]
+  ticketRequestLinks TicketRequestLink[]
+  ticketAudits       TicketAudit[]
+  accessPermissions  AccessPermission[]
+  accessRoles        AccessRole[]
+  accessRolePermissions AccessRolePermission[]
+  userRoleAssignments UserRoleAssignment[]
+  rbacAudits         RbacAudit[]
+  workflowDefinitions WorkflowDefinition[]
+  workflowStates     WorkflowStateDefinition[]
+  workflowTransitions WorkflowTransitionDefinition[]
+  workflowInstances  WorkflowInstance[]
+  workflowEvents     WorkflowEvent[]
+  municipalAssets    MunicipalAsset[]
+  municipalAssetEvents MunicipalAssetEvent[]
+  municipalAssetAssignments MunicipalAssetAssignment[]
+  financeProcesses   FinanceProcess[]
+  financeProcessEvents FinanceProcessEvent[]
+  presidencyDispatches PresidencyDispatch[]
 
   publicRequests           PublicRequest[]
 }
@@ -104,6 +153,20 @@ model User {
   submittedPublicRequests PublicRequest[] @relation("PublicRequestRequesterUser")
   handledPublicRequests           PublicRequest[]       @relation("PublicRequestHandledBy")
   generatedReports Report[] @relation("ReportGeneratedBy")
+  createdTickets  Ticket[] @relation("TicketCreatedBy")
+  assignedTickets Ticket[] @relation("TicketAssignedTo")
+  ticketMessages  TicketMessage[]
+  ticketRequestLinks TicketRequestLink[]
+  ticketAudits       TicketAudit[] @relation("TicketAuditActor")
+  roleAssignments      UserRoleAssignment[] @relation("UserRoleAssignmentUser")
+  roleAssignmentsGiven UserRoleAssignment[] @relation("UserRoleAssignmentAssignedBy")
+  rbacAudits         RbacAudit[] @relation("RbacAuditActor")
+  workflowEvents     WorkflowEvent[] @relation("WorkflowEventActor")
+  assetEvents        MunicipalAssetEvent[] @relation("MunicipalAssetEventActor")
+  assetAssignments   MunicipalAssetAssignment[]
+  assignedMunicipalAssets MunicipalAsset[] @relation("MunicipalAssetAssignedTo")
+  financeEvents      FinanceProcessEvent[] @relation("FinanceProcessEventActor")
+  presidencyDecisions PresidencyDispatch[] @relation("PresidencyDispatchDecidedBy")
 
   @@unique([tenantId, email])
   @@unique([tenantId, username])
@@ -337,6 +400,11 @@ model Request {
   acceptedFromPublicRequests PublicRequest[] @relation("PublicRequestAcceptedRequest")
   statusAudits RequestStatusAudit[]
   notifications Notification[]
+  ticketLinks TicketRequestLink[]
+  workflowInstances WorkflowInstance[]
+  financeProcesses FinanceProcess[]
+  presidencyDispatch PresidencyDispatch?
+  linkedAssets MunicipalAsset[]
 
   @@unique([tenantId, gtmiNumber])
   @@unique([tenantId, gtmiYear, gtmiSeq])
@@ -392,6 +460,10 @@ model RequestingService {
   invoices ProductInvoice[]
 
   publicRequests           PublicRequest[]
+  roleAssignments          UserRoleAssignment[]
+  municipalAssets          MunicipalAsset[]
+  financeProcesses         FinanceProcess[]
+  municipalAssetAssignments MunicipalAssetAssignment[]
 
   @@unique([codigo])
   @@index([ativo])
@@ -430,6 +502,7 @@ model PublicRequest {
   acceptedRequest   Request? @relation("PublicRequestAcceptedRequest", fields: [acceptedRequestId], references: [id], onDelete: SetNull)
 
   items PublicRequestItem[]
+  workflowInstances WorkflowInstance[]
 
   @@index([tenantId])
   @@index([requestingServiceId])
@@ -771,6 +844,126 @@ model RequestStatusAudit {
   @@index([changedByUserId])
 }
 
+model Ticket {
+  id String @id @default(uuid()) @db.Uuid
+
+  code        String
+  title       String
+  description String?
+
+  status   TicketStatus   @default(OPEN)
+  priority TicketPriority @default(NORMAL)
+  type     TicketType     @default(QUESTION)
+  level    TicketLevel    @default(L1)
+
+  escalationReason String?
+  dueAt            DateTime?
+  firstResponseDueAt DateTime?
+  resolutionDueAt    DateTime?
+  firstResponseAt  DateTime?
+  resolvedAt       DateTime?
+  closedAt         DateTime?
+  slaBreachedAt    DateTime?
+  lastEscalatedAt  DateTime?
+  slaEscalationCount Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  createdByUserId String @db.Uuid
+  createdBy       User   @relation("TicketCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  assignedToUserId String? @db.Uuid
+  assignedTo       User?   @relation("TicketAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+
+  messages TicketMessage[]
+  requestLinks TicketRequestLink[]
+  audits       TicketAudit[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@index([status])
+  @@index([priority])
+  @@index([type])
+  @@index([level])
+  @@index([assignedToUserId])
+  @@index([createdByUserId])
+  @@index([createdAt])
+}
+
+model TicketMessage {
+  id String @id @default(uuid()) @db.Uuid
+
+  body String @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  ticketId String @db.Uuid
+  ticket   Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  authorUserId String @db.Uuid
+  author       User   @relation(fields: [authorUserId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId])
+  @@index([ticketId])
+  @@index([authorUserId])
+  @@index([createdAt])
+}
+
+model TicketRequestLink {
+  id String @id @default(uuid()) @db.Uuid
+  createdAt DateTime @default(now())
+
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  ticketId String @db.Uuid
+  ticket   Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  requestId String @db.Uuid
+  request   Request @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  linkedByUserId String? @db.Uuid
+  linkedBy       User?   @relation(fields: [linkedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([ticketId, requestId])
+  @@index([tenantId])
+  @@index([ticketId])
+  @@index([requestId])
+  @@index([createdAt])
+}
+
+model TicketAudit {
+  id String @id @default(uuid()) @db.Uuid
+  createdAt DateTime @default(now())
+
+  action String @db.VarChar(80)
+  note   String?
+  data   Json?
+
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  ticketId String @db.Uuid
+  ticket   Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  actorUserId String? @db.Uuid
+  actor       User?   @relation("TicketAuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([ticketId])
+  @@index([actorUserId])
+  @@index([createdAt])
+  @@index([action])
+}
+
 model Report {
   id        String   @id @default(uuid()) @db.Uuid
   createdAt DateTime @default(now())
@@ -811,4 +1004,451 @@ model AuthLockout {
   @@index([tenantId])
   @@index([email])
   @@index([lockedUntil])
+}
+
+model AccessPermission {
+  id          String   @id @default(uuid()) @db.Uuid
+  key         String   @db.VarChar(120)
+  name        String   @db.VarChar(120)
+  description String?  @db.Text
+  isSystem    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now()) @updatedAt
+
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  rolePermissions AccessRolePermission[]
+
+  @@unique([tenantId, key])
+  @@index([tenantId])
+}
+
+model AccessRole {
+  id          String   @id @default(uuid()) @db.Uuid
+  key         String   @db.VarChar(120)
+  name        String   @db.VarChar(120)
+  description String?  @db.Text
+  isSystem    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now()) @updatedAt
+
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  permissions AccessRolePermission[]
+  assignments UserRoleAssignment[]
+
+  @@unique([tenantId, key])
+  @@index([tenantId])
+}
+
+model AccessRolePermission {
+  id        String   @id @default(uuid()) @db.Uuid
+  createdAt DateTime @default(now())
+
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  roleId String @db.Uuid
+  role   AccessRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  permissionId String @db.Uuid
+  permission   AccessPermission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+  @@index([tenantId])
+  @@index([roleId])
+  @@index([permissionId])
+}
+
+model UserRoleAssignment {
+  id       String   @id @default(uuid()) @db.Uuid
+  isActive Boolean  @default(true)
+  note     String?
+  startsAt DateTime?
+  endsAt   DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  userId String @db.Uuid
+  user   User   @relation("UserRoleAssignmentUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  roleId String @db.Uuid
+  role   AccessRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  requestingServiceId Int?
+  requestingService RequestingService? @relation(fields: [requestingServiceId], references: [id], onDelete: SetNull)
+
+  assignedByUserId String? @db.Uuid
+  assignedBy       User?   @relation("UserRoleAssignmentAssignedBy", fields: [assignedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([userId])
+  @@index([roleId])
+  @@index([requestingServiceId])
+  @@index([isActive])
+  @@index([startsAt])
+  @@index([endsAt])
+}
+
+model RbacAudit {
+  id        String   @id @default(uuid()) @db.Uuid
+  action    String   @db.VarChar(80)
+  payload   Json?
+  note      String?
+  createdAt DateTime @default(now())
+
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  actorUserId String? @db.Uuid
+  actor       User?   @relation("RbacAuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([actorUserId])
+  @@index([createdAt])
+  @@index([action])
+}
+
+enum WorkflowTargetType {
+  REQUEST
+  PUBLIC_REQUEST
+  MUNICIPAL_ASSET
+  FINANCE_PROCESS
+}
+
+model WorkflowDefinition {
+  id         String             @id @default(uuid()) @db.Uuid
+  key        String             @db.VarChar(120)
+  name       String             @db.VarChar(120)
+  targetType WorkflowTargetType
+  version    Int                @default(1)
+  isActive   Boolean            @default(true)
+  createdAt  DateTime           @default(now())
+  updatedAt  DateTime           @default(now()) @updatedAt
+
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  states      WorkflowStateDefinition[]
+  transitions WorkflowTransitionDefinition[]
+  instances   WorkflowInstance[]
+
+  @@unique([tenantId, key, version])
+  @@index([tenantId])
+  @@index([targetType])
+  @@index([isActive])
+}
+
+model WorkflowStateDefinition {
+  id           String   @id @default(uuid()) @db.Uuid
+  code         String   @db.VarChar(120)
+  name         String   @db.VarChar(120)
+  sortOrder    Int
+  isInitial    Boolean  @default(false)
+  isTerminal   Boolean  @default(false)
+  requestStatus RequestStatus?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @default(now()) @updatedAt
+
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  workflowId String @db.Uuid
+  workflow   WorkflowDefinition @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+  instancesCurrent WorkflowInstance[] @relation("WorkflowInstanceCurrentState")
+  fromTransitions  WorkflowTransitionDefinition[] @relation("WorkflowTransitionFromState")
+  toTransitions    WorkflowTransitionDefinition[] @relation("WorkflowTransitionToState")
+  fromEvents       WorkflowEvent[] @relation("WorkflowEventFromState")
+  toEvents         WorkflowEvent[] @relation("WorkflowEventToState")
+
+  @@unique([workflowId, code])
+  @@index([tenantId])
+  @@index([workflowId, sortOrder])
+  @@index([requestStatus])
+}
+
+model WorkflowTransitionDefinition {
+  id            String   @id @default(uuid()) @db.Uuid
+  action        String   @db.VarChar(80)
+  requiredPermission String? @db.VarChar(120)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @default(now()) @updatedAt
+
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  workflowId String @db.Uuid
+  workflow   WorkflowDefinition @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+  fromStateId String @db.Uuid
+  fromState   WorkflowStateDefinition @relation("WorkflowTransitionFromState", fields: [fromStateId], references: [id], onDelete: Cascade)
+
+  toStateId String @db.Uuid
+  toState   WorkflowStateDefinition @relation("WorkflowTransitionToState", fields: [toStateId], references: [id], onDelete: Cascade)
+
+  @@unique([workflowId, fromStateId, action])
+  @@index([tenantId])
+  @@index([workflowId])
+  @@index([fromStateId])
+  @@index([toStateId])
+}
+
+model WorkflowInstance {
+  id        String   @id @default(uuid()) @db.Uuid
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+  completedAt DateTime?
+
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  definitionId String @db.Uuid
+  definition   WorkflowDefinition @relation(fields: [definitionId], references: [id], onDelete: Cascade)
+
+  currentStateId String @db.Uuid
+  currentState   WorkflowStateDefinition @relation("WorkflowInstanceCurrentState", fields: [currentStateId], references: [id], onDelete: Restrict)
+
+  requestId String? @db.Uuid
+  request   Request? @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  publicRequestId String? @db.Uuid
+  publicRequest   PublicRequest? @relation(fields: [publicRequestId], references: [id], onDelete: Cascade)
+
+  municipalAssetId String? @db.Uuid
+  municipalAsset   MunicipalAsset? @relation(fields: [municipalAssetId], references: [id], onDelete: Cascade)
+
+  financeProcessId String? @db.Uuid
+  financeProcess   FinanceProcess? @relation(fields: [financeProcessId], references: [id], onDelete: Cascade)
+
+  events WorkflowEvent[]
+
+  @@unique([requestId])
+  @@unique([publicRequestId])
+  @@unique([municipalAssetId])
+  @@unique([financeProcessId])
+  @@index([tenantId])
+  @@index([definitionId])
+  @@index([currentStateId])
+}
+
+model WorkflowEvent {
+  id        String   @id @default(uuid()) @db.Uuid
+  action    String   @db.VarChar(80)
+  note      String?
+  createdAt DateTime @default(now())
+
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  instanceId String @db.Uuid
+  instance   WorkflowInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+
+  fromStateId String? @db.Uuid
+  fromState   WorkflowStateDefinition? @relation("WorkflowEventFromState", fields: [fromStateId], references: [id], onDelete: SetNull)
+
+  toStateId String @db.Uuid
+  toState   WorkflowStateDefinition @relation("WorkflowEventToState", fields: [toStateId], references: [id], onDelete: Restrict)
+
+  actorUserId String? @db.Uuid
+  actor       User?   @relation("WorkflowEventActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([instanceId])
+  @@index([createdAt])
+  @@index([actorUserId])
+}
+
+enum MunicipalAssetStatus {
+  REGISTERED
+  ACTIVE
+  ASSIGNED
+  MAINTENANCE
+  SCRAPPED
+  DISPOSED
+}
+
+model MunicipalAsset {
+  id          String   @id @default(uuid()) @db.Uuid
+  code        String
+  name        String
+  description String?
+  category    String?
+  status      MunicipalAssetStatus @default(REGISTERED)
+  location    String?
+  notes       String?
+  acquisitionDate DateTime?
+  acquisitionValue Float?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now()) @updatedAt
+
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  requestingServiceId Int?
+  requestingService RequestingService? @relation(fields: [requestingServiceId], references: [id], onDelete: SetNull)
+
+  requestId String? @db.Uuid
+  request   Request? @relation(fields: [requestId], references: [id], onDelete: SetNull)
+
+  assignedToUserId String? @db.Uuid
+  assignedTo       User?   @relation("MunicipalAssetAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+
+  events      MunicipalAssetEvent[]
+  assignments MunicipalAssetAssignment[]
+  workflows   WorkflowInstance[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@index([status])
+  @@index([requestingServiceId])
+  @@index([requestId])
+  @@index([assignedToUserId])
+}
+
+model MunicipalAssetEvent {
+  id         String   @id @default(uuid()) @db.Uuid
+  fromStatus MunicipalAssetStatus?
+  toStatus   MunicipalAssetStatus
+  note       String?
+  createdAt  DateTime @default(now())
+
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  assetId String @db.Uuid
+  asset   MunicipalAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  actorUserId String? @db.Uuid
+  actor       User?   @relation("MunicipalAssetEventActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([assetId])
+  @@index([createdAt])
+  @@index([actorUserId])
+}
+
+model MunicipalAssetAssignment {
+  id        String   @id @default(uuid()) @db.Uuid
+  note      String?
+  startAt   DateTime @default(now())
+  endAt     DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  assetId String @db.Uuid
+  asset   MunicipalAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  userId String? @db.Uuid
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  requestingServiceId Int?
+  requestingService RequestingService? @relation(fields: [requestingServiceId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([assetId])
+  @@index([userId])
+  @@index([requestingServiceId])
+  @@index([startAt])
+  @@index([endAt])
+}
+
+enum FinanceProcessStatus {
+  DRAFT
+  CABIMENTO
+  COMPROMISSO
+  APPROVED
+  PAYMENT_AUTHORIZED
+  PAID
+  REJECTED
+}
+
+model FinanceProcess {
+  id         String   @id @default(uuid()) @db.Uuid
+  code       String
+  amount     Float
+  currency   String   @default("EUR") @db.VarChar(10)
+  budgetLine String?
+  note       String?
+  status     FinanceProcessStatus @default(DRAFT)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @default(now()) @updatedAt
+
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  requestId String? @db.Uuid
+  request   Request? @relation(fields: [requestId], references: [id], onDelete: SetNull)
+
+  requestingServiceId Int?
+  requestingService RequestingService? @relation(fields: [requestingServiceId], references: [id], onDelete: SetNull)
+
+  events    FinanceProcessEvent[]
+  workflows WorkflowInstance[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@index([status])
+  @@index([requestId])
+  @@index([requestingServiceId])
+}
+
+model FinanceProcessEvent {
+  id         String   @id @default(uuid()) @db.Uuid
+  fromStatus FinanceProcessStatus?
+  toStatus   FinanceProcessStatus
+  note       String?
+  createdAt  DateTime @default(now())
+
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  financeProcessId String @db.Uuid
+  financeProcess   FinanceProcess @relation(fields: [financeProcessId], references: [id], onDelete: Cascade)
+
+  actorUserId String? @db.Uuid
+  actor       User?   @relation("FinanceProcessEventActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([financeProcessId])
+  @@index([createdAt])
+  @@index([actorUserId])
+}
+
+enum PresidencyDispatchStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model PresidencyDispatch {
+  id        String   @id @default(uuid()) @db.Uuid
+  status    PresidencyDispatchStatus @default(PENDING)
+  note      String?
+  dispatchedAt DateTime @default(now())
+  decidedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  requestId String @db.Uuid
+  request   Request @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  decidedByUserId String? @db.Uuid
+  decidedBy       User?   @relation("PresidencyDispatchDecidedBy", fields: [decidedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([requestId])
+  @@index([tenantId])
+  @@index([status])
+  @@index([decidedByUserId])
 }

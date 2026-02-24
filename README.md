@@ -1,186 +1,257 @@
-# Stockly (StockBackup)
+# CMCHUB Platform (StockBackup)
 
-Aplicação de **gestão de stock e requisições** (Next.js + Prisma + PostgreSQL).
+[![Next.js](https://img.shields.io/badge/Next.js-15-black)](#)
+[![React](https://img.shields.io/badge/React-19-149eca)](#)
+[![Prisma](https://img.shields.io/badge/Prisma-ORM-2d3748)](#)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791)](#)
+[![TypeScript](https://img.shields.io/badge/TypeScript-Strict-3178c6)](#)
 
-Inclui:
-- Produtos, categorias, fornecedores e unidades
-- Requisições (aprovação, assinatura de aprovação e assinatura de levantamento)
-- Movimentos de stock
-- Upload/download de anexos com storage local em disco (`storage/`)
+## Table of Contents
 
-## Requisitos
+- [PT — Visão Geral](#pt--visão-geral)
+- [PT — Módulos](#pt--módulos)
+- [PT — Diagrama Técnico](#pt--diagrama-técnico)
+- [PT — Mapa de Estados](#pt--mapa-de-estados)
+- [PT — Diagrama Operacional](#pt--diagrama-operacional)
+- [PT — Setup Rápido](#pt--setup-rápido)
+- [EN — Overview](#en--overview)
+- [EN — Modules](#en--modules)
+- [EN — Technical Diagram](#en--technical-diagram)
+- [EN — State Machine](#en--state-machine)
+- [EN — Operational Diagram](#en--operational-diagram)
+- [Project Structure](#project-structure)
+- [Quality Checklist](#quality-checklist)
+- [Contributing](#contributing)
+- [License](#license)
 
-- Node.js 20+ (recomendado)
-- PostgreSQL 16+ (recomendado via Docker)
-- Docker + Docker Compose (opcional, mas recomendado para a BD)
+---
 
-## Quick start (local)
+## PT — Visão Geral
+
+Plataforma municipal para **gestão de requisições, património, financiamento e despacho institucional**, com auditoria, RBAC granular, workflow de estados e operação multi-tenant.
+
+### PT — Módulos
+
+- Requisições (criação, aprovação, rejeição, cumprimento)
+- Workflow (state machine com transições por permissão)
+- RBAC (papéis e permissões por serviço)
+- Património (ativos, afetação, ciclo de vida)
+- Financiamento (cabimento, compromisso, aprovação, pagamento)
+- Portal Externo (submissão de requerimentos)
+- Presidência (despacho e decisão)
+
+### PT — Diagrama Técnico
+
+```mermaid
+flowchart LR
+  UI[Web App Next.js] --> API[API Routes]
+  API --> AUTH[Auth, CSRF, IP Allowlist, RBAC]
+  API --> WF[Workflow Engine]
+  API --> REQ[Requests Domain]
+  API --> ASSET[Assets Domain]
+  API --> FIN[Finance Domain]
+  API --> PUB[Public Portal Domain]
+  API --> TKT[Tickets/SLA Domain]
+
+  AUTH --> DB[(PostgreSQL)]
+  WF --> DB
+  REQ --> DB
+  ASSET --> DB
+  FIN --> DB
+  PUB --> DB
+  TKT --> DB
+
+  API --> STORAGE[(Storage local /storage)]
+```
+
+### PT — Mapa de Estados
+
+```mermaid
+stateDiagram-v2
+  [*] --> SUBMITTED
+  SUBMITTED --> APPROVED: APPROVE
+  SUBMITTED --> REJECTED: REJECT
+  APPROVED --> FULFILLED: FULFILL
+  APPROVED --> REJECTED: REJECT
+  REJECTED --> [*]
+  FULFILLED --> [*]
+```
+
+### PT — Diagrama Operacional
+
+```mermaid
+sequenceDiagram
+  participant U as Utilizador/Serviço
+  participant P as Plataforma
+  participant PR as Presidência
+  participant F as Finanças
+  participant A as Património
+
+  U->>P: Criar Requisição
+  P->>P: Iniciar Workflow (SUBMITTED)
+  P->>PR: Despacho Presidencial
+  PR->>P: Aprovar/Rejeitar
+  P->>F: Iniciar Processo Financeiro
+  F->>P: Evoluir estado financeiro
+  P->>A: Registar/afetar ativos
+  P->>P: Fecho operacional e auditoria
+```
+
+### PT — Setup Rápido
 
 ```bash
-# 1) Dependências
 npm install
-
-# 2) Base de dados (Postgres)
 docker compose up -d postgres
-
-# 3) Env
 cp .env.example .env.local
-
-# 4) Migrations
 npm run prisma:deploy
-
-# 5) Dev
 npm run dev
 ```
 
-Abrir: http://localhost:3000
+Abrir: `http://localhost:3000`
 
-## Variáveis de ambiente (`.env.local`)
-
-O projeto lê variáveis do `.env.local` (recomendado). Podes começar pelo mínimo e depois ir adicionando opcionais conforme a tua instalação.
-
-`.env.local` mínimo:
+### PT — Variáveis Essenciais
 
 ```dotenv
 DATABASE_URL="postgresql://stockly:stockly_password@localhost:5432/stockly?schema=public"
 JWT_SECRET="change-me-in-development"
-```
-
-Opcionais mais comuns (ver também `.env.example`):
-
-```dotenv
-# URL pública/base da aplicação (usado para gerar links/impressões em algumas páginas)
-NEXT_PUBLIC_APP_URL="http://localhost:3000"
-
-# Multi-tenant: tenant por defeito quando o cliente não envia x-tenant-slug
 DEFAULT_TENANT_SLUG="default"
-
-# CORS no login para origens diferentes (comma-separated). ALLOWED_ORIGINS é aceite como alias.
-# CORS_ALLOWED_ORIGINS="http://localhost:3000"
-
-# Se estiveres atrás de reverse proxy/load balancer (x-forwarded-for)
-TRUST_PROXY="false"
-
-# Evita lockout inicial do ADMIN quando a allowlist de IPs está vazia (usar temporariamente)
-ALLOWLIST_BOOTSTRAP_ADMIN="false"
-
-# Rate limit distribuído (recomendado em produção com múltiplas instâncias)
-# Use "db" para guardar contadores na base de dados.
-# RATE_LIMIT_STORE="db"
-
-# Logging estruturado (opcional)
-# LOG_LEVEL="info"
-
-# Base URL da API no browser (normalmente deixa "/api")
 NEXT_PUBLIC_API_BASE_URL="/api"
-
-# Logo opcional para páginas de impressão
-# NEXT_PUBLIC_PRINT_LOGO_URL="https://example.com/logo.png"
 ```
 
-## Base de dados
+### PT — Rotas Principais
 
-Subir o Postgres via Docker:
+- UI: `/`, `/governanca`, `/governanca/patrimonio`, `/governanca/financiamento`, `/governanca/requerimentos`, `/governanca/permissoes`, `/portal/requerimentos`
+- API: `/api/requests`, `/api/workflows/requests/[id]/action`, `/api/governanca/assets`, `/api/governanca/finance`, `/api/portal/requests`, `/api/requests/[id]/presidency-dispatch`, `/api/requests/[id]/presidency-decision`
+
+---
+
+## EN — Overview
+
+Municipal platform for **requests, asset management, finance operations, and presidential dispatch workflows**, with auditing, granular RBAC, state-machine workflows, and multi-tenant operation.
+
+### EN — Modules
+
+- Requests (create, approve, reject, fulfill)
+- Workflow engine (permission-driven state machine)
+- RBAC (role and permission scope by requesting service)
+- Assets (lifecycle, assignment, status transitions)
+- Finance (budget commitment through payment)
+- External Portal (public request submission)
+- Presidency (formal dispatch and decision)
+
+### EN — Technical Diagram
+
+```mermaid
+flowchart LR
+  UI[Next.js Web App] --> API[API Routes]
+  API --> AUTH[Auth, CSRF, IP Allowlist, RBAC]
+  API --> WF[Workflow Engine]
+  API --> REQ[Requests Domain]
+  API --> ASSET[Assets Domain]
+  API --> FIN[Finance Domain]
+  API --> PUB[Public Portal Domain]
+  API --> TKT[Tickets/SLA Domain]
+
+  AUTH --> DB[(PostgreSQL)]
+  WF --> DB
+  REQ --> DB
+  ASSET --> DB
+  FIN --> DB
+  PUB --> DB
+  TKT --> DB
+
+  API --> STORAGE[(Local storage /storage)]
+```
+
+### EN — State Machine
+
+```mermaid
+stateDiagram-v2
+  [*] --> SUBMITTED
+  SUBMITTED --> APPROVED: APPROVE
+  SUBMITTED --> REJECTED: REJECT
+  APPROVED --> FULFILLED: FULFILL
+  APPROVED --> REJECTED: REJECT
+  REJECTED --> [*]
+  FULFILLED --> [*]
+```
+
+### EN — Operational Diagram
+
+```mermaid
+sequenceDiagram
+  participant U as User/Service
+  participant P as Platform
+  participant PR as Presidency
+  participant F as Finance
+  participant A as Assets
+
+  U->>P: Create request
+  P->>P: Start workflow (SUBMITTED)
+  P->>PR: Send presidential dispatch
+  PR->>P: Approve/Reject
+  P->>F: Start finance process
+  F->>P: Progress finance status
+  P->>A: Register/assign assets
+  P->>P: Operational closure + audit
+```
+
+### EN — Quick Start
 
 ```bash
+npm install
 docker compose up -d postgres
-docker compose ps
-```
-
-Parar/remover volumes (apaga dados):
-
-```bash
-docker compose down -v
-```
-
-## Migrations (Prisma)
-
-- Aplicar migrations existentes:
-
-```bash
+cp .env.example .env.local
 npm run prisma:deploy
-
-# (Opcional) validar tipagem localmente
-npm run typecheck
-```
-
-- Criar nova migration (dev):
-
-```bash
-npm run prisma:migrate
-```
-
-## Executar
-
-Desenvolvimento:
-
-```bash
 npm run dev
 ```
 
-Produção (local/servidor):
+Open: `http://localhost:3000`
 
-```bash
-npm run build
-npm run prisma:deploy
-npm run start
+### EN — Required Environment Variables
+
+```dotenv
+DATABASE_URL="postgresql://stockly:stockly_password@localhost:5432/stockly?schema=public"
+JWT_SECRET="change-me-in-development"
+DEFAULT_TENANT_SLUG="default"
+NEXT_PUBLIC_API_BASE_URL="/api"
 ```
 
-## Primeiro login / bootstrap (importante)
+### EN — Core Routes
 
-- **Registo público está desativado** por design: `/api/auth/register` devolve `403`.
-- Em base de dados vazia, é necessário criar **Tenant + primeiro utilizador ADMIN** diretamente na BD.
+- UI: `/`, `/governanca`, `/governanca/patrimonio`, `/governanca/financiamento`, `/governanca/requerimentos`, `/governanca/permissoes`, `/portal/requerimentos`
+- API: `/api/requests`, `/api/workflows/requests/[id]/action`, `/api/governanca/assets`, `/api/governanca/finance`, `/api/portal/requests`, `/api/requests/[id]/presidency-dispatch`, `/api/requests/[id]/presidency-decision`
 
-Passo-a-passo (manual, via Prisma Studio):
+---
 
-1) Abrir Prisma Studio:
-```bash
-npm run prisma:studio
+## Project Structure
+
+```text
+app/                      # UI (App Router)
+pages/api/                # Backend endpoints
+prisma/schema.prisma      # Data model
+prisma/migrations/        # SQL migrations
+utils/                    # Auth, RBAC, workflow, helpers
+storage/                  # Local file storage
 ```
 
-2) Criar um `Tenant` (ex.: `slug=default`, `name=Default`).
-
-3) Criar um `User` com:
-- `tenantId`: o `id` do Tenant
-- `role`: `ADMIN`
-- `email`, `name`
-- `passwordHash` (na BD está mapeado para a coluna `password`) com bcrypt
-
-Gerar hash bcrypt (exemplo):
+## Quality Checklist
 
 ```bash
-node -e "const bcrypt=require('bcryptjs'); bcrypt.hash('Admin123!', 10).then(h=>console.log(h))"
-```
-
-4) Fazer login na UI.
-
-## Allowlist de IPs no login
-
-O login valida IPs permitidos.
-- Se vires `IP não autorizado`, o sistema cria um pedido de acesso para aprovação.
-- Para evitar lockout inicial em ambientes novos, podes usar bootstrap (ADMIN + allowlist vazia):
-  - Define `ALLOWLIST_BOOTSTRAP_ADMIN="true"` temporariamente.
-  - Faz login com um ADMIN (o IP atual é adicionado).
-  - Volta a `false` depois de configurar a allowlist.
-
-Se estiveres atrás de proxy/load balancer, valida também `TRUST_PROXY`.
-
-## Storage (uploads)
-
-- Ficheiros são guardados localmente em `storage/` (disco) e indexados no Postgres.
-- Em Linux/EC2, garante permissões de escrita na pasta `storage/` para o utilizador que corre o Node.
-
-## Scripts úteis
-
-```bash
-npm run lint
-npm run prisma:studio
 npm run prisma:generate
+npm run typecheck
+npm run lint
+npm run prisma:deploy
 ```
 
-## Rotas úteis
+## Contributing
 
-- UI: `/`
-- API docs: `/api-docs`
-- API status: `/api-status`
-- Insights operacionais: `/business-insights`
+1. Create a dedicated branch for each feature/fix.
+2. Run `npm run typecheck` and `npm run lint` before opening a PR.
+3. For data model changes, add/update Prisma migrations and document impacts.
+4. Include API/UI evidence for functional changes (screenshots or request/response examples).
+5. Keep README and operational notes updated when behavior changes.
+
+## License
+
+Define according to institutional policy.

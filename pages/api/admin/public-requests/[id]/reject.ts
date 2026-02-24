@@ -1,7 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { z } from "zod";
 import { prisma } from "@/prisma/client";
-import { requireAdmin } from "../../_admin";
+import { requireAdminOrPermission } from "../../_admin";
 import { notifyAdmin, notifyUser } from "@/utils/notifications";
 import { publishRealtimeEvent } from "@/utils/realtime";
 
@@ -10,7 +10,7 @@ const bodySchema = z.object({
 });
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  const session = await requireAdmin(req, res);
+  const session = await requireAdminOrPermission(req, res, "public_requests.handle");
   if (!session) return;
 
   const id = typeof req.query.id === "string" ? req.query.id : "";

@@ -2,10 +2,10 @@
 
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
-import { AiFillProduct } from "react-icons/ai";
 import {
   FiActivity,
   FiArchive,
@@ -14,6 +14,7 @@ import {
   FiCamera,
   FiDatabase,
   FiFileText,
+  FiLayers,
   FiPackage,
   FiRepeat,
   FiUsers,
@@ -73,13 +74,20 @@ export default function AppHeader() {
             <button
               type="button"
               onClick={() => handleNavigation("/")}
-              className="flex aspect-square size-10 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm"
+              className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-lg bg-primary/10 shadow-sm"
               aria-label="Ir para Produtos"
             >
-              <AiFillProduct className="text-2xl" />
+              <Image
+                src="/branding/favicon.ico"
+                alt="CMCHUB Logo"
+                width={40}
+                height={40}
+                className="h-full w-full object-contain"
+                priority
+              />
             </button>
             <div>
-              <div className="text-lg font-semibold leading-tight">Stockly</div>
+              <div className="text-lg font-semibold leading-tight">CMCHUB</div>
               <div className="text-xs text-muted-foreground">
                 {user?.name ? `Bem-vindo, ${user.name}` : "Bem-vindo"}
                 {user?.email ? ` • ${user.email}` : ""}
@@ -151,6 +159,15 @@ export default function AppHeader() {
             >
               <Plus className="mr-2 h-4 w-4" />
               Novo Pedido
+            </Button>
+
+            <Button
+              variant={isActive("/governanca") ? "secondary" : "ghost"}
+              size="sm"
+              onClick={() => handleNavigation("/governanca")}
+            >
+              <FiLayers className="mr-2 h-4 w-4" />
+              Governança
             </Button>
 
             <Button

@@ -1,7 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { z } from "zod";
 import { prisma } from "@/prisma/client";
-import { requireAdmin } from "../_admin";
+import { requireAdminOrPermission } from "../_admin";
 
 const querySchema = z.object({
   status: z.enum(["RECEIVED", "ACCEPTED", "REJECTED"]).optional(),
@@ -9,7 +9,7 @@ const querySchema = z.object({
 });
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  const session = await requireAdmin(req, res);
+  const session = await requireAdminOrPermission(req, res, "public_requests.handle");
   if (!session) return;
 
   if (req.method !== "GET") {

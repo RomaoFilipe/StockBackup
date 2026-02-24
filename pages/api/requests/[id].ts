@@ -7,6 +7,9 @@ import { prisma } from "@/prisma/client";
 import { getSessionServer } from "@/utils/auth";
 import { createRequestStatusAudit, notifyAdmin, notifyUser } from "@/utils/notifications";
 import { publishRealtimeEvent } from "@/utils/realtime";
+import { createTicketAudit } from "@/pages/api/tickets/_utils";
+import { getUserPermissionGrants, hasPermission } from "@/utils/rbac";
+import { ensureRequestWorkflowDefinition, transitionRequestWorkflowToStatus } from "@/utils/workflow";
 import { buildSignedRequestPdfBuffer } from "@/utils/requestPdf";
 import {
   buildRequestFolderName,
@@ -488,20 +491,47 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const updateData: any = { ...rest };
       const existingBefore = await prisma.request.findFirst({
         where: { id, tenantId },
-        select: { status: true, userId: true, gtmiNumber: true, requestType: true, pickupSignedAt: true },
+        select: { status: true, userId: true, gtmiNumber: true, requestType: true, pickupSignedAt: true, requestingServiceId: true },
       });
       if (!existingBefore) {
         return res.status(404).json({ error: "Request not found" });
       }
+      const permissionGrants = await getUserPermissionGrants(prisma, {
+        id: session.id,
+        tenantId,
+        role: session.role,
+      });
+      const serviceScopeId = existingBefore.requestingServiceId ?? null;
+      const can = (key: string) => isAdmin || hasPermission(permissionGrants, key, serviceScopeId);
 
-      const hasAdminOnlyMutation =
-        Boolean(sign) ||
-        Boolean(pickupSign) ||
-        Boolean(voidSign) ||
-        Boolean(voidPickupSign) ||
-        Object.prototype.hasOwnProperty.call(updateData, "status");
-      if (hasAdminOnlyMutation && !isAdmin) {
-        return res.status(403).json({ error: "Apenas ADMIN pode assinar ou alterar estado." });
+      if (sign && !can("requests.sign_approval") && !can("presidency.approve")) {
+        return res.status(403).json({ error: "Sem permissão para assinar aprovação." });
+      }
+      if (pickupSign && !can("requests.pickup_sign")) {
+        return res.status(403).json({ error: "Sem permissão para assinar levantamento." });
+      }
+      if (voidSign && !can("requests.void_sign")) {
+        return res.status(403).json({ error: "Sem permissão para anular assinatura de aprovação." });
+      }
+      if (voidPickupSign && !can("requests.void_pickup_sign")) {
+        return res.status(403).json({ error: "Sem permissão para anular assinatura de levantamento." });
+      }
+
+      if (Object.prototype.hasOwnProperty.call(updateData, "status")) {
+        const nextStatus = updateData.status;
+        const canApprove = can("requests.approve") || can("presidency.approve");
+        const canReject = can("requests.reject") || can("presidency.approve");
+        const canChangeStatus = can("requests.change_status");
+
+        if (nextStatus === "APPROVED" && !canApprove) {
+          return res.status(403).json({ error: "Sem permissão para aprovar requisição." });
+        }
+        if (nextStatus === "REJECTED" && !canReject) {
+          return res.status(403).json({ error: "Sem permissão para rejeitar requisição." });
+        }
+        if (nextStatus !== "APPROVED" && nextStatus !== "REJECTED" && !canChangeStatus) {
+          return res.status(403).json({ error: "Sem permissão para alterar estado da requisição." });
+        }
       }
 
       const hasNonSignatureUpdates = Object.keys(rest).length > 0 || Boolean(items?.length) || Boolean(replaceItems);
@@ -620,9 +650,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const userAgent = typeof req.headers["user-agent"] === "string" ? req.headers["user-agent"] : undefined;
 
       if (voidSign) {
-        if (!isAdmin) {
-          return res.status(403).json({ error: "Forbidden" });
-        }
         updateData.signedAt = null;
         updateData.signedByName = null;
         updateData.signedByTitle = null;
@@ -635,9 +662,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
 
       if (voidPickupSign) {
-        if (!isAdmin) {
-          return res.status(403).json({ error: "Forbidden" });
-        }
         updateData.pickupSignedAt = null;
         updateData.pickupSignedByName = null;
         updateData.pickupSignedByTitle = null;
@@ -685,6 +709,29 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         updateData.pickupVoidedAt = null;
         updateData.pickupVoidedReason = null;
         updateData.pickupVoidedByUserId = null;
+      }
+
+      if (
+        Object.prototype.hasOwnProperty.call(updateData, "status") &&
+        updateData.status &&
+        updateData.status !== existingBefore.status
+      ) {
+        await ensureRequestWorkflowDefinition(prisma, tenantId);
+        const transitioned = await transitionRequestWorkflowToStatus(prisma, {
+          tenantId,
+          requestId: id,
+          targetStatus: updateData.status,
+          actorUserId: session.id,
+          note: "api/requests/[id]:PATCH",
+        });
+
+        if (transitioned.moved) {
+          delete updateData.status;
+        } else if (!can("requests.change_status")) {
+          return res.status(400).json({
+            error: "Transição de workflow inválida para o estado pretendido.",
+          });
+        }
       }
 
       const updated = await prisma.$transaction(async (tx) => {
@@ -1281,6 +1328,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         const fromStatus = existingBefore.status;
         const toStatus = request.status;
         const statusChanged = fromStatus !== toStatus;
+        const linkedTicketLinks = await prisma.ticketRequestLink.findMany({
+          where: { tenantId, requestId: request.id },
+          select: {
+            ticket: {
+              select: {
+                id: true,
+                code: true,
+                status: true,
+                createdByUserId: true,
+                assignedToUserId: true,
+              },
+            },
+          },
+        });
 
         if (statusChanged) {
           await createRequestStatusAudit({
@@ -1330,6 +1391,86 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
               at: new Date().toISOString(),
             },
           });
+
+          if (linkedTicketLinks.length) {
+            const ticketStatusByRequestStatus: Record<string, "OPEN" | "IN_PROGRESS" | "RESOLVED"> = {
+              DRAFT: "OPEN",
+              SUBMITTED: "IN_PROGRESS",
+              APPROVED: "IN_PROGRESS",
+              REJECTED: "RESOLVED",
+              FULFILLED: "RESOLVED",
+            };
+            const nextTicketStatus = ticketStatusByRequestStatus[toStatus] ?? "IN_PROGRESS";
+            for (const link of linkedTicketLinks) {
+              const linkedTicket = link.ticket;
+              await prisma.$transaction(async (tx) => {
+                await tx.ticketMessage.create({
+                  data: {
+                    tenantId,
+                    ticketId: linkedTicket.id,
+                    authorUserId: session.id,
+                    body: `Estado da requisição ${request.gtmiNumber} alterado: ${fromStatus} -> ${toStatus}.`,
+                  },
+                });
+                if (linkedTicket.status !== "CLOSED") {
+                  await tx.ticket.update({
+                    where: { id: linkedTicket.id },
+                    data: { status: nextTicketStatus, type: "REQUEST" },
+                  });
+                }
+              });
+              await createTicketAudit({
+                tenantId,
+                ticketId: linkedTicket.id,
+                actorUserId: session.id,
+                action: "REQUEST_STATUS_SYNC",
+                note: `Requisição ${request.gtmiNumber} mudou ${fromStatus} -> ${toStatus}`,
+                data: { requestId: request.id, gtmiNumber: request.gtmiNumber, fromStatus, toStatus },
+              });
+
+              const notifyUserIds = Array.from(
+                new Set([linkedTicket.createdByUserId, linkedTicket.assignedToUserId].filter(Boolean) as string[])
+              );
+              publishRealtimeEvent({
+                type: "ticket.updated",
+                tenantId,
+                audience: "ADMIN",
+                payload: { ticketId: linkedTicket.id, code: linkedTicket.code, requestId: request.id },
+              });
+              publishRealtimeEvent({
+                type: "ticket.message_created",
+                tenantId,
+                audience: "ADMIN",
+                payload: {
+                  ticketId: linkedTicket.id,
+                  code: linkedTicket.code,
+                  requestId: request.id,
+                  authorUserId: session.id,
+                },
+              });
+              for (const uid of notifyUserIds) {
+                publishRealtimeEvent({
+                  type: "ticket.updated",
+                  tenantId,
+                  audience: "USER",
+                  userId: uid,
+                  payload: { ticketId: linkedTicket.id, code: linkedTicket.code, requestId: request.id },
+                });
+                publishRealtimeEvent({
+                  type: "ticket.message_created",
+                  tenantId,
+                  audience: "USER",
+                  userId: uid,
+                  payload: {
+                    ticketId: linkedTicket.id,
+                    code: linkedTicket.code,
+                    requestId: request.id,
+                    authorUserId: session.id,
+                  },
+                });
+              }
+            }
+          }
         } else if (Object.keys(updateData).length > 0 || Boolean(items?.length) || Boolean(replaceItems)) {
           await notifyAdmin({
             tenantId,

@@ -4,6 +4,8 @@ import { prisma } from "@/prisma/client";
 import { getSessionServer } from "@/utils/auth";
 import { createRequestStatusAudit, notifyAdmin, notifyUser } from "@/utils/notifications";
 import { publishRealtimeEvent } from "@/utils/realtime";
+import { createTicketAudit } from "@/pages/api/tickets/_utils";
+import { ensureRequestWorkflowDefinition, ensureRequestWorkflowInstance } from "@/utils/workflow";
 
 const goodsTypeSchema = z.enum(["MATERIALS_SERVICES", "WAREHOUSE_MATERIALS", "OTHER_PRODUCTS"]);
 const requestTypeSchema = z.enum(["STANDARD", "RETURN"]);
@@ -34,6 +36,7 @@ const createRequestSchema = z.object({
   supplierOption1: z.string().max(200).optional(),
   supplierOption2: z.string().max(200).optional(),
   supplierOption3: z.string().max(200).optional(),
+  ticketId: z.string().uuid().optional(),
   items: z
     .array(
       z.object({
@@ -168,6 +171,11 @@ async function createRequestWithGtmiSeq(args: {
               orderBy: { createdAt: "asc" },
             },
           },
+        });
+
+        await ensureRequestWorkflowInstance(tx, {
+          tenantId: args.tenantId,
+          requestId: created.id,
         });
 
         // === Stock deduction / unit allocation ===
@@ -523,6 +531,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       supplierOption1,
       supplierOption2,
       supplierOption3,
+      ticketId,
       items,
     } = parsed.data;
     const effectiveRequestType = requestType ?? "STANDARD";
@@ -536,6 +545,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     try {
+      await ensureRequestWorkflowDefinition(prisma, tenantId);
       const svc = await prisma.requestingService.findUnique({
         where: { id: requestingServiceId },
         select: { id: true, ativo: true, codigo: true, designacao: true },
@@ -588,6 +598,71 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           role: it.role ?? "NORMAL",
         })),
       });
+
+      if (ticketId) {
+        const ticket = await prisma.ticket.findFirst({
+          where: {
+            id: ticketId,
+            tenantId,
+            ...(isAdmin ? {} : { OR: [{ createdByUserId: session.id }, { assignedToUserId: session.id }] }),
+          },
+          select: { id: true, code: true },
+        });
+
+        if (!ticket) {
+          return res.status(400).json({ error: "Ticket inválido para associação." });
+        }
+        await prisma.$transaction(async (tx) => {
+          await tx.ticket.update({
+            where: { id: ticket.id },
+            data: { type: "REQUEST" },
+          });
+          await tx.ticketRequestLink.upsert({
+            where: {
+              ticketId_requestId: {
+                ticketId: ticket.id,
+                requestId: created.id,
+              },
+            },
+            create: {
+              tenantId,
+              ticketId: ticket.id,
+              requestId: created.id,
+              linkedByUserId: session.id,
+            },
+            update: {},
+          });
+          await tx.ticketMessage.create({
+            data: {
+              tenantId,
+              ticketId: ticket.id,
+              authorUserId: session.id,
+              body: `Requisição associada: ${created.gtmiNumber}.`,
+            },
+          });
+        });
+        await createTicketAudit({
+          tenantId,
+          ticketId: ticket.id,
+          actorUserId: session.id,
+          action: "REQUEST_LINKED",
+          note: `Requisição ${created.gtmiNumber} associada ao ticket`,
+          data: { requestId: created.id, gtmiNumber: created.gtmiNumber },
+        });
+
+        publishRealtimeEvent({
+          type: "ticket.updated",
+          tenantId,
+          audience: "ALL",
+          payload: { ticketId: ticket.id, code: ticket.code, requestId: created.id },
+        });
+        publishRealtimeEvent({
+          type: "ticket.message_created",
+          tenantId,
+          audience: "ALL",
+          payload: { ticketId: ticket.id, code: ticket.code, requestId: created.id, authorUserId: session.id },
+        });
+      }
 
       try {
         await createRequestStatusAudit({

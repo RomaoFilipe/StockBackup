@@ -13,6 +13,8 @@ interface User {
   isActive?: boolean;
   mustChangePassword?: boolean;
   requestingServiceId?: number | null;
+  permissions?: string[];
+  permissionGrants?: Array<{ key: string; requestingServiceId: number | null }>;
 }
 
 interface AuthContextType {
@@ -92,6 +94,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
             isActive: (session as any).isActive,
             mustChangePassword: (session as any).mustChangePassword ?? false,
             requestingServiceId: (session as any).requestingServiceId ?? null,
+            permissions: (session as any).permissions ?? [],
+            permissionGrants: (session as any).permissionGrants ?? [],
           });
           localStorage.setItem("isAuth", "true");
           localStorage.setItem("isLoggedIn", "true");
@@ -151,6 +155,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         isActive: (session as any).isActive,
         mustChangePassword: (session as any).mustChangePassword ?? false,
         requestingServiceId: (session as any).requestingServiceId ?? null,
+        permissions: (session as any).permissions ?? [],
+        permissionGrants: (session as any).permissionGrants ?? [],
       });
 
       localStorage.setItem("isAuth", "true");
