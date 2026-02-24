@@ -184,3 +184,7 @@ npm run prisma:generate
 - API docs: `/api-docs`
 - API status: `/api-status`
 - Insights operacionais: `/business-insights`
+
+## Arquitetura e fluxos
+
+- Diagrama funcional atual da app: `docs/diagrama-fluxo-app.md`
