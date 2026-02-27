@@ -8,6 +8,24 @@ on:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: stockly
+          POSTGRES_PASSWORD: stockly_password
+          POSTGRES_DB: stockly
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U stockly -d stockly"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://stockly:stockly_password@localhost:5432/stockly?schema=public
+      JWT_SECRET: ci-only-not-for-production
+      DEFAULT_TENANT_SLUG: default
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -24,9 +42,14 @@ jobs:
       - name: Prisma generate
         run: npm run prisma:generate
 
+      - name: Prisma migrate deploy (smoke)
+        run: npm run prisma:deploy
+
       - name: Lint
         run: npm run lint
 
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Build
+        run: npm run build

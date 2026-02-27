@@ -2,24 +2,29 @@
   <img src="public/branding/logo2.png" alt="CMCHUB" width="160" />
 </p>
 
-# CMCHUB Municipal Operations Platform
+# CMCHUB — Municipal Operations Hub
 
-Enterprise platform for Portuguese municipalities, designed to orchestrate internal requests, citizen requests, finance approvals, asset lifecycle, presidential dispatch, and full compliance-grade auditability.
+CMCHUB is a **municipal operations hub**: it centralizes **Requests**, **Tickets**, **Incoming (Portal)**, **Inventory/Assets**, **Approvals**, and **Audit**, with **service/department-scoped RBAC** and a **configurable workflow engine** to guarantee traceability.
+
+> Goal: a single municipal platform for requests, approvals, assets, and compliance-grade audit trails.
 
 ## Table of Contents
 
-- [Executive Overview](#executive-overview)
-- [Municipal Problem Statement](#municipal-problem-statement)
+- [At a Glance](#at-a-glance)
+- [Personas](#personas)
 - [Core Capabilities](#core-capabilities)
-- [Technology Stack](#technology-stack)
-- [Architecture Overview](#architecture-overview)
-- [Architecture Diagram](#architecture-diagram)
-- [Operational Workflow Diagram](#operational-workflow-diagram)
+- [Key Flows](#key-flows)
+- [Request Workflow (Internal Requests)](#request-workflow-internal-requests)
 - [Request State Machine](#request-state-machine)
-- [Deployment Topology](#deployment-topology)
 - [Project Structure](#project-structure)
 - [Getting Started](#getting-started)
 - [Go-live Checklist](#go-live-checklist)
+- [Definition of Done & Release Criteria](#definition-of-done--release-criteria)
+- [Technology Stack](#technology-stack)
+- [Deployment Topology](#deployment-topology)
+- [Architecture Overview](#architecture-overview)
+- [Architecture Diagram](#architecture-diagram)
+- [Operational Workflow Diagram](#operational-workflow-diagram)
 - [What Docker Compose Does](#what-docker-compose-does)
 - [Database Schema](#database-schema)
 - [API Endpoints](#api-endpoints)
@@ -34,103 +39,93 @@ Enterprise platform for Portuguese municipalities, designed to orchestrate inter
 - [Quality Commands](#quality-commands)
 - [License](#license)
 
-## Executive Overview
+## At a Glance
 
-CMCHUB is a modular municipal platform built for real public administration constraints: organizational complexity, strict traceability, role segregation, and policy-driven approvals. It centralizes process execution across departments while preserving clear domain boundaries and institutional governance.
+CMCHUB is built for real municipal constraints: **departments**, **management approvals**, **scope-based authorization**, evidence-driven decisions, and a complete “who did what and when” history.
 
-## Municipal Problem Statement
+**What it solves:**
+- Reduces manual work (email/Excel) with end-to-end flows
+- Prevents “random access” with consistent permissions
+- Improves response time with queues (“Pending for me”) and SLAs
+- Ensures traceability (workflow + audit)
 
-Municipal operations are often fragmented across spreadsheets, disconnected tools, and manual approvals. This typically causes:
+**Main screens:**
+- `Requests`: create, track, approvals (department + final), history
+- `Tickets`: support/triage, chat and participants, linked requests
+- `Incoming (Portal)`: external intake and legacy history
+- `Inventory/Assets`: catalog, units/equipment, movements
+- `Reports`: exports and audit views
 
-- Low traceability of decisions and approvals
-- Inconsistent policy enforcement across departments
-- Delays in internal and citizen-facing processes
-- Weak audit evidence for inspections and accountability
-- High operational risk in finance, asset management, and dispatch decisions
+## Personas
 
-CMCHUB addresses these issues with a unified workflow-driven core, granular RBAC scoped by Organizational Unit, and end-to-end event/audit trails.
+These personas drive the menu and RBAC (menu items show/hide based on permissions):
+
+| Persona | Objetivo | Acesso (resumo) |
+|---|---|---|
+| `USER` (worker) | “My work” | My requests, my tickets, incoming items assigned to me, MyDesktop |
+| `MANAGEMENT` (division/office heads) | Department management | Everything from USER + department requests, pending approvals, department reports |
+| `ADMIN` (platform) | Technical/platform ops | Catalogs, RBAC, global audit, technical management and support |
+
+Note: `ADMIN` should not be a “business bypass”; operational decisions must be enforced via permissions and scope.
 
 ## Core Capabilities
 
-- Domain-separated municipal operations: `internal_requests`, `citizen_requests`, `finance`, `assets`
-- Configurable workflow engine (`ProcessDefinition`, `ProcessStep`, `ProcessInstance`)
-- Granular RBAC with Organizational Unit scope
-- Presidential dispatch and decision lifecycle
-- Full audit trail and event history
-- Notifications and official document support
-- Multi-tenant-ready operating model
+- Internal requests with workflow (DRAFT → department approval → final approval → execution) and auditability
+- Approvals scoped by service (`requestingServiceId`) plus global final-approval permissions
+- Tickets with chat, participants, and `@username` mentions, with bidirectional Ticket ↔ Request linking
+- Incoming (portal) for external intake + legacy history
+- Inventory/Assets with movements, audit, and reporting
+- RBAC with roles/permissions (scoped) and audit trail (RBAC audit)
+- Multi-tenant isolation (`tenantId`)
 
-## Modular Domains (Current Project)
+## Key Flows
 
-### Core Municipal Domains
+### Internal Requests (Pedidos)
 
-- `internal_requests`
-  - Internal request lifecycle, approvals, signatures, fulfillment
-- `citizen_requests`
-  - External/citizen request intake, triage, acceptance/rejection
-- `finance`
-  - Financial process lifecycle (`appropriation`, `commitment`, `authorization`, `payment`)
-- `assets`
-  - Municipal asset registration, assignments, lifecycle events, disposal
-- `workflow`
-  - Configurable process orchestration (`ProcessDefinition`, `ProcessStep`, `ProcessInstance`)
-- `presidency_dispatch`
-  - Dispatch and decision flow for presidency-level approvals
+- **Create** a request (user intake or backoffice) → starts as `DRAFT` and is submitted (`SUBMITTED`)
+- **Management** approves (only for requests belonging to the service(s) they manage) → `AWAITING_ADMIN_APPROVAL`
+- **Final** (platform/admin or another role with `requests.final_*`) decides → `APPROVED/REJECTED`
+- **Execution**/delivery/pickup → `FULFILLED` (when applicable)
 
-### Governance and Security Modules
+### Tickets
 
-- `rbac`
-  - Role/permission management with organizational scope
-- `audit_trail`
-  - Request status audit, RBAC audit, workflow events, domain event history
-- `auth_session`
-  - Login/session lifecycle, token validation, secure cookies
-- `security_controls`
-  - CSRF protection, IP allowlist, login lockout, rate limiting
-- `multi_tenant`
-  - Tenant-aware data partitioning and context enforcement
+- Per-ticket chat with **participants** (followers) and `@username` mentions (auto-add)
+- Triage by status/priority and Ticket ↔ Request linking (single place for context)
 
-### Operations and Service Modules
+### Incoming (Portal) (Recebidos)
 
-- `inventory_products`
-  - Products, categories, suppliers, supplier providers
-- `stock_movements`
-  - IN/OUT/RETURN/REPAIR/SCRAP/LOST movement tracking
-- `equipment_units`
-  - Unit-level tracking, assignment, repair, return, loss, scrap
-- `invoices_procurement`
-  - Product invoices and linkage with requests/services
-- `tickets_sla`
-  - Incident/request ticketing, status workflow, SLA escalation
-- `users_admin`
-  - User administration, password resets, activation and audit actions
+- External intake creates `PublicRequest` (portal) and is managed in `/governanca/recebidos`
 
-### Citizen, Communication and Documents
+### Inventory/Assets (Inventário/Património)
 
-- `notifications_realtime`
-  - In-app notifications and realtime event propagation
-- `official_documents`
-  - Request PDFs, report PDFs, substitution/request document generation
-- `storage_management`
-  - File upload/download, document indexing, storage organization
-- `portal_requests`
-  - Public portal endpoint and UI for citizen request submission
+- Catalog (products/categories/suppliers), units/equipment and movements
+- Audit and reporting by period/service
 
-### Analytics and Reporting
+## Request Workflow (Internal Requests)
 
-- `business_insights`
-  - Operational metrics and business insights dashboards
-- `municipal_reports`
-  - Municipal reporting endpoints and export flows
-- `ticket_operations_reports`
-  - Ticket performance and SLA-oriented reporting
+The system uses 2 layers:
+- `Request.status` (a simple request state)
+- `WorkflowInstance.currentState` (the workflow state, used to distinguish “under management validation” vs “awaiting final approval”, etc.)
 
-### Field and Productivity Modules
+Key rule for management:
+- A user with `requests.approve` can only approve requests where `requestingServiceId` is within the services they manage (scope).
 
-- `scan_qr`
-  - QR scanning flows for products and substitutions
-- `mydesktop_presence`
-  - Personal workspace, presence/heartbeat and desktop queue views
+## Request State Machine
+
+The real (simplified) internal requests workflow:
+
+```mermaid
+stateDiagram-v2
+  [*] --> DRAFT
+  DRAFT --> SUBMITTED: submit
+  SUBMITTED --> AWAITING_ADMIN_APPROVAL: chefia approve
+  SUBMITTED --> REJECTED: chefia reject
+  AWAITING_ADMIN_APPROVAL --> APPROVED: final approve
+  AWAITING_ADMIN_APPROVAL --> REJECTED: final reject
+  APPROVED --> FULFILLED: execution/fulfillment
+  REJECTED --> [*]
+  FULFILLED --> [*]
+```
 
 ## Module x Endpoints x Permissions Matrix
 
@@ -203,7 +198,7 @@ sequenceDiagram
   participant CIT as Citizen
 
   OU->>P: Submit internal request
-  P->>P: Create ProcessInstance
+  P->>P: Create WorkflowInstance
   P->>FIN: Financial validation
   FIN->>P: Validation outcome
 
@@ -219,24 +214,6 @@ sequenceDiagram
   P->>P: Route to dedicated workflow
   P->>AUD: Persist full trace
   P->>CIT: Return progress/decision
-```
-
-## Request State Machine
-
-```mermaid
-stateDiagram-v2
-  [*] --> SUBMITTED
-  SUBMITTED --> IN_REVIEW: validate input
-  IN_REVIEW --> FINANCE_REVIEW: financial check required
-  FINANCE_REVIEW --> PRESIDENCY_REVIEW: amount > threshold
-  FINANCE_REVIEW --> APPROVED: amount <= threshold
-  PRESIDENCY_REVIEW --> APPROVED: presidential approval
-  PRESIDENCY_REVIEW --> REJECTED: presidential rejection
-  APPROVED --> IN_EXECUTION: start execution
-  IN_EXECUTION --> COMPLETED: execution complete
-  IN_REVIEW --> REJECTED: non-compliant request
-  REJECTED --> [*]
-  COMPLETED --> [*]
 ```
 
 ## Deployment Topology
@@ -357,6 +334,16 @@ npm run lint
   - `npm run backfill:usernames -- --dry-run`
   - `npm run backfill:usernames`
 
+## Definition of Done & Release Criteria
+
+Para evitar o “já faz tudo” mas ainda não está “fechado” (pronto para produção municipal), os critérios vivem em:
+- `docs/definition-of-done.md`
+- `docs/release-criteria.md`
+
+E são aplicados no fluxo via template de PR e checklist de release:
+- `.github/pull_request_template.md`
+- `.github/ISSUE_TEMPLATE/release.md`
+
 ## What Docker Compose Does
 
 `docker compose up -d postgres` boots the PostgreSQL service defined in `docker-compose.yml`, which is required for Prisma migrations and local runtime.
@@ -467,6 +454,11 @@ erDiagram
 - `GET /api/admin/rbac/assignments`
 - `POST /api/admin/rbac/assignments`
 - `PATCH /api/admin/rbac/assignments`
+- `GET /api/admin/rbac/roles`
+- `POST /api/admin/rbac/roles`
+- `PATCH /api/admin/rbac/roles/[id]`
+- `DELETE /api/admin/rbac/roles/[id]`
+- `PATCH /api/admin/rbac/roles/[id]/permissions`
 
 ## RBAC and Organizational Scope
 
@@ -501,13 +493,15 @@ Governance note: keep `ADMIN` as a technical/system role and enforce business de
 
 ## Workflow Engine
 
-The workflow engine is configuration-driven.
+The workflow is **configurable** per tenant and acts as the decision/audit backbone.
 
-- `ProcessDefinition`: process type and version
-- `ProcessStep`: states, transitions, required permissions
-- `ProcessInstance`: runtime execution record
+- `WorkflowDefinition`: workflow type + version
+- `WorkflowStateDefinition`: states (with `isInitial/isTerminal`)
+- `WorkflowTransitionDefinition`: transitions (with `requiredPermission`)
+- `WorkflowInstance`: runtime instance per request (`currentState`)
+- `WorkflowEvent`: immutable events per transition/action
 
-Capabilities include conditional rules, per-process flow variants, and immutable event history for every transition.
+Transitions are executed through **actions** (API `.../action`) and are always validated server-side by permission and scope.
 
 ## Domain Breakdown
 

@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 
 type TicketStatus = "OPEN" | "IN_PROGRESS" | "WAITING_CUSTOMER" | "ESCALATED" | "RESOLVED" | "CLOSED";
@@ -128,6 +129,7 @@ export default function TicketDetailsPage() {
   const { toast } = useToast();
   const { isLoggedIn, isAuthLoading, user } = useAuth();
   const isAdmin = user?.role === "ADMIN";
+  const canEditTicket = isAdmin;
 
   const [ticket, setTicket] = useState<TicketDetails | null>(null);
   const [loading, setLoading] = useState(true);
@@ -449,15 +451,21 @@ export default function TicketDetailsPage() {
     <AuthenticatedLayout>
       <div className="space-y-4">
         <section className="rounded-2xl border border-border/60 bg-[hsl(var(--surface-1)/0.82)] p-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <div className="font-mono text-xs text-muted-foreground">{ticket.code}</div>
-              <h1 className="text-2xl font-semibold">{ticket.title}</h1>
-              <div className="text-xs text-muted-foreground">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <Button size="sm" variant="outline" onClick={() => router.push("/tickets")}>
+                  Voltar
+                </Button>
+                <div className="font-mono text-xs text-muted-foreground">{ticket.code}</div>
+              </div>
+              <h1 className="mt-2 truncate text-2xl font-semibold">{ticket.title}</h1>
+              <div className="mt-1 text-xs text-muted-foreground">
                 Criado por {ticket.createdBy?.name || ticket.createdBy?.email} em {fmtDateTime(ticket.createdAt)}
               </div>
             </div>
-            <div className="flex items-center gap-2">
+
+            <div className="flex flex-wrap items-center justify-end gap-2">
               <Badge
                 variant="outline"
                 className={
@@ -470,157 +478,105 @@ export default function TicketDetailsPage() {
               >
                 {realtimeStatus === "online" ? "Realtime ligado" : realtimeStatus === "connecting" ? "A ligar realtime..." : "Realtime offline"}
               </Badge>
-              <Badge variant="outline">{ticket.level}</Badge>
-              <Badge variant="outline">{ticket.type}</Badge>
               <Badge variant="outline">{ticket.status}</Badge>
-              <Badge variant="outline">Reqs: {ticket.requests?.length || 0}</Badge>
+              <Badge variant="outline">{ticket.priority}</Badge>
+              <Badge variant="outline">{ticket.type}</Badge>
+              <Badge variant="outline">{ticket.level}</Badge>
+              <Badge variant="outline">{ticket.requests?.length || 0} pedidos</Badge>
             </div>
           </div>
         </section>
 
-        <section className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
-          <div className="rounded-2xl border border-border/60 bg-[hsl(var(--surface-1)/0.82)] p-4">
-            <div className="mb-3 text-sm font-semibold">Chat do Ticket</div>
-            <div className="max-h-[55vh] space-y-2 overflow-y-auto pr-1">
-              {messages.map((m) => {
-                const mine = m.author.id === user?.id;
-                return (
-                  <div
-                    key={m.id}
-                    className={`rounded-xl border p-3 ${mine ? "border-primary/30 bg-primary/5" : "border-border/60 bg-[hsl(var(--surface-2)/0.5)]"}`}
-                  >
-                    <div className="text-xs text-muted-foreground">
-                      {m.author.name || m.author.email} · {fmtDateTime(m.createdAt)}
-                    </div>
-                    <div className="mt-1 whitespace-pre-wrap text-sm">{m.body}</div>
-                  </div>
-                );
-              })}
-              {!messages.length ? <div className="text-sm text-muted-foreground">Sem mensagens ainda.</div> : null}
-            </div>
-
-            <div className="mt-3 space-y-2">
-              {isTicketClosed ? (
-                <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700">
-                  Este ticket está fechado. O envio de mensagens foi desativado.
-                </div>
-              ) : null}
-              <Textarea
-                value={messageBody}
-                onChange={(e) => setMessageBody(e.target.value)}
-                placeholder="Escreve uma mensagem..."
-                rows={4}
-                disabled={isTicketClosed}
-              />
-              <div className="flex justify-end">
-                <Button onClick={sendMessage} disabled={!canSend || sending || isTicketClosed}>
-                  {sending ? "A enviar..." : "Enviar mensagem"}
-                </Button>
-              </div>
-            </div>
+        <Tabs defaultValue="chat" className="space-y-3">
+          <div className="overflow-x-auto">
+            <TabsList className="inline-flex min-w-max">
+              <TabsTrigger value="chat">Chat</TabsTrigger>
+              <TabsTrigger value="requests">Pedidos</TabsTrigger>
+              <TabsTrigger value="people">Pessoas</TabsTrigger>
+              <TabsTrigger value="details">Detalhes</TabsTrigger>
+              {canEditTicket ? <TabsTrigger value="audit">Auditoria</TabsTrigger> : null}
+            </TabsList>
           </div>
 
-          <aside className="rounded-2xl border border-border/60 bg-[hsl(var(--surface-1)/0.82)] p-4">
-            <div className="mb-3 text-sm font-semibold">Gestão</div>
-            <div className="space-y-3">
-              <div className="rounded-xl border border-border/60 p-3">
-                <div className="mb-1 text-xs text-muted-foreground">Pessoas no ticket</div>
-                <div className="space-y-2">
-                  <div className="text-xs text-muted-foreground">
-                    Dica: podes mencionar alguém no chat com <span className="font-mono">@username</span>.
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Badge variant="outline">
-                      Criador: {ticket.createdBy?.name || ticket.createdBy?.email}
-                    </Badge>
-                    {ticket.assignedTo ? (
-                      <Badge variant="outline">
-                        Atribuído: {ticket.assignedTo?.name || ticket.assignedTo?.email}
-                      </Badge>
-                    ) : null}
-                  </div>
-
-                  {ticket.participants?.length ? (
-                    <div className="flex flex-wrap gap-2">
-                      {ticket.participants.map((p) => {
-                        const label = p.user?.username
-                          ? `${p.user.name || p.user.email} (@${p.user.username})`
-                          : (p.user?.name || p.user?.email);
-                        const isCreator = p.userId === ticket.createdBy?.id;
-                        return (
-                          <div key={p.id} className="inline-flex items-center gap-2 rounded-full border border-border/70 bg-background px-3 py-1 text-xs">
-                            <span className="max-w-[220px] truncate">{label}</span>
-                            {canManageParticipants && !isCreator ? (
-                              <button
-                                className="text-muted-foreground hover:text-foreground"
-                                onClick={() => void removeParticipant(p.userId)}
-                                disabled={participantSaving}
-                                title="Remover"
-                              >
-                                ×
-                              </button>
-                            ) : null}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <div className="text-xs text-muted-foreground">Sem participantes extra.</div>
-                  )}
-
-                  {canManageParticipants ? (
-                    <div className="mt-2 space-y-2">
-                      <div className="text-xs text-muted-foreground">Adicionar pessoa</div>
-                      <Input
-                        value={participantQuery}
-                        onChange={(e) => setParticipantQuery(e.target.value)}
-                        placeholder="Pesquisar por nome/email/username..."
-                        disabled={participantSaving}
-                      />
-                      <div className="flex gap-2">
-                        <select
-                          className="h-10 w-full rounded-md border bg-background px-2 text-sm"
-                          value={participantSelectedId}
-                          onChange={(e) => setParticipantSelectedId(e.target.value)}
-                          disabled={participantSaving || participantLoading || participantResults.length === 0}
-                        >
-                          <option value="">
-                            {participantLoading
-                              ? "A pesquisar..."
-                              : participantResults.length
-                                ? "Seleciona uma pessoa"
-                                : "Sem resultados (mín. 2 letras)"}
-                          </option>
-                          {participantResults.map((u) => (
-                            <option key={u.id} value={u.id}>
-                              {u.name || u.email}
-                              {u.username ? ` (@${u.username})` : ""} · {u.email}
-                            </option>
-                          ))}
-                        </select>
-                        <Button size="sm" variant="outline" onClick={() => void addParticipant()} disabled={!participantSelectedId || participantSaving}>
-                          {participantSaving ? "A guardar..." : "Adicionar"}
-                        </Button>
-                      </div>
-                      <div className="text-[11px] text-muted-foreground">
-                        Nota: utilizadores sem permissão <span className="font-mono">tickets.manage</span> só conseguem adicionar pessoas do mesmo departamento.
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
+          <TabsContent value="chat" className="m-0">
+            <section className="rounded-2xl border border-border/60 bg-[hsl(var(--surface-1)/0.82)] p-4">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <div className="text-sm font-semibold">Chat do Ticket</div>
+                <div className="text-xs text-muted-foreground">{messages.length ? `${messages.length} mensagens` : "Sem mensagens"}</div>
               </div>
 
-              <div className="rounded-xl border border-border/60 p-3">
-                <div className="mb-1 text-xs text-muted-foreground">Requisições associadas</div>
-                {ticket.requests?.length ? (
-                  <div className="space-y-2">
-                    {ticket.requests.map((req) => (
-                      <div key={req.id} className="rounded-md border border-border/50 p-2">
-                        <div className="text-sm font-medium">{req.gtmiNumber}</div>
-                        <div className="text-xs text-muted-foreground">
-                          Estado: {req.status} · {fmtDateTime(req.requestedAt)} · ligado em {fmtDateTime(req.linkedAt)}
+              <div className="max-h-[55vh] space-y-2 overflow-y-auto pr-1">
+                {messages.map((m) => {
+                  const mine = m.author.id === user?.id;
+                  return (
+                    <div
+                      key={m.id}
+                      className={`rounded-xl border p-3 ${mine ? "border-primary/30 bg-primary/5" : "border-border/60 bg-[hsl(var(--surface-2)/0.5)]"}`}
+                    >
+                      <div className="text-xs text-muted-foreground">
+                        {m.author.name || m.author.email} · {fmtDateTime(m.createdAt)}
+                      </div>
+                      <div className="mt-1 whitespace-pre-wrap text-sm">{m.body}</div>
+                    </div>
+                  );
+                })}
+                {!messages.length ? <div className="text-sm text-muted-foreground">Sem mensagens ainda.</div> : null}
+              </div>
+
+              <div className="mt-3 space-y-2">
+                {isTicketClosed ? (
+                  <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700">
+                    Este ticket está fechado. O envio de mensagens foi desativado.
+                  </div>
+                ) : null}
+                <Textarea
+                  value={messageBody}
+                  onChange={(e) => setMessageBody(e.target.value)}
+                  placeholder="Escreve uma mensagem... (podes mencionar com @username)"
+                  rows={4}
+                  disabled={isTicketClosed}
+                />
+                <div className="flex justify-end">
+                  <Button onClick={sendMessage} disabled={!canSend || sending || isTicketClosed}>
+                    {sending ? "A enviar..." : "Enviar mensagem"}
+                  </Button>
+                </div>
+              </div>
+            </section>
+          </TabsContent>
+
+          <TabsContent value="requests" className="m-0">
+            <section className="rounded-2xl border border-border/60 bg-[hsl(var(--surface-1)/0.82)] p-4">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <div className="text-sm font-semibold">Pedidos associados</div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    if (isAdmin) {
+                      router.push(`/requests?openCreate=1&ticketId=${ticket.id}`);
+                      return;
+                    }
+                    router.push(`/requests/estado/novo?ticketId=${ticket.id}`);
+                  }}
+                >
+                  Criar novo pedido
+                </Button>
+              </div>
+
+              {ticket.requests?.length ? (
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {ticket.requests.map((req) => (
+                    <div key={req.id} className="rounded-xl border border-border/60 bg-[hsl(var(--surface-2)/0.55)] p-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-semibold">{req.gtmiNumber}</div>
+                          <div className="mt-0.5 text-xs text-muted-foreground">
+                            Estado: {req.status} · {fmtDateTime(req.requestedAt)}
+                          </div>
+                          <div className="mt-0.5 text-xs text-muted-foreground">Ligado em {fmtDateTime(req.linkedAt)}</div>
                         </div>
-                        <div className="mt-2 flex gap-2">
+                        <div className="flex gap-2">
                           <Button size="sm" variant="outline" onClick={() => router.push(`/requests/${req.id}`)}>
                             Abrir
                           </Button>
@@ -631,213 +587,291 @@ export default function TicketDetailsPage() {
                           ) : null}
                         </div>
                       </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-xs text-muted-foreground">Sem requisições ligadas.</div>
-                )}
-                <div className="mt-3">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => {
-                      if (isAdmin) {
-                        router.push(`/requests?openCreate=1&ticketId=${ticket.id}`);
-                        return;
-                      }
-                      // Base role USER can't access /requests (backoffice). Use the USER intake form instead.
-                      router.push(`/requests/estado/novo?ticketId=${ticket.id}`);
-                    }}
-                  >
-                    Criar novo pedido associado
-                  </Button>
-                </div>
-                {isAdmin ? (
-                  <div className="mt-3">
-                    <div className="mb-1 text-xs text-muted-foreground">Associar requisição existente (ID)</div>
-                    <div className="flex gap-2">
-                      <Input
-                        value={linkedRequestId}
-                        onChange={(e) => setLinkedRequestId(e.target.value)}
-                        placeholder="UUID da requisição"
-                      />
-                      <Button size="sm" variant="outline" onClick={() => void linkRequestById()} disabled={linkingRequest || !linkedRequestId.trim()}>
-                        {linkingRequest ? "A ligar..." : "Ligar"}
-                      </Button>
                     </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-xl border border-dashed border-border/70 p-6 text-center text-sm text-muted-foreground">
+                  Sem pedidos ligados a este ticket.
+                </div>
+              )}
+
+              {isAdmin ? (
+                <div className="mt-4 rounded-xl border border-border/60 p-3">
+                  <div className="mb-2 text-xs text-muted-foreground">Associar requisição existente (ID)</div>
+                  <div className="flex gap-2">
+                    <Input value={linkedRequestId} onChange={(e) => setLinkedRequestId(e.target.value)} placeholder="UUID da requisição" />
+                    <Button size="sm" variant="outline" onClick={() => void linkRequestById()} disabled={linkingRequest || !linkedRequestId.trim()}>
+                      {linkingRequest ? "A ligar..." : "Ligar"}
+                    </Button>
                   </div>
-                ) : (
-                  <div className="mt-3">
-                    <div className="mb-1 text-xs text-muted-foreground">Associar um pedido teu existente</div>
-                    <div className="flex gap-2">
-                      <select
-                        className="h-10 w-full rounded-md border bg-background px-2 text-sm"
-                        value={selectedMyRequestId}
-                        onChange={(e) => setSelectedMyRequestId(e.target.value)}
-                        disabled={linkingRequest || availableMyRequests.length === 0}
-                      >
-                        <option value="">
-                          {availableMyRequests.length ? "Seleciona um pedido" : "Sem pedidos teus por associar"}
+                </div>
+              ) : (
+                <div className="mt-4 rounded-xl border border-border/60 p-3">
+                  <div className="mb-2 text-xs text-muted-foreground">Associar um pedido teu existente</div>
+                  <div className="flex gap-2">
+                    <select
+                      className="h-10 w-full rounded-md border bg-background px-2 text-sm"
+                      value={selectedMyRequestId}
+                      onChange={(e) => setSelectedMyRequestId(e.target.value)}
+                      disabled={linkingRequest || availableMyRequests.length === 0}
+                    >
+                      <option value="">{availableMyRequests.length ? "Seleciona um pedido" : "Sem pedidos teus por associar"}</option>
+                      {availableMyRequests.map((req) => (
+                        <option key={req.id} value={req.id}>
+                          {(req.gtmiNumber || req.id).slice(0, 28)} · {req.status}
                         </option>
-                        {availableMyRequests.map((req) => (
-                          <option key={req.id} value={req.id}>
-                            {(req.gtmiNumber || req.id).slice(0, 28)} · {req.status}
-                          </option>
-                        ))}
-                      </select>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => void linkMyRequest()}
-                        disabled={linkingRequest || !selectedMyRequestId}
-                      >
-                        {linkingRequest ? "A ligar..." : "Associar"}
-                      </Button>
-                    </div>
+                      ))}
+                    </select>
+                    <Button size="sm" variant="outline" onClick={() => void linkMyRequest()} disabled={linkingRequest || !selectedMyRequestId}>
+                      {linkingRequest ? "A ligar..." : "Associar"}
+                    </Button>
                   </div>
+                </div>
+              )}
+            </section>
+          </TabsContent>
+
+          <TabsContent value="people" className="m-0">
+            <section className="rounded-2xl border border-border/60 bg-[hsl(var(--surface-1)/0.82)] p-4">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <div className="text-sm font-semibold">Pessoas no ticket</div>
+                <div className="text-xs text-muted-foreground">Dica: menciona alguém no chat com <span className="font-mono">@username</span></div>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <Badge variant="outline">Criador: {ticket.createdBy?.name || ticket.createdBy?.email}</Badge>
+                {ticket.assignedTo ? <Badge variant="outline">Atribuído: {ticket.assignedTo?.name || ticket.assignedTo?.email}</Badge> : null}
+              </div>
+
+              <div className="mt-3">
+                {ticket.participants?.length ? (
+                  <div className="flex flex-wrap gap-2">
+                    {ticket.participants.map((p) => {
+                      const label = p.user?.username ? `${p.user.name || p.user.email} (@${p.user.username})` : (p.user?.name || p.user?.email);
+                      const isCreator = p.userId === ticket.createdBy?.id;
+                      return (
+                        <div key={p.id} className="inline-flex items-center gap-2 rounded-full border border-border/70 bg-background px-3 py-1 text-xs">
+                          <span className="max-w-[260px] truncate">{label}</span>
+                          {canManageParticipants && !isCreator ? (
+                            <button
+                              className="text-muted-foreground hover:text-foreground"
+                              onClick={() => void removeParticipant(p.userId)}
+                              disabled={participantSaving}
+                              title="Remover"
+                            >
+                              ×
+                            </button>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="text-sm text-muted-foreground">Sem participantes extra.</div>
                 )}
               </div>
 
-              <div>
-                <div className="mb-1 text-xs text-muted-foreground">Estado</div>
-                <select
-                  className="h-10 w-full rounded-md border bg-background px-2 text-sm"
-                  value={status}
-                  onChange={(e) => setStatus(e.target.value as TicketStatus)}
-                  disabled={!isAdmin}
-                >
-                  {statusOptions.map((o) => (
-                    <option key={o.value} value={o.value}>{o.label}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <div className="mb-1 text-xs text-muted-foreground">Prioridade</div>
-                <select
-                  className="h-10 w-full rounded-md border bg-background px-2 text-sm"
-                  value={priority}
-                  onChange={(e) => setPriority(e.target.value as TicketPriority)}
-                  disabled={!isAdmin}
-                >
-                  {priorityOptions.map((o) => (
-                    <option key={o.value} value={o.value}>{o.label}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <div className="mb-1 text-xs text-muted-foreground">Tipo</div>
-                <select
-                  className="h-10 w-full rounded-md border bg-background px-2 text-sm"
-                  value={type}
-                  onChange={(e) => setType(e.target.value as TicketType)}
-                  disabled={!isAdmin}
-                >
-                  {typeOptions.map((o) => (
-                    <option key={o.value} value={o.value}>{o.label}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <div className="mb-1 text-xs text-muted-foreground">Nível</div>
-                <select
-                  className="h-10 w-full rounded-md border bg-background px-2 text-sm"
-                  value={level}
-                  onChange={(e) => setLevel(e.target.value as TicketLevel)}
-                  disabled={!isAdmin}
-                >
-                  {levelOptions.map((o) => (
-                    <option key={o.value} value={o.value}>{o.label}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <div className="mb-1 text-xs text-muted-foreground">Título</div>
-                <Input value={title} onChange={(e) => setTitle(e.target.value)} disabled={!isAdmin} />
-              </div>
-
-              <div>
-                <div className="mb-1 text-xs text-muted-foreground">Descrição</div>
-                <Textarea value={description} onChange={(e) => setDescription(e.target.value)} disabled={!isAdmin} rows={4} />
-              </div>
-
-              <div>
-                <div className="mb-1 text-xs text-muted-foreground">Razão de escalonamento</div>
-                <Input value={escalationReason} onChange={(e) => setEscalationReason(e.target.value)} disabled={!isAdmin} />
-              </div>
-
-              <div>
-                <div className="mb-1 text-xs text-muted-foreground">Responsável</div>
-                <select
-                  className="h-10 w-full rounded-md border bg-background px-2 text-sm"
-                  value={assignedToUserId}
-                  onChange={(e) => setAssignedToUserId(e.target.value)}
-                  disabled={!isAdmin}
-                >
-                  <option value="">Sem responsável</option>
-                  {users.map((u) => (
-                    <option key={u.id} value={u.id}>{u.name} ({u.email})</option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="pt-2">
-                <Button className="w-full" onClick={saveTicket} disabled={!isAdmin || savingTicket || !title.trim()}>
-                  {savingTicket ? "A guardar..." : "Guardar alterações"}
-                </Button>
-              </div>
-
-              {isAdmin ? (
-                <div>
-                  <Button
-                    variant="outline"
-                    className="w-full border-rose-300 text-rose-700"
-                    onClick={() => void closeTicket()}
-                    disabled={closingTicket || ticket.status === "CLOSED"}
-                  >
-                    {closingTicket ? "A finalizar..." : ticket.status === "CLOSED" ? "Ticket já finalizado" : "Finalizar ticket"}
-                  </Button>
-                </div>
-              ) : null}
-
-              <div className="rounded-xl border border-border/60 p-3 text-xs text-muted-foreground">
-                <div>SLA 1ª resposta: {fmtDateTime(ticket.firstResponseDueAt)}</div>
-                <div>SLA resolução: {fmtDateTime(ticket.resolutionDueAt)}</div>
-                <div>SLA breached em: {fmtDateTime(ticket.slaBreachedAt)}</div>
-                <div>Último escalonamento: {fmtDateTime(ticket.lastEscalatedAt)}</div>
-                <div>Nº escalonamentos: {ticket.slaEscalationCount ?? 0}</div>
-                <div>Primeira resposta: {fmtDateTime(ticket.firstResponseAt)}</div>
-                <div>Resolvido em: {fmtDateTime(ticket.resolvedAt)}</div>
-                <div>Fechado em: {fmtDateTime(ticket.closedAt)}</div>
-                <div>Atualizado em: {fmtDateTime(ticket.updatedAt)}</div>
-              </div>
-
-              {isAdmin ? (
-                <div className="rounded-xl border border-border/60 p-3">
-                  <div className="mb-2 text-xs text-muted-foreground">Logs de auditoria (persistentes)</div>
-                  <div className="max-h-52 space-y-2 overflow-y-auto pr-1">
-                    {(ticket.audits || []).length ? (
-                      ticket.audits?.map((a) => (
-                        <div key={a.id} className="rounded-md border border-border/50 p-2 text-xs">
-                          <div className="font-medium">{a.action}</div>
-                          <div className="text-muted-foreground">
-                            {fmtDateTime(a.createdAt)} · {a.actor?.name || a.actor?.email || "sistema"}
-                          </div>
-                          {a.note ? <div className="mt-1">{a.note}</div> : null}
-                        </div>
-                      ))
-                    ) : (
-                      <div className="text-xs text-muted-foreground">Sem logs.</div>
-                    )}
+              {canManageParticipants ? (
+                <div className="mt-4 rounded-xl border border-border/60 p-3">
+                  <div className="mb-2 text-xs text-muted-foreground">Adicionar pessoa</div>
+                  <Input
+                    value={participantQuery}
+                    onChange={(e) => setParticipantQuery(e.target.value)}
+                    placeholder="Pesquisar por nome/email/username..."
+                    disabled={participantSaving}
+                  />
+                  <div className="mt-2 flex gap-2">
+                    <select
+                      className="h-10 w-full rounded-md border bg-background px-2 text-sm"
+                      value={participantSelectedId}
+                      onChange={(e) => setParticipantSelectedId(e.target.value)}
+                      disabled={participantSaving || participantLoading || participantResults.length === 0}
+                    >
+                      <option value="">
+                        {participantLoading ? "A pesquisar..." : participantResults.length ? "Seleciona uma pessoa" : "Sem resultados (mín. 2 letras)"}
+                      </option>
+                      {participantResults.map((u) => (
+                        <option key={u.id} value={u.id}>
+                          {u.name || u.email}
+                          {u.username ? ` (@${u.username})` : ""} · {u.email}
+                        </option>
+                      ))}
+                    </select>
+                    <Button size="sm" variant="outline" onClick={() => void addParticipant()} disabled={!participantSelectedId || participantSaving}>
+                      {participantSaving ? "A guardar..." : "Adicionar"}
+                    </Button>
+                  </div>
+                  <div className="mt-2 text-[11px] text-muted-foreground">
+                    Nota: utilizadores sem permissão <span className="font-mono">tickets.manage</span> só conseguem adicionar pessoas do mesmo departamento.
                   </div>
                 </div>
               ) : null}
-            </div>
-          </aside>
-        </section>
+            </section>
+          </TabsContent>
+
+          <TabsContent value="details" className="m-0">
+            <section className="rounded-2xl border border-border/60 bg-[hsl(var(--surface-1)/0.82)] p-4">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <div className="text-sm font-semibold">Detalhes</div>
+                {canEditTicket ? (
+                  <div className="flex gap-2">
+                    <Button size="sm" onClick={saveTicket} disabled={!canEditTicket || savingTicket || !title.trim()}>
+                      {savingTicket ? "A guardar..." : "Guardar"}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="border-rose-300 text-rose-700"
+                      onClick={() => void closeTicket()}
+                      disabled={closingTicket || ticket.status === "CLOSED"}
+                    >
+                      {closingTicket ? "A finalizar..." : ticket.status === "CLOSED" ? "Já finalizado" : "Finalizar"}
+                    </Button>
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <div>
+                  <div className="mb-1 text-xs text-muted-foreground">Estado</div>
+                  <select
+                    className="h-10 w-full rounded-md border bg-background px-2 text-sm"
+                    value={status}
+                    onChange={(e) => setStatus(e.target.value as TicketStatus)}
+                    disabled={!canEditTicket}
+                  >
+                    {statusOptions.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <div className="mb-1 text-xs text-muted-foreground">Prioridade</div>
+                  <select
+                    className="h-10 w-full rounded-md border bg-background px-2 text-sm"
+                    value={priority}
+                    onChange={(e) => setPriority(e.target.value as TicketPriority)}
+                    disabled={!canEditTicket}
+                  >
+                    {priorityOptions.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <div className="mb-1 text-xs text-muted-foreground">Tipo</div>
+                  <select
+                    className="h-10 w-full rounded-md border bg-background px-2 text-sm"
+                    value={type}
+                    onChange={(e) => setType(e.target.value as TicketType)}
+                    disabled={!canEditTicket}
+                  >
+                    {typeOptions.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <div className="mb-1 text-xs text-muted-foreground">Nível</div>
+                  <select
+                    className="h-10 w-full rounded-md border bg-background px-2 text-sm"
+                    value={level}
+                    onChange={(e) => setLevel(e.target.value as TicketLevel)}
+                    disabled={!canEditTicket}
+                  >
+                    {levelOptions.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="mt-3 grid gap-3 md:grid-cols-2">
+                <div className="md:col-span-2">
+                  <div className="mb-1 text-xs text-muted-foreground">Título</div>
+                  <Input value={title} onChange={(e) => setTitle(e.target.value)} disabled={!canEditTicket} />
+                </div>
+                <div className="md:col-span-2">
+                  <div className="mb-1 text-xs text-muted-foreground">Descrição</div>
+                  <Textarea value={description} onChange={(e) => setDescription(e.target.value)} disabled={!canEditTicket} rows={4} />
+                </div>
+                <div>
+                  <div className="mb-1 text-xs text-muted-foreground">Razão de escalonamento</div>
+                  <Input value={escalationReason} onChange={(e) => setEscalationReason(e.target.value)} disabled={!canEditTicket} />
+                </div>
+                <div>
+                  <div className="mb-1 text-xs text-muted-foreground">Responsável</div>
+                  <select
+                    className="h-10 w-full rounded-md border bg-background px-2 text-sm"
+                    value={assignedToUserId}
+                    onChange={(e) => setAssignedToUserId(e.target.value)}
+                    disabled={!canEditTicket}
+                  >
+                    <option value="">Sem responsável</option>
+                    {users.map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.name} ({u.email})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="mt-4 rounded-xl border border-border/60 p-3 text-xs text-muted-foreground">
+                <div className="grid gap-1 sm:grid-cols-2">
+                  <div>SLA 1ª resposta: {fmtDateTime(ticket.firstResponseDueAt)}</div>
+                  <div>SLA resolução: {fmtDateTime(ticket.resolutionDueAt)}</div>
+                  <div>SLA breached em: {fmtDateTime(ticket.slaBreachedAt)}</div>
+                  <div>Último escalonamento: {fmtDateTime(ticket.lastEscalatedAt)}</div>
+                  <div>Nº escalonamentos: {ticket.slaEscalationCount ?? 0}</div>
+                  <div>Primeira resposta: {fmtDateTime(ticket.firstResponseAt)}</div>
+                  <div>Resolvido em: {fmtDateTime(ticket.resolvedAt)}</div>
+                  <div>Fechado em: {fmtDateTime(ticket.closedAt)}</div>
+                  <div>Atualizado em: {fmtDateTime(ticket.updatedAt)}</div>
+                </div>
+              </div>
+            </section>
+          </TabsContent>
+
+          {canEditTicket ? (
+            <TabsContent value="audit" className="m-0">
+              <section className="rounded-2xl border border-border/60 bg-[hsl(var(--surface-1)/0.82)] p-4">
+                <div className="mb-3 text-sm font-semibold">Auditoria (persistente)</div>
+                <div className="max-h-[60vh] space-y-2 overflow-y-auto pr-1">
+                  {(ticket.audits || []).length ? (
+                    ticket.audits?.map((a) => (
+                      <div key={a.id} className="rounded-xl border border-border/60 bg-[hsl(var(--surface-2)/0.55)] p-3 text-sm">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <div className="font-semibold">{a.action}</div>
+                            <div className="text-xs text-muted-foreground">
+                              {fmtDateTime(a.createdAt)} · {a.actor?.name || a.actor?.email || "sistema"}
+                            </div>
+                            {a.note ? <div className="mt-2 text-sm">{a.note}</div> : null}
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-sm text-muted-foreground">Sem logs.</div>
+                  )}
+                </div>
+              </section>
+            </TabsContent>
+          ) : null}
+        </Tabs>
       </div>
     </AuthenticatedLayout>
   );
