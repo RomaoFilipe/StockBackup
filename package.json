@@ -20,13 +20,17 @@
     "test:user-intake": "bash scripts/test-user-intake.sh",
     "test:admin-workflows": "bash scripts/test-admin-workflows.sh",
     "test:scan-workflow": "bash scripts/test-scan-workflow.sh",
+    "test:rbac-workflow-scope": "bash scripts/test-rbac-workflow-scope.sh",
+    "test:approval-2step": "bash scripts/test-approval-2step.sh",
     "backfill:request-owners": "node scripts/backfill-request-owners.js",
-    "test:return-flow": "bash scripts/test-return-signature-restock.sh"
+    "backfill:usernames": "node scripts/backfill-usernames.js",
+    "test:return-flow": "bash scripts/test-return-signature-restock.sh",
+    "test:request-execution-flow": "bash scripts/test-request-execution-flow.sh"
   },
   "dependencies": {
     "@clerk/clerk-sdk-node": "^5.1.6",
     "@hookform/resolvers": "^3.10.0",
-    "@prisma/client": "^6.4.1",
+    "@prisma/client": "6.19.2",
     "@radix-ui/react-alert-dialog": "^1.1.2",
     "@radix-ui/react-checkbox": "^1.1.2",
     "@radix-ui/react-dialog": "^1.1.2",
@@ -61,9 +65,9 @@
     "lucide-react": "^0.454.0",
     "mongodb": "^4.17.2",
     "nanoid": "^5.0.8",
-    "next": "15.5.7",
+    "next": "^15.5.12",
     "next-themes": "^0.4.3",
-    "nodemailer": "^6.9.4",
+    "nodemailer": "^8.0.1",
     "papaparse": "^5.5.3",
     "pdf-lib": "^1.17.1",
     "puppeteer": "^24.2.0",
@@ -92,8 +96,11 @@
     "eslint": "^8",
     "eslint-config-next": "15.5.7",
     "postcss": "^8.5.3",
-    "prisma": "^6.4.1",
+    "prisma": "6.19.2",
     "tailwindcss": "^3.4.17",
-    "typescript": "^5"
+    "typescript": "5.6.3"
+  },
+  "overrides": {
+    "fast-xml-parser": "5.3.8"
   }
 }

@@ -69,6 +69,8 @@ type RbacPayload = {
 };
 
 type AssignmentDraft = {
+  roleKey: string;
+  requestingServiceId: string;
   note: string;
   startsAt: string;
   endsAt: string;
@@ -116,7 +118,19 @@ export default function GovernancaPermissoesPage() {
   const [endsAt, setEndsAt] = useState("");
   const [assignmentDrafts, setAssignmentDrafts] = useState<Record<string, AssignmentDraft>>({});
 
-  const canAccess = user?.role === "ADMIN";
+  const permissionSet = useMemo(() => {
+    const direct = user?.permissions ?? [];
+    const scoped = (user?.permissionGrants ?? []).map((g) => g.key);
+    return new Set<string>([...direct, ...scoped]);
+  }, [user?.permissionGrants, user?.permissions]);
+
+  const canAccess = permissionSet.has("*") || permissionSet.has("users.manage");
+
+  const [newRoleKey, setNewRoleKey] = useState("");
+  const [newRoleName, setNewRoleName] = useState("");
+  const [newRoleDescription, setNewRoleDescription] = useState("");
+  const [cloneFromRoleKey, setCloneFromRoleKey] = useState<string>("");
+  const [creatingRole, setCreatingRole] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -140,11 +154,16 @@ export default function GovernancaPermissoesPage() {
         const next: Record<string, AssignmentDraft> = {};
         for (const assignment of response.data.assignments) {
           next[assignment.id] = prev[assignment.id] ?? {
+            roleKey: assignment.role.key,
+            requestingServiceId: assignment.requestingService ? String(assignment.requestingService.id) : "all",
             note: assignment.note ?? "",
             startsAt: toDatetimeLocal(assignment.startsAt),
             endsAt: toDatetimeLocal(assignment.endsAt),
             saving: false,
           };
+          next[assignment.id].roleKey = next[assignment.id].roleKey || assignment.role.key;
+          next[assignment.id].requestingServiceId =
+            next[assignment.id].requestingServiceId || (assignment.requestingService ? String(assignment.requestingService.id) : "all");
           next[assignment.id].saving = false;
         }
         return next;
@@ -157,6 +176,56 @@ export default function GovernancaPermissoesPage() {
       });
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function createRoleFromTemplate() {
+    if (!canAccess) return;
+    if (!newRoleKey.trim() || !newRoleName.trim()) {
+      toast({ title: "Erro", description: "Indica Key e Nome do papel.", variant: "destructive" });
+      return;
+    }
+    setCreatingRole(true);
+    try {
+      await axiosInstance.post("/admin/rbac/roles", {
+        key: newRoleKey.trim().toUpperCase(),
+        name: newRoleName.trim(),
+        description: newRoleDescription.trim() || null,
+        cloneFromRoleKey: cloneFromRoleKey || null,
+      });
+      setNewRoleKey("");
+      setNewRoleName("");
+      setNewRoleDescription("");
+      setCloneFromRoleKey("");
+      await load();
+      toast({ title: "Papel criado" });
+    } catch (error: any) {
+      const msg = error?.response?.data?.error || "Não foi possível criar papel.";
+      toast({ title: "Erro", description: msg, variant: "destructive" });
+    } finally {
+      setCreatingRole(false);
+    }
+  }
+
+  async function toggleRolePermission(role: RbacRole, permissionKey: string, enabled: boolean) {
+    if (!canAccess) return;
+    if (role.isSystem) {
+      toast({
+        title: "Papel de sistema",
+        description: "Este papel não é editável. Duplica o papel e edita a cópia.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setSaving(true);
+    try {
+      await axiosInstance.patch(`/admin/rbac/roles/${role.id}/permissions`, { permissionKey, enabled });
+      await load();
+    } catch (error: any) {
+      const msg = error?.response?.data?.error || "Não foi possível alterar permissão.";
+      toast({ title: "Erro", description: msg, variant: "destructive" });
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -179,6 +248,14 @@ export default function GovernancaPermissoesPage() {
     }
     return Array.from(byKey.entries()).map(([key, name]) => ({ key, name }));
   }, [data.roles]);
+  const assignmentByUserId = useMemo(() => {
+    const map = new Map<string, Assignment>();
+    for (const assignment of data.assignments) {
+      if (!map.has(assignment.user.id)) map.set(assignment.user.id, assignment);
+    }
+    return map;
+  }, [data.assignments]);
+  const selectedUserAssignment = userId ? assignmentByUserId.get(userId) ?? null : null;
 
   async function createAssignment() {
     if (!userId || !roleKey) {
@@ -208,7 +285,7 @@ export default function GovernancaPermissoesPage() {
 
       toast({
         title: "Permissões",
-        description: "Atribuição criada com sucesso.",
+        description: "Papel atribuído com sucesso.",
       });
       await load();
     } catch (error: any) {
@@ -242,6 +319,8 @@ export default function GovernancaPermissoesPage() {
     setAssignmentDrafts((prev) => ({
       ...prev,
       [assignmentId]: {
+        roleKey: prev[assignmentId]?.roleKey ?? "",
+        requestingServiceId: prev[assignmentId]?.requestingServiceId ?? "all",
         note: prev[assignmentId]?.note ?? "",
         startsAt: prev[assignmentId]?.startsAt ?? "",
         endsAt: prev[assignmentId]?.endsAt ?? "",
@@ -254,6 +333,8 @@ export default function GovernancaPermissoesPage() {
   async function saveDraft(assignment: Assignment) {
     const draft = assignmentDrafts[assignment.id] ?? {
       note: assignment.note ?? "",
+      roleKey: assignment.role.key,
+      requestingServiceId: assignment.requestingService ? String(assignment.requestingService.id) : "all",
       startsAt: toDatetimeLocal(assignment.startsAt),
       endsAt: toDatetimeLocal(assignment.endsAt),
       saving: false,
@@ -263,6 +344,8 @@ export default function GovernancaPermissoesPage() {
     try {
       await axiosInstance.patch("/admin/rbac/assignments", {
         assignmentId: assignment.id,
+        roleKey: draft.roleKey || assignment.role.key,
+        requestingServiceId: draft.requestingServiceId === "all" ? null : Number(draft.requestingServiceId),
         note: draft.note.trim() || null,
         startsAt: fromInputToIso(draft.startsAt),
         endsAt: fromInputToIso(draft.endsAt),
@@ -277,6 +360,26 @@ export default function GovernancaPermissoesPage() {
       toast({
         title: "Permissões",
         description: error?.response?.data?.error || "Falha ao guardar a edição da atribuição.",
+        variant: "destructive",
+      });
+    }
+  }
+
+  async function removeAssignment(assignment: Assignment) {
+    if (!window.confirm(`Remover a atribuição de "${assignment.user.name || assignment.user.email}"?`)) return;
+    try {
+      await axiosInstance.delete("/admin/rbac/assignments", {
+        data: { assignmentId: assignment.id },
+      });
+      toast({
+        title: "Permissões",
+        description: "Atribuição removida.",
+      });
+      await load();
+    } catch (error: any) {
+      toast({
+        title: "Permissões",
+        description: error?.response?.data?.error || "Falha ao remover atribuição.",
         variant: "destructive",
       });
     }
@@ -304,10 +407,10 @@ export default function GovernancaPermissoesPage() {
         />
 
         <SectionCard
-          title="Nova Atribuição"
-          description="Cria uma atribuição de papel para um utilizador."
+          title="Atribuição de Papel"
+          description="Cada utilizador pode ter apenas um papel RBAC. Para mudar, edita a atribuição atual."
           actions={
-            <Button onClick={() => void createAssignment()} disabled={saving || loading}>
+            <Button onClick={() => void createAssignment()} disabled={saving || loading || Boolean(selectedUserAssignment)}>
               {saving ? "A guardar..." : "Atribuir papel"}
             </Button>
           }
@@ -377,6 +480,11 @@ export default function GovernancaPermissoesPage() {
               <Input type="datetime-local" value={endsAt} onChange={(e) => setEndsAt(e.target.value)} />
             </div>
           </div>
+          {selectedUserAssignment ? (
+            <div className="mt-3 text-sm text-muted-foreground">
+              Este utilizador já tem um papel atribuído. Edita o registo em Atribuições Atuais ou remove-o para criar novo.
+            </div>
+          ) : null}
 
           {selectedRole ? (
             <div className="mt-4 flex flex-wrap gap-2">
@@ -463,6 +571,39 @@ export default function GovernancaPermissoesPage() {
                       Início: {assignment.startsAt ? new Date(assignment.startsAt).toLocaleString() : "imediato"} |
                       Fim: {assignment.endsAt ? new Date(assignment.endsAt).toLocaleString() : "sem prazo"}
                     </div>
+                    <div className="mt-2 grid gap-2 md:grid-cols-2">
+                      <Select
+                        value={assignmentDrafts[assignment.id]?.roleKey ?? assignment.role.key}
+                        onValueChange={(value) => updateDraft(assignment.id, { roleKey: value })}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Papel" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {data.roles.map((r) => (
+                            <SelectItem key={r.id} value={r.key}>
+                              {r.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Select
+                        value={assignmentDrafts[assignment.id]?.requestingServiceId ?? (assignment.requestingService ? String(assignment.requestingService.id) : "all")}
+                        onValueChange={(value) => updateDraft(assignment.id, { requestingServiceId: value })}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Todos os serviços" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">Todos os serviços</SelectItem>
+                          {data.requestingServices.map((s) => (
+                            <SelectItem key={s.id} value={String(s.id)}>
+                              {s.codigo} - {s.designacao}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
                     <div className="mt-2 grid gap-2 md:grid-cols-3">
                       <Input
                         value={assignmentDrafts[assignment.id]?.note ?? assignment.note ?? ""}
@@ -501,6 +642,13 @@ export default function GovernancaPermissoesPage() {
                     >
                       {assignment.isActive ? "Desativar" : "Ativar"}
                     </Button>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={() => void removeAssignment(assignment)}
+                    >
+                      Remover
+                    </Button>
                   </div>
                 </div>
               </div>
@@ -516,6 +664,52 @@ export default function GovernancaPermissoesPage() {
           title="Matriz de Permissões"
           description="Visão papel x permissão para auditoria rápida."
         >
+          {canAccess ? (
+            <div className="mb-4 rounded-xl border border-border/60 bg-[hsl(var(--surface-1)/0.82)] p-3">
+              <div className="mb-2 text-sm font-semibold">Criar papel custom (recomendado)</div>
+              <div className="grid gap-2 md:grid-cols-[220px,1fr,1fr]">
+                <div>
+                  <Label className="text-xs">Clonar de</Label>
+                  <Select value={cloneFromRoleKey} onValueChange={setCloneFromRoleKey}>
+                    <SelectTrigger className="h-10">
+                      <SelectValue placeholder="(Opcional)" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {data.roles
+                        .filter((r) => r.isSystem)
+                        .map((r) => (
+                          <SelectItem key={r.id} value={r.key}>
+                            {r.name} ({r.key})
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label className="text-xs">Key (A-Z/0-9/_)</Label>
+                  <Input value={newRoleKey} onChange={(e) => setNewRoleKey(e.target.value)} placeholder="EX: CUSTOM_DIVISION_HEAD" />
+                </div>
+                <div>
+                  <Label className="text-xs">Nome</Label>
+                  <Input value={newRoleName} onChange={(e) => setNewRoleName(e.target.value)} placeholder="EX: Chefe de Divisão (Custom)" />
+                </div>
+              </div>
+              <div className="mt-2 grid gap-2 md:grid-cols-[1fr,160px]">
+                <div>
+                  <Label className="text-xs">Descrição (opcional)</Label>
+                  <Input value={newRoleDescription} onChange={(e) => setNewRoleDescription(e.target.value)} placeholder="Notas sobre o papel..." />
+                </div>
+                <div className="flex items-end">
+                  <Button onClick={() => void createRoleFromTemplate()} disabled={creatingRole}>
+                    {creatingRole ? "A criar..." : "Criar papel"}
+                  </Button>
+                </div>
+              </div>
+              <div className="mt-2 text-xs text-muted-foreground">
+                Nota: papéis <span className="font-mono">isSystem</span> são imutáveis; edita sempre um papel custom.
+              </div>
+            </div>
+          ) : null}
           <div className="overflow-x-auto">
             <table className="w-full min-w-[720px] border-collapse text-sm">
               <thead>
@@ -523,7 +717,10 @@ export default function GovernancaPermissoesPage() {
                   <th className="px-2 py-2 font-medium">Permissão</th>
                   {data.roles.map((role) => (
                     <th key={role.id} className="px-2 py-2 font-medium">
-                      {role.name}
+                      <div className="flex items-center gap-2">
+                        <span>{role.name}</span>
+                        {role.isSystem ? <Badge variant="outline">Sistema</Badge> : <Badge variant="secondary">Custom</Badge>}
+                      </div>
                     </th>
                   ))}
                 </tr>
@@ -539,9 +736,22 @@ export default function GovernancaPermissoesPage() {
                       const enabled = role.permissions.some((p) => p.key === permission.key);
                       return (
                         <td key={`${permission.key}-${role.id}`} className="px-2 py-2">
-                          <Badge variant={enabled ? "default" : "outline"}>
-                            {enabled ? "Sim" : "Não"}
-                          </Badge>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 px-2"
+                            disabled={!canAccess || saving || role.isSystem}
+                            onClick={() => void toggleRolePermission(role, permission.key, !enabled)}
+                            title={
+                              role.isSystem
+                                ? "Papel de sistema (imutável). Cria um papel custom para editar."
+                                : canAccess
+                                  ? "Clicar para alternar"
+                                  : "Sem permissões para editar"
+                            }
+                          >
+                            <Badge variant={enabled ? "default" : "outline"}>{enabled ? "Sim" : "Não"}</Badge>
+                          </Button>
                         </td>
                       );
                     })}

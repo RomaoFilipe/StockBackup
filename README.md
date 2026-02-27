@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="public/branding/logo.png" alt="CMCHUB" width="160" />
+  <img src="public/branding/logo2.png" alt="CMCHUB" width="160" />
 </p>
 
 # CMCHUB Municipal Operations Platform
@@ -19,6 +19,7 @@ Enterprise platform for Portuguese municipalities, designed to orchestrate inter
 - [Deployment Topology](#deployment-topology)
 - [Project Structure](#project-structure)
 - [Getting Started](#getting-started)
+- [Go-live Checklist](#go-live-checklist)
 - [What Docker Compose Does](#what-docker-compose-does)
 - [Database Schema](#database-schema)
 - [API Endpoints](#api-endpoints)
@@ -58,6 +59,90 @@ CMCHUB addresses these issues with a unified workflow-driven core, granular RBAC
 - Full audit trail and event history
 - Notifications and official document support
 - Multi-tenant-ready operating model
+
+## Modular Domains (Current Project)
+
+### Core Municipal Domains
+
+- `internal_requests`
+  - Internal request lifecycle, approvals, signatures, fulfillment
+- `citizen_requests`
+  - External/citizen request intake, triage, acceptance/rejection
+- `finance`
+  - Financial process lifecycle (`appropriation`, `commitment`, `authorization`, `payment`)
+- `assets`
+  - Municipal asset registration, assignments, lifecycle events, disposal
+- `workflow`
+  - Configurable process orchestration (`ProcessDefinition`, `ProcessStep`, `ProcessInstance`)
+- `presidency_dispatch`
+  - Dispatch and decision flow for presidency-level approvals
+
+### Governance and Security Modules
+
+- `rbac`
+  - Role/permission management with organizational scope
+- `audit_trail`
+  - Request status audit, RBAC audit, workflow events, domain event history
+- `auth_session`
+  - Login/session lifecycle, token validation, secure cookies
+- `security_controls`
+  - CSRF protection, IP allowlist, login lockout, rate limiting
+- `multi_tenant`
+  - Tenant-aware data partitioning and context enforcement
+
+### Operations and Service Modules
+
+- `inventory_products`
+  - Products, categories, suppliers, supplier providers
+- `stock_movements`
+  - IN/OUT/RETURN/REPAIR/SCRAP/LOST movement tracking
+- `equipment_units`
+  - Unit-level tracking, assignment, repair, return, loss, scrap
+- `invoices_procurement`
+  - Product invoices and linkage with requests/services
+- `tickets_sla`
+  - Incident/request ticketing, status workflow, SLA escalation
+- `users_admin`
+  - User administration, password resets, activation and audit actions
+
+### Citizen, Communication and Documents
+
+- `notifications_realtime`
+  - In-app notifications and realtime event propagation
+- `official_documents`
+  - Request PDFs, report PDFs, substitution/request document generation
+- `storage_management`
+  - File upload/download, document indexing, storage organization
+- `portal_requests`
+  - Public portal endpoint and UI for citizen request submission
+
+### Analytics and Reporting
+
+- `business_insights`
+  - Operational metrics and business insights dashboards
+- `municipal_reports`
+  - Municipal reporting endpoints and export flows
+- `ticket_operations_reports`
+  - Ticket performance and SLA-oriented reporting
+
+### Field and Productivity Modules
+
+- `scan_qr`
+  - QR scanning flows for products and substitutions
+- `mydesktop_presence`
+  - Personal workspace, presence/heartbeat and desktop queue views
+
+## Module x Endpoints x Permissions Matrix
+
+| Module | Key Endpoints | Required Permission(s) |
+|---|---|---|
+| `internal_requests` | `GET/POST /api/requests`, `GET/PATCH /api/requests/[id]` | `requests.change_status`, `requests.approve` (chefia), `requests.final_approve` (final), `requests.reject` (chefia), `requests.final_reject` (final), `requests.pickup_sign`, `requests.sign_approval` |
+| `workflow` | `GET/POST /api/workflows/requests/[id]/action` | `requests.change_status` (view/ops), plus transition-specific permissions |
+| `citizen_requests` | `POST /api/portal/requests`, `GET /api/admin/public-requests`, `POST .../accept`, `POST .../reject` | `public_requests.handle` |
+| `assets` | `GET/POST /api/governanca/assets`, `GET/PATCH /api/governanca/assets/[id]` | `assets.manage` |
+| `finance` | `GET/POST /api/governanca/finance`, `GET/PATCH /api/governanca/finance/[id]` | `finance.manage` |
+| `presidency_dispatch` | `POST /api/requests/[id]/presidency-dispatch`, `POST /api/requests/[id]/presidency-decision` | `presidency.approve` (decision), plus dispatch-level governance permissions |
+| `rbac` | `GET/POST/PATCH /api/admin/rbac/*` | `users.manage` |
 
 ## Technology Stack
 
@@ -231,6 +316,47 @@ DEFAULT_TENANT_SLUG="default"
 NEXT_PUBLIC_API_BASE_URL="/api"
 ```
 
+## Go-live Checklist
+
+This is the short, practical checklist to validate before going to staging/production.
+
+### Already implemented in this repo
+
+- [x] RBAC bootstrap (system permissions/roles) on session load
+- [x] Scoped approvals by `requestingServiceId` (CHEFIA) + global final approval permissions
+- [x] Two-step approvals UI: `/requests/aprovacoes` (chefia) and `/requests/aprovacoes-finais` (final)
+- [x] Unified request creation flow: `DRAFT -> SUBMIT` (user intake + backoffice + external accept)
+- [x] Ticket participants + `@username` mentions (auto-add participant on mention)
+- [x] Minimal flow script: `npm run test:approval-2step`
+- [x] RBAC management UI: `/governanca/permissoes` (custom roles + toggle permissions)
+
+### Must confirm before go-live
+
+- [ ] **Dependency security**: run `npm audit` and ensure there are no `critical/high` (or accept a documented exception)
+- [ ] **Lockfile stability**: use `npm ci` in CI/CD (avoid `npm audit fix --force` in production branches)
+- [ ] **Database migrations**: `npm run prisma:deploy` in staging/prod (never `migrate dev` in prod)
+- [ ] **Secrets**: set a strong `JWT_SECRET` (required in production) and verify cookie security behind TLS
+- [ ] **Tenant bootstrap**: validate `DEFAULT_TENANT_SLUG` and at least 1 admin user exists for that tenant
+- [ ] **RBAC ops**: confirm at least one user has `users.manage` (break-glass path) and access is logged in RBAC audit
+- [ ] **Performance sanity**: check browser Network tab for no requests stuck in `(pending)` and navigation stays responsive
+- [ ] **Backups**: DB backup policy + restore test + rollback plan for migrations
+
+### Recommended smoke commands (staging/prod)
+
+```bash
+npm ci
+npm run prisma:deploy
+npm run prisma:generate
+npm run typecheck
+npm run lint
+```
+
+### One-time operational backfills (optional but recommended)
+
+- [ ] Ensure all users have `username` for `@username` mentions:
+  - `npm run backfill:usernames -- --dry-run`
+  - `npm run backfill:usernames`
+
 ## What Docker Compose Does
 
 `docker compose up -d postgres` boots the PostgreSQL service defined in `docker-compose.yml`, which is required for Prisma migrations and local runtime.
@@ -350,6 +476,28 @@ Access control combines fine-grained permissions with organizational scope.
 - Role composition based on permission sets
 - User-role assignments scoped by Organizational Unit
 - Context-aware validation for each transition/action
+
+### Role Matrix (Ready to Use)
+
+| Role | Key Permissions | Recommended Scope |
+|---|---|---|
+| `PRESIDENT` | `presidency.approve`, `requests.approve`, `requests.final_approve`, `requests.reject`, `requests.final_reject`, `requests.sign_approval`, `requests.dispatch_presidency`, `reports.view` | Global municipal scope |
+| `VICE_PRESIDENT` | Same as `PRESIDENT` for formal substitution | Global municipal scope |
+| `COUNCILOR` | `requests.approve`, `requests.final_approve`, `requests.reject`, `requests.final_reject`, `requests.sign_approval`, `requests.dispatch_presidency`, `finance.view`, `assets.view` | By portfolio / Organizational Unit |
+| `DIVISION_HEAD` | `requests.create`, `requests.view`, `requests.approve`, `requests.reject`, `requests.sign_approval`, `requests.pickup_sign` | Division / Organizational Unit |
+| `FINANCE_MANAGER` | `finance.manage`, `finance.view`, `requests.approve`, `requests.final_approve`, `requests.reject`, `requests.final_reject`, `reports.view` | Finance department or municipal global (policy-based) |
+| `FINANCE_OFFICER` | `finance.manage`, `finance.view`, `requests.view` | Finance department operational scope |
+| `ASSET_MANAGER` | `assets.manage`, `assets.view`, `requests.change_status`, `requests.pickup_sign`, `requests.void_pickup_sign` | Asset/patrimony management scope |
+| `PROCUREMENT_OFFICER` | `requests.create`, `requests.view`, `finance.view`, `assets.view` | Procurement / supporting units |
+| `SERVICE_MANAGER` | `requests.create`, `requests.view`, `requests.approve`, `requests.reject`, `requests.sign_approval`, `requests.pickup_sign`, `requests.dispatch_presidency` | Specific requesting service |
+| `EXTERNAL_REQUEST_VIEWER` | `public_requests.view` | Citizen request monitoring units |
+| `EXTERNAL_REQUEST_REVIEWER` | `public_requests.view`, `public_requests.handle` | Citizen request handling units |
+| `SUPERVISOR_UO` | `requests.create`, `requests.view`, `public_requests.view`, `reports.view` | Specific Organizational Unit |
+| `OPERATOR_UO` | `requests.create`, `requests.view` | Specific Organizational Unit |
+| `AUDITOR` | `requests.view`, `assets.view`, `finance.view`, `public_requests.view`, `reports.view` | Read-only institutional/audit scope |
+| `SUPPORT_ADMIN` | `users.manage`, `tickets.manage`, `reports.view` | Platform administration scope (non-political) |
+
+Governance note: keep `ADMIN` as a technical/system role and enforce business decisions through scoped institutional roles above.
 
 ## Workflow Engine
 

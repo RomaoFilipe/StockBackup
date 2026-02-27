@@ -106,6 +106,7 @@ type RequestDto = {
   id: string;
   userId: string;
   status: "DRAFT" | "SUBMITTED" | "APPROVED" | "REJECTED" | "FULFILLED";
+  workflowState?: { code: string; name: string } | null;
   requestType?: "STANDARD" | "RETURN";
   title?: string | null;
   notes?: string | null;
@@ -164,6 +165,12 @@ const formatStatus = (status: RequestDto["status"]) => {
     default:
       return { label: status, className: "bg-muted/50 text-muted-foreground border-border/60" };
   }
+};
+
+const stageLabel = (r: Pick<RequestDto, "status" | "workflowState">) => {
+  if (r.status !== "SUBMITTED") return null;
+  if (r.workflowState?.code === "AWAITING_ADMIN_APPROVAL") return "Aprovação final";
+  return "Validação (chefia)";
 };
 
 const goodsTypeLabels: Record<GoodsType, string> = {
@@ -235,10 +242,18 @@ export default function RequestsPage() {
   const ticketIdFromQuery = searchParams?.get("ticketId") || "";
 
   const isAdmin = user?.role === "ADMIN";
+  const permissionKeys = useMemo(() => {
+    const keys = new Set<string>();
+    for (const k of user?.permissions ?? []) keys.add(k);
+    for (const g of user?.permissionGrants ?? []) keys.add(g.key);
+    return keys;
+  }, [user?.permissionGrants, user?.permissions]);
+  const canViewBackoffice = permissionKeys.has("*") || permissionKeys.has("requests.view");
 
   const [requests, setRequests] = useState<RequestDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
+  const [scopeMode, setScopeMode] = useState<"DEPARTMENT" | "MINE">("DEPARTMENT");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"ALL" | RequestDto["status"]>("ALL");
   const [priorityFilter, setPriorityFilter] = useState<"ALL" | "LOW" | "NORMAL" | "HIGH" | "URGENT">("ALL");
@@ -706,7 +721,7 @@ export default function RequestsPage() {
     setLoading(true);
     try {
       await loadProducts();
-      const res = await axiosInstance.get("/requests");
+      const res = await axiosInstance.get(scopeMode === "MINE" ? "/requests?mine=1" : "/requests");
       setRequests(res.data || []);
     } catch {
       toast({
@@ -717,7 +732,7 @@ export default function RequestsPage() {
     } finally {
       setLoading(false);
     }
-  }, [isLoggedIn, loadProducts, toast]);
+  }, [isLoggedIn, loadProducts, scopeMode, toast]);
 
   const changeRequestStatus = async (
     requestId: string,
@@ -739,7 +754,7 @@ export default function RequestsPage() {
       router.replace(`/login?redirect=${encodeURIComponent("/requests")}`);
       return;
     }
-    if (user?.role === "USER") {
+    if (user?.role === "USER" && !canViewBackoffice) {
       router.replace("/requests/estado");
       return;
     }
@@ -760,7 +775,7 @@ export default function RequestsPage() {
 
     void loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAuthLoading, isLoggedIn, isAdmin, loadAll, router, user?.role]);
+  }, [canViewBackoffice, isAuthLoading, isLoggedIn, isAdmin, loadAll, router, user?.role]);
 
   useEffect(() => {
     if (isAuthLoading || !isLoggedIn) return;
@@ -1441,6 +1456,22 @@ export default function RequestsPage() {
               <p className="text-sm text-muted-foreground">
                 Gestão de pedidos de reposição e compras
               </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  variant={scopeMode === "DEPARTMENT" ? "default" : "outline"}
+                  onClick={() => setScopeMode("DEPARTMENT")}
+                >
+                  Meu departamento
+                </Button>
+                <Button
+                  size="sm"
+                  variant={scopeMode === "MINE" ? "default" : "outline"}
+                  onClick={() => setScopeMode("MINE")}
+                >
+                  Meu
+                </Button>
+              </div>
             </div>
             <div className="grid gap-2 sm:grid-cols-4">
               <Button
@@ -1654,6 +1685,11 @@ export default function RequestsPage() {
                         />
                         <span className="font-semibold">{r.gtmiNumber}</span>
                         <Badge variant="outline" className={formatStatus(r.status).className}>{formatStatus(r.status).label}</Badge>
+                        {stageLabel(r) ? (
+                          <Badge variant="outline" className="border-border/60 bg-[hsl(var(--surface-2)/0.7)] text-muted-foreground">
+                            {stageLabel(r)}
+                          </Badge>
+                        ) : null}
                         {needsRestockSignatureBadge(r) ? (
                           <Badge variant="outline" className="border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300">
                             Aguarda assinatura para repor stock
@@ -1734,6 +1770,11 @@ export default function RequestsPage() {
                                 <SelectItem value="FULFILLED">Cumprida</SelectItem>
                               </SelectContent>
                             </Select>
+                            {stageLabel(r) ? (
+                              <Badge variant="outline" className="border-border/60 bg-[hsl(var(--surface-2)/0.7)] text-muted-foreground">
+                                {stageLabel(r)}
+                              </Badge>
+                            ) : null}
                             {needsRestockSignatureBadge(r) ? (
                               <Badge variant="outline" className="border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300">
                                 Aguarda assinatura para repor stock
@@ -1743,6 +1784,11 @@ export default function RequestsPage() {
                         ) : (
                           <div className="space-y-1">
                             <Badge variant="outline" className={formatStatus(r.status).className}>{formatStatus(r.status).label}</Badge>
+                            {stageLabel(r) ? (
+                              <Badge variant="outline" className="border-border/60 bg-[hsl(var(--surface-2)/0.7)] text-muted-foreground">
+                                {stageLabel(r)}
+                              </Badge>
+                            ) : null}
                             {needsRestockSignatureBadge(r) ? (
                               <Badge variant="outline" className="border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300">
                                 Aguarda assinatura para repor stock

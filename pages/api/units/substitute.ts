@@ -5,6 +5,7 @@ import { prisma } from "@/prisma/client";
 import { getSessionServer } from "@/utils/auth";
 import { logUserAdminAction } from "@/utils/adminAudit";
 import { logInfo, logWarn } from "@/utils/logger";
+import { ensureRequestWorkflowDefinition, ensureRequestWorkflowInstance, transitionRequestWorkflowByActionTx } from "@/utils/workflow";
 
 const bodySchema = z.object({
   oldCode: z.string().uuid(),
@@ -119,6 +120,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(403).json({ error: "Forbidden: admin only for SCRAP/LOST substitution" });
   }
 
+  await ensureRequestWorkflowDefinition(prisma, session.tenantId);
+
   try {
     const result = await prisma.$transaction(async (tx) => {
       const txAny = tx as any;
@@ -201,7 +204,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           tenantId: session.tenantId,
           userId: requestOwner.id,
           createdByUserId: session.id,
-          status: "SUBMITTED",
+          status: "DRAFT",
           requestType: "RETURN",
           title: "Requisição de Devolução / Substituição",
           notes: notes ?? null,
@@ -247,6 +250,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           },
         },
         select: { id: true, gtmiNumber: true },
+      });
+
+      await ensureRequestWorkflowInstance(tx, { tenantId: session.tenantId, requestId: linkedRequest.id });
+      await transitionRequestWorkflowByActionTx(tx, {
+        tenantId: session.tenantId,
+        requestId: linkedRequest.id,
+        action: "SUBMIT",
+        actorUserId: session.id,
+        note: "auto-submit (unit substitute)",
       });
 
       await tx.requestStatusAudit.create({

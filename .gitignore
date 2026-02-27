@@ -51,3 +51,7 @@ next-env.d.ts
 # Local file uploads (stored on disk)
 storage/**
 !storage/.gitkeep
+
+# npm local cache/logs (see .npmrc)
+.npm-cache/
+.npm-logs/

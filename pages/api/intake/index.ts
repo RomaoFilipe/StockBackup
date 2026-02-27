@@ -27,6 +27,7 @@ const createIntakeSchema = z.object({
       price: z.number().nonnegative(),
       categoryId: z.string().uuid(),
       supplierId: z.string().uuid(),
+      isPatrimonializable: z.boolean().optional(),
     })
     .optional(),
 });
@@ -120,6 +121,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             price: product!.price,
             quantity: BigInt(0) as any,
             status: calculateStatus(0),
+            isPatrimonializable: Boolean(product!.isPatrimonializable),
             categoryId: product!.categoryId,
             supplierId: product!.supplierId,
           } as any,

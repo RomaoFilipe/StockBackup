@@ -9,7 +9,7 @@ import { createRequestStatusAudit, notifyAdmin, notifyUser } from "@/utils/notif
 import { publishRealtimeEvent } from "@/utils/realtime";
 import { createTicketAudit } from "@/pages/api/tickets/_utils";
 import { getUserPermissionGrants, hasPermission } from "@/utils/rbac";
-import { ensureRequestWorkflowDefinition, transitionRequestWorkflowToStatus } from "@/utils/workflow";
+import { ensureRequestWorkflowDefinition, transitionRequestWorkflowByAction } from "@/utils/workflow";
 import { buildSignedRequestPdfBuffer } from "@/utils/requestPdf";
 import {
   buildRequestFolderName,
@@ -39,6 +39,17 @@ function getSystemRequestPdfOriginalName(gtmiNumber: string) {
 
 function getSystemRequestApprovalPdfOriginalName(gtmiNumber: string) {
   return `[SISTEMA] Requisição ${gtmiNumber} - Aprovada.pdf`;
+}
+
+async function generateMunicipalAssetCode(txAny: any, tenantId: string) {
+  const year = new Date().getFullYear();
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const suffix = String(Date.now()).slice(-6);
+    const code = `AST-${year}-${suffix}${attempt ? `-${attempt}` : ""}`;
+    const exists = await txAny.municipalAsset.findFirst({ where: { tenantId, code }, select: { id: true } });
+    if (!exists) return code;
+  }
+  return `AST-${year}-${Math.random().toString(36).slice(2, 10).toUpperCase()}`;
 }
 
 async function deleteSystemRequestPdfs(args: {
@@ -352,12 +363,33 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const canMutateRequest = async () => {
     const row = await prisma.request.findFirst({
       where: { id, tenantId },
-      select: { userId: true },
+      select: { userId: true, createdByUserId: true, requestingServiceId: true },
     });
 
     if (!row) return { ok: false as const, status: 404 as const, error: "Request not found" };
-    if (isAdmin) return { ok: true as const, ownerUserId: row.userId };
-    if (row.userId === session.id) return { ok: true as const, ownerUserId: row.userId };
+    if (row.userId === session.id || row.createdByUserId === session.id) {
+      return { ok: true as const, ownerUserId: row.userId };
+    }
+
+    const permissionGrants = await getUserPermissionGrants(prisma, {
+      id: session.id,
+      tenantId,
+      role: session.role,
+    });
+    const serviceScopeId = row.requestingServiceId ?? null;
+    const can = (key: string) => hasPermission(permissionGrants, key, serviceScopeId);
+    const canMutate =
+      can("requests.change_status") ||
+      can("requests.approve") ||
+      can("requests.reject") ||
+      can("requests.sign_approval") ||
+      can("requests.void_sign") ||
+      can("requests.pickup_sign") ||
+      can("requests.void_pickup_sign") ||
+      can("requests.dispatch_presidency") ||
+      can("presidency.approve");
+
+    if (canMutate) return { ok: true as const, ownerUserId: row.userId };
 
     return { ok: false as const, status: 403 as const, error: "Forbidden" };
   };
@@ -406,6 +438,25 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         return res.status(404).json({ error: "Request not found" });
       }
 
+      const permissionGrants = await getUserPermissionGrants(prisma, {
+        id: session.id,
+        tenantId,
+        role: session.role,
+      });
+      const serviceScopeId = (request as any).requestingServiceId ?? null;
+      const canView =
+        request.userId === session.id ||
+        (request as any).createdByUserId === session.id ||
+        hasPermission(permissionGrants, "requests.view", serviceScopeId) ||
+        hasPermission(permissionGrants, "requests.change_status", serviceScopeId) ||
+        hasPermission(permissionGrants, "requests.approve", serviceScopeId) ||
+        hasPermission(permissionGrants, "requests.reject", serviceScopeId) ||
+        hasPermission(permissionGrants, "presidency.approve", serviceScopeId);
+
+      if (!canView) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
       const uniqueProductIds = Array.from(
         new Set((request.items || []).map((it) => it.productId).filter((pid) => typeof pid === "string" && pid))
       ) as string[];
@@ -442,6 +493,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           reqDate: inv!.reqDate ? inv!.reqDate.toISOString() : null,
         }));
 
+      const ticketLinks = await prisma.ticketRequestLink.findMany({
+        where: { tenantId, requestId: request.id },
+        orderBy: [{ createdAt: "desc" }],
+        select: {
+          createdAt: true,
+          ticket: { select: { id: true, code: true, status: true } },
+        },
+      });
+
       return res.status(200).json({
         ...request,
         createdAt: request.createdAt.toISOString(),
@@ -468,6 +528,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           reqDate: inv.reqDate ? inv.reqDate.toISOString() : null,
         })),
         latestInvoices,
+        tickets: ticketLinks.map((l) => ({
+          ...l.ticket,
+          linkedAt: l.createdAt.toISOString(),
+        })),
       });
     } catch (error) {
       console.error("GET /api/requests/[id] error:", error);
@@ -502,7 +566,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         role: session.role,
       });
       const serviceScopeId = existingBefore.requestingServiceId ?? null;
-      const can = (key: string) => isAdmin || hasPermission(permissionGrants, key, serviceScopeId);
+      const can = (key: string) => hasPermission(permissionGrants, key, serviceScopeId);
 
       if (sign && !can("requests.sign_approval") && !can("presidency.approve")) {
         return res.status(403).json({ error: "Sem permissão para assinar aprovação." });
@@ -519,8 +583,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       if (Object.prototype.hasOwnProperty.call(updateData, "status")) {
         const nextStatus = updateData.status;
-        const canApprove = can("requests.approve") || can("presidency.approve");
-        const canReject = can("requests.reject") || can("presidency.approve");
+        const canApprove = can("requests.approve") || can("requests.final_approve") || can("presidency.approve");
+        const canReject = can("requests.reject") || can("requests.final_reject") || can("presidency.approve");
         const canChangeStatus = can("requests.change_status");
 
         if (nextStatus === "APPROVED" && !canApprove) {
@@ -717,17 +781,31 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         updateData.status !== existingBefore.status
       ) {
         await ensureRequestWorkflowDefinition(prisma, tenantId);
-        const transitioned = await transitionRequestWorkflowToStatus(prisma, {
+        const action =
+          updateData.status === "SUBMITTED"
+            ? "SUBMIT"
+            : updateData.status === "APPROVED"
+              ? "APPROVE"
+              : updateData.status === "REJECTED"
+                ? "REJECT"
+                : updateData.status === "FULFILLED"
+                  ? "FULFILL"
+                  : null;
+        if (!action) {
+          return res.status(400).json({ error: "Transição inválida." });
+        }
+
+        const transitioned = await transitionRequestWorkflowByAction(prisma, {
           tenantId,
           requestId: id,
-          targetStatus: updateData.status,
+          action,
           actorUserId: session.id,
           note: "api/requests/[id]:PATCH",
         });
 
         if (transitioned.moved) {
           delete updateData.status;
-        } else if (!can("requests.change_status")) {
+        } else {
           return res.status(400).json({
             error: "Transição de workflow inválida para o estado pretendido.",
           });
@@ -735,6 +813,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
 
       const updated = await prisma.$transaction(async (tx) => {
+        const txAny = tx as any;
         const updatedRequest = await tx.request.updateMany({
           where: { id, tenantId },
           data: updateData,
@@ -788,8 +867,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           if (replaceItems.length < 1) {
             throw new Error("Replace items must include at least one item");
           }
-
-          const txAny = tx as any;
 
           const existingRequest = await tx.request.findFirst({
             where: { id, tenantId },
@@ -1245,6 +1322,189 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                   data: { status: computeProductStatus(Number(productAfter.quantity)) },
                 });
               }
+            }
+          }
+        }
+
+        // For STANDARD requests, persist patrimonial custody/location ledger when finalized.
+        // Consumables keep stock-only behavior; unit-tracked items synchronize MunicipalAsset.
+        if (existingBefore.status !== "FULFILLED") {
+          const finalized = await tx.request.findFirst({
+            where: { id, tenantId },
+            select: {
+              id: true,
+              status: true,
+              requestType: true,
+              gtmiNumber: true,
+              userId: true,
+              requesterName: true,
+              deliveryLocation: true,
+              requestingServiceId: true,
+              items: {
+                select: {
+                  id: true,
+                  productId: true,
+                  destination: true,
+                  quantity: true,
+                  notes: true,
+                  role: true,
+                  product: {
+                    select: {
+                      id: true,
+                      name: true,
+                      sku: true,
+                      category: { select: { name: true } },
+                    },
+                  },
+                },
+              },
+            },
+          });
+
+          if (finalized && finalized.status === "FULFILLED" && finalized.requestType === "STANDARD") {
+            const movementDocumentRef = getSystemRequestPdfOriginalName(finalized.gtmiNumber);
+            const movementNoteBase = `Auto de entrega ${finalized.gtmiNumber}`;
+
+            for (const it of finalized.items) {
+              const qty = Number(it.quantity);
+              if (!Number.isFinite(qty) || qty <= 0) continue;
+              if ((it.role ?? "NORMAL") === "OLD") continue;
+
+              const code = typeof it.destination === "string" ? it.destination.trim() : "";
+              if (!code) continue;
+
+              const unit = await txAny.productUnit.findFirst({
+                where: { tenantId, productId: it.productId, code },
+                select: {
+                  id: true,
+                  code: true,
+                  status: true,
+                  serialNumber: true,
+                  assetTag: true,
+                },
+              });
+
+              // Only unit-tracked items produce patrimonial asset events.
+              if (!unit) continue;
+
+              const existingAsset = await txAny.municipalAsset.findFirst({
+                where: { tenantId, productUnitId: unit.id },
+                select: {
+                  id: true,
+                  code: true,
+                  status: true,
+                  requestingServiceId: true,
+                  assignedToUserId: true,
+                  location: true,
+                  locationId: true,
+                },
+              });
+
+              let toLocationId: string | null = null;
+              const normalizedDeliveryLocation = finalized.deliveryLocation?.trim() || null;
+              if (normalizedDeliveryLocation) {
+                const location = await txAny.municipalAssetLocation.findFirst({
+                  where: { tenantId, name: normalizedDeliveryLocation },
+                  select: { id: true },
+                });
+                toLocationId = location?.id ?? null;
+              }
+
+              const nextStatus = "IN_SERVICE";
+              let assetId = existingAsset?.id as string | undefined;
+
+              if (!existingAsset) {
+                const createdAsset = await txAny.municipalAsset.create({
+                  data: {
+                    tenantId,
+                    code: await generateMunicipalAssetCode(txAny, tenantId),
+                    name: it.product?.name || `Ativo ${unit.code}`,
+                    category: it.product?.category?.name || null,
+                    status: nextStatus,
+                    location: normalizedDeliveryLocation,
+                    locationId: toLocationId,
+                    notes: it.notes?.trim() || `Criado automaticamente a partir da requisição ${finalized.gtmiNumber}`,
+                    serialNumber: unit.serialNumber ?? null,
+                    assetTag: unit.assetTag ?? null,
+                    requestingServiceId: finalized.requestingServiceId ?? null,
+                    assignedToUserId: finalized.userId,
+                    productId: it.productId,
+                    productUnitId: unit.id,
+                  },
+                });
+                assetId = createdAsset.id;
+
+                await txAny.municipalAssetEvent.create({
+                  data: {
+                    tenantId,
+                    assetId,
+                    fromStatus: null,
+                    toStatus: nextStatus,
+                    note: `Ativo criado automaticamente no fulfillment da requisição ${finalized.gtmiNumber}`,
+                    actorUserId: session.id,
+                  },
+                });
+              } else {
+                await txAny.municipalAsset.update({
+                  where: { id: existingAsset.id },
+                  data: {
+                    status: nextStatus,
+                    requestingServiceId: finalized.requestingServiceId ?? null,
+                    assignedToUserId: finalized.userId,
+                    location: normalizedDeliveryLocation,
+                    locationId: toLocationId,
+                    productId: it.productId,
+                    serialNumber: unit.serialNumber ?? null,
+                    assetTag: unit.assetTag ?? null,
+                  },
+                });
+
+                if (existingAsset.status !== nextStatus) {
+                  await txAny.municipalAssetEvent.create({
+                    data: {
+                      tenantId,
+                      assetId: existingAsset.id,
+                      fromStatus: existingAsset.status,
+                      toStatus: nextStatus,
+                      note: `Estado atualizado automaticamente no fulfillment da requisição ${finalized.gtmiNumber}`,
+                      actorUserId: session.id,
+                    },
+                  });
+                }
+              }
+
+              if (!assetId) continue;
+
+              await txAny.municipalAssetAssignment.create({
+                data: {
+                  tenantId,
+                  assetId,
+                  userId: finalized.userId,
+                  requestingServiceId: finalized.requestingServiceId ?? null,
+                  note: `${movementNoteBase} · ${finalized.requesterName || "requerente"}`,
+                },
+              });
+
+              await txAny.municipalAssetMovement.create({
+                data: {
+                  tenantId,
+                  assetId,
+                  type: existingAsset ? "TRANSFER" : "ASSIGN",
+                  statusFrom: existingAsset?.status ?? null,
+                  statusTo: nextStatus,
+                  movementAt: new Date(),
+                  reason: `Entrega de unidade ${unit.code} via requisição`,
+                  note: `${movementNoteBase} · Unidade ${unit.code}`,
+                  documentRef: movementDocumentRef,
+                  actorUserId: session.id,
+                  fromRequestingServiceId: existingAsset?.requestingServiceId ?? null,
+                  toRequestingServiceId: finalized.requestingServiceId ?? null,
+                  fromLocationId: existingAsset?.locationId ?? null,
+                  toLocationId: toLocationId ?? null,
+                  fromCustodianUserId: existingAsset?.assignedToUserId ?? null,
+                  toCustodianUserId: finalized.userId,
+                },
+              });
             }
           }
         }

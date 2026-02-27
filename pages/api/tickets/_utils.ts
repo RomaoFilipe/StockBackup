@@ -1,6 +1,7 @@
 import { prisma } from "@/prisma/client";
 import type { TicketLevel, TicketPriority } from "@prisma/client";
 import type { NextApiRequest, NextApiResponse } from "next";
+import { getUserPermissionGrants, hasPermission } from "@/utils/rbac";
 
 export function inferLevelFromPriority(priority: TicketPriority): TicketLevel {
   if (priority === "CRITICAL") return "L3";
@@ -27,8 +28,27 @@ export async function nextUniqueTicketCode(tenantId: string): Promise<string> {
 }
 
 export function canAccessTicket(session: { role?: string; id: string }, ticket: { createdByUserId: string; assignedToUserId: string | null }) {
-  if (session.role === "ADMIN") return true;
   return ticket.createdByUserId === session.id || ticket.assignedToUserId === session.id;
+}
+
+export async function getTicketPermissionGrants(session: { id: string; tenantId: string; role?: any }) {
+  return getUserPermissionGrants(prisma, { id: session.id, tenantId: session.tenantId, role: session.role });
+}
+
+export function isTicketManager(grants: Array<{ key: string; requestingServiceId: number | null }>) {
+  return hasPermission(grants, "tickets.manage");
+}
+
+export function canAccessTicketWithParticipants(
+  session: { id: string },
+  ticket: { createdByUserId: string; assignedToUserId: string | null },
+  participantUserIds: string[],
+  opts?: { isManager?: boolean }
+) {
+  if (opts?.isManager) return true;
+  if (ticket.createdByUserId === session.id) return true;
+  if (ticket.assignedToUserId && ticket.assignedToUserId === session.id) return true;
+  return participantUserIds.includes(session.id);
 }
 
 export async function createTicketAudit(args: {

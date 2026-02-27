@@ -75,6 +75,7 @@ model Tenant {
   ticketMessages TicketMessage[]
   ticketRequestLinks TicketRequestLink[]
   ticketAudits       TicketAudit[]
+  ticketParticipants TicketParticipant[]
   accessPermissions  AccessPermission[]
   accessRoles        AccessRole[]
   accessRolePermissions AccessRolePermission[]
@@ -88,6 +89,14 @@ model Tenant {
   municipalAssets    MunicipalAsset[]
   municipalAssetEvents MunicipalAssetEvent[]
   municipalAssetAssignments MunicipalAssetAssignment[]
+  municipalAssetClasses MunicipalAssetClass[]
+  municipalAssetModels  MunicipalAssetModel[]
+  municipalAssetLocations MunicipalAssetLocation[]
+  municipalAssetMovements MunicipalAssetMovement[]
+  municipalAssetDisposalProcesses MunicipalAssetDisposalProcess[]
+  assetCategoryClassMaps AssetCategoryClassMap[]
+  assetPolicies AssetPolicy[]
+  requestExecutions RequestExecution[]
   financeProcesses   FinanceProcess[]
   financeProcessEvents FinanceProcessEvent[]
   presidencyDispatches PresidencyDispatch[]
@@ -158,6 +167,8 @@ model User {
   ticketMessages  TicketMessage[]
   ticketRequestLinks TicketRequestLink[]
   ticketAudits       TicketAudit[] @relation("TicketAuditActor")
+  ticketParticipants TicketParticipant[] @relation("TicketParticipantUser")
+  ticketParticipantsAdded TicketParticipant[] @relation("TicketParticipantAddedBy")
   roleAssignments      UserRoleAssignment[] @relation("UserRoleAssignmentUser")
   roleAssignmentsGiven UserRoleAssignment[] @relation("UserRoleAssignmentAssignedBy")
   rbacAudits         RbacAudit[] @relation("RbacAuditActor")
@@ -165,6 +176,12 @@ model User {
   assetEvents        MunicipalAssetEvent[] @relation("MunicipalAssetEventActor")
   assetAssignments   MunicipalAssetAssignment[]
   assignedMunicipalAssets MunicipalAsset[] @relation("MunicipalAssetAssignedTo")
+  assetMovements     MunicipalAssetMovement[] @relation("MunicipalAssetMovementActor")
+  assetMovementsFromCustody MunicipalAssetMovement[] @relation("MunicipalAssetMovementFromCustodian")
+  assetMovementsToCustody   MunicipalAssetMovement[] @relation("MunicipalAssetMovementToCustodian")
+  assetDisposalProcessesOpened MunicipalAssetDisposalProcess[] @relation("MunicipalAssetDisposalOpenedBy")
+  assetDisposalProcessesDecided MunicipalAssetDisposalProcess[] @relation("MunicipalAssetDisposalDecidedBy")
+  requestExecutions RequestExecution[] @relation("RequestExecutionExecutedBy")
   financeEvents      FinanceProcessEvent[] @relation("FinanceProcessEventActor")
   presidencyDecisions PresidencyDispatch[] @relation("PresidencyDispatchDecidedBy")
 
@@ -186,6 +203,7 @@ model Category {
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   products Product[]
+  assetClassMappings AssetCategoryClassMap[]
 
   @@unique([tenantId, name])
   @@index([tenantId])
@@ -252,6 +270,7 @@ model Product {
   price       Float
   quantity    BigInt
   status      String
+  isPatrimonializable Boolean @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @default(now()) @updatedAt
 
@@ -272,6 +291,7 @@ model Product {
   publicRequestItems PublicRequestItem[]
 
   stockMovements StockMovement[]
+  municipalAssets MunicipalAsset[]
 
   @@index([tenantId])
   @@index([categoryId])
@@ -405,6 +425,7 @@ model Request {
   financeProcesses FinanceProcess[]
   presidencyDispatch PresidencyDispatch?
   linkedAssets MunicipalAsset[]
+  executions RequestExecution[]
 
   @@unique([tenantId, gtmiNumber])
   @@unique([tenantId, gtmiYear, gtmiSeq])
@@ -464,6 +485,8 @@ model RequestingService {
   municipalAssets          MunicipalAsset[]
   financeProcesses         FinanceProcess[]
   municipalAssetAssignments MunicipalAssetAssignment[]
+  outgoingAssetMovements MunicipalAssetMovement[] @relation("MunicipalAssetMovementFromService")
+  incomingAssetMovements MunicipalAssetMovement[] @relation("MunicipalAssetMovementToService")
 
   @@unique([codigo])
   @@index([ativo])
@@ -479,6 +502,10 @@ model PublicRequest {
 
   tenantId String @db.Uuid
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // Optional linkage to a Ticket so that, when accepted, the created Request can be associated automatically.
+  ticketId String? @db.Uuid
+  ticket   Ticket? @relation("PublicRequestTicket", fields: [ticketId], references: [id], onDelete: SetNull)
 
   requestingServiceId Int
   requestingService   RequestingService @relation(fields: [requestingServiceId], references: [id], onDelete: Restrict)
@@ -505,6 +532,7 @@ model PublicRequest {
   workflowInstances WorkflowInstance[]
 
   @@index([tenantId])
+  @@index([ticketId])
   @@index([requestingServiceId])
   @@index([requesterUserId])
   @@index([status])
@@ -612,6 +640,7 @@ model ProductUnit {
   acquiredNotes  String?
 
   stockMovements StockMovement[]
+  municipalAssets MunicipalAsset[]
 
   @@unique([tenantId, serialNumber])
   @@unique([tenantId, partNumber])
@@ -880,8 +909,10 @@ model Ticket {
   assignedTo       User?   @relation("TicketAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
 
   messages TicketMessage[]
+  participants TicketParticipant[]
   requestLinks TicketRequestLink[]
   audits       TicketAudit[]
+  publicRequests PublicRequest[] @relation("PublicRequestTicket")
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -891,6 +922,29 @@ model Ticket {
   @@index([level])
   @@index([assignedToUserId])
   @@index([createdByUserId])
+  @@index([createdAt])
+}
+
+model TicketParticipant {
+  id String @id @default(uuid()) @db.Uuid
+  createdAt DateTime @default(now())
+
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  ticketId String @db.Uuid
+  ticket   Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  userId String @db.Uuid
+  user   User   @relation("TicketParticipantUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  addedByUserId String? @db.Uuid
+  addedBy       User?   @relation("TicketParticipantAddedBy", fields: [addedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([ticketId, userId])
+  @@index([tenantId])
+  @@index([ticketId])
+  @@index([userId])
   @@index([createdAt])
 }
 
@@ -1266,11 +1320,133 @@ model WorkflowEvent {
 
 enum MunicipalAssetStatus {
   REGISTERED
+  IN_SERVICE
+  IN_REPAIR
+  LOANED
+  LOST
+  STOLEN
+  TO_DISPOSE
+  TRANSFERRED_OUT
+  DONATED
   ACTIVE
   ASSIGNED
   MAINTENANCE
   SCRAPPED
   DISPOSED
+}
+
+enum MunicipalAssetCriticality {
+  OPERATIONAL
+  SECURITY
+  ESSENTIAL
+}
+
+enum MunicipalAssetDepreciationMethod {
+  NONE
+  STRAIGHT_LINE
+}
+
+enum MunicipalAssetMovementType {
+  REGISTER
+  ASSIGN
+  TRANSFER
+  STOCK_IN
+  STOCK_OUT
+  LOAN_OUT
+  LOAN_RETURN
+  REPAIR_OUT
+  REPAIR_IN
+  STATUS_CHANGE
+  DISPOSAL_INIT
+  DISPOSAL_APPROVED
+  DISPOSED
+  NOTE
+}
+
+enum MunicipalAssetDisposalStatus {
+  DRAFT
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+  COMPLETED
+}
+
+model MunicipalAssetClass {
+  id          String   @id @default(uuid()) @db.Uuid
+  key         String   @db.VarChar(80)
+  name        String   @db.VarChar(120)
+  description String?
+  isActive    Boolean  @default(true)
+
+  requiresSerialNumber Boolean @default(false)
+  defaultUsefulLifeMonths Int?
+  defaultDepreciationMethod MunicipalAssetDepreciationMethod?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  models MunicipalAssetModel[]
+  assets MunicipalAsset[]
+  categoryMappings AssetCategoryClassMap[]
+
+  @@unique([tenantId, key])
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@index([isActive])
+}
+
+model MunicipalAssetModel {
+  id          String   @id @default(uuid()) @db.Uuid
+  brand       String   @db.VarChar(120)
+  model       String   @db.VarChar(120)
+  description String?
+  isActive    Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  classId String? @db.Uuid
+  class   MunicipalAssetClass? @relation(fields: [classId], references: [id], onDelete: SetNull)
+
+  assets MunicipalAsset[]
+
+  @@unique([tenantId, brand, model])
+  @@index([tenantId])
+  @@index([classId])
+  @@index([isActive])
+}
+
+model MunicipalAssetLocation {
+  id    String @id @default(uuid()) @db.Uuid
+  code  String? @db.VarChar(80)
+  name  String
+  level Int @default(0)
+  note  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  parentId String? @db.Uuid
+  parent   MunicipalAssetLocation? @relation("MunicipalAssetLocationTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children MunicipalAssetLocation[] @relation("MunicipalAssetLocationTree")
+
+  assets MunicipalAsset[]
+  fromMovements MunicipalAssetMovement[] @relation("MunicipalAssetMovementFromLocation")
+  toMovements   MunicipalAssetMovement[] @relation("MunicipalAssetMovementToLocation")
+
+  @@unique([tenantId, code])
+  @@unique([tenantId, parentId, name])
+  @@index([tenantId])
+  @@index([parentId])
 }
 
 model MunicipalAsset {
@@ -1281,6 +1457,11 @@ model MunicipalAsset {
   category    String?
   status      MunicipalAssetStatus @default(REGISTERED)
   location    String?
+  serialNumber String? @db.VarChar(160)
+  assetTag     String? @db.VarChar(160)
+  criticality  MunicipalAssetCriticality @default(OPERATIONAL)
+  usefulLifeMonths Int?
+  depreciationMethod MunicipalAssetDepreciationMethod @default(NONE)
   notes       String?
   acquisitionDate DateTime?
   acquisitionValue Float?
@@ -1299,16 +1480,41 @@ model MunicipalAsset {
   assignedToUserId String? @db.Uuid
   assignedTo       User?   @relation("MunicipalAssetAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
 
+  productId String? @db.Uuid
+  product   Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  productUnitId String? @db.Uuid
+  productUnit   ProductUnit? @relation(fields: [productUnitId], references: [id], onDelete: SetNull)
+
+  classId String? @db.Uuid
+  class   MunicipalAssetClass? @relation(fields: [classId], references: [id], onDelete: SetNull)
+
+  modelId String? @db.Uuid
+  model   MunicipalAssetModel? @relation(fields: [modelId], references: [id], onDelete: SetNull)
+
+  locationId String? @db.Uuid
+  locationRef MunicipalAssetLocation? @relation(fields: [locationId], references: [id], onDelete: SetNull)
+
   events      MunicipalAssetEvent[]
   assignments MunicipalAssetAssignment[]
+  movements   MunicipalAssetMovement[]
+  disposalProcesses MunicipalAssetDisposalProcess[]
   workflows   WorkflowInstance[]
 
   @@unique([tenantId, code])
+  @@unique([tenantId, serialNumber])
+  @@unique([tenantId, assetTag])
+  @@unique([tenantId, productUnitId])
   @@index([tenantId])
   @@index([status])
   @@index([requestingServiceId])
   @@index([requestId])
   @@index([assignedToUserId])
+  @@index([productId])
+  @@index([classId])
+  @@index([modelId])
+  @@index([locationId])
+  @@index([criticality])
 }
 
 model MunicipalAssetEvent {
@@ -1359,6 +1565,162 @@ model MunicipalAssetAssignment {
   @@index([requestingServiceId])
   @@index([startAt])
   @@index([endAt])
+}
+
+model MunicipalAssetMovement {
+  id         String   @id @default(uuid()) @db.Uuid
+  type       MunicipalAssetMovementType
+  statusFrom MunicipalAssetStatus?
+  statusTo   MunicipalAssetStatus?
+  movementAt DateTime @default(now())
+  expectedReturnAt DateTime?
+  returnedAt DateTime?
+
+  note       String?
+  reason     String?
+  vendorName String?
+  cost       Float?
+  documentRef String?
+  attachments Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  assetId String @db.Uuid
+  asset   MunicipalAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  actorUserId String? @db.Uuid
+  actor       User?   @relation("MunicipalAssetMovementActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  fromRequestingServiceId Int?
+  fromRequestingService RequestingService? @relation("MunicipalAssetMovementFromService", fields: [fromRequestingServiceId], references: [id], onDelete: SetNull)
+  toRequestingServiceId Int?
+  toRequestingService RequestingService? @relation("MunicipalAssetMovementToService", fields: [toRequestingServiceId], references: [id], onDelete: SetNull)
+
+  fromLocationId String? @db.Uuid
+  fromLocation   MunicipalAssetLocation? @relation("MunicipalAssetMovementFromLocation", fields: [fromLocationId], references: [id], onDelete: SetNull)
+  toLocationId String? @db.Uuid
+  toLocation   MunicipalAssetLocation? @relation("MunicipalAssetMovementToLocation", fields: [toLocationId], references: [id], onDelete: SetNull)
+
+  fromCustodianUserId String? @db.Uuid
+  fromCustodian       User?   @relation("MunicipalAssetMovementFromCustodian", fields: [fromCustodianUserId], references: [id], onDelete: SetNull)
+  toCustodianUserId String? @db.Uuid
+  toCustodian       User?   @relation("MunicipalAssetMovementToCustodian", fields: [toCustodianUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([assetId])
+  @@index([type])
+  @@index([movementAt])
+  @@index([actorUserId])
+  @@index([fromRequestingServiceId])
+  @@index([toRequestingServiceId])
+  @@index([fromLocationId])
+  @@index([toLocationId])
+  @@index([fromCustodianUserId])
+  @@index([toCustodianUserId])
+}
+
+model MunicipalAssetDisposalProcess {
+  id      String @id @default(uuid()) @db.Uuid
+  code    String @db.VarChar(60)
+  status  MunicipalAssetDisposalStatus @default(DRAFT)
+
+  reasonCode String @db.VarChar(80)
+  reasonDetail String?
+  technicalEvaluation String?
+  estimatedValue Float?
+  decisionNote String?
+  destination String?
+  documentRef String?
+  attachments Json?
+
+  openedAt DateTime @default(now())
+  closedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  assetId String @db.Uuid
+  asset   MunicipalAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  openedByUserId String? @db.Uuid
+  openedBy       User?   @relation("MunicipalAssetDisposalOpenedBy", fields: [openedByUserId], references: [id], onDelete: SetNull)
+
+  decidedByUserId String? @db.Uuid
+  decidedBy       User?   @relation("MunicipalAssetDisposalDecidedBy", fields: [decidedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@index([assetId])
+  @@index([status])
+  @@index([openedByUserId])
+  @@index([decidedByUserId])
+  @@index([openedAt])
+}
+
+model AssetCategoryClassMap {
+  id        String   @id @default(uuid()) @db.Uuid
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  categoryId String @db.Uuid
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  classId String @db.Uuid
+  class   MunicipalAssetClass @relation(fields: [classId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, categoryId])
+  @@index([tenantId])
+  @@index([categoryId])
+  @@index([classId])
+}
+
+model AssetPolicy {
+  id        String   @id @default(uuid()) @db.Uuid
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  requireTransferApproval Boolean @default(true)
+  requireDisposalApproval Boolean @default(true)
+  transferApproverRoleKey String? @db.VarChar(120)
+  disposalApproverRoleKey String? @db.VarChar(120)
+
+  @@unique([tenantId])
+  @@index([tenantId])
+}
+
+model RequestExecution {
+  id             String   @id @default(uuid()) @db.Uuid
+  idempotencyKey String   @db.VarChar(120)
+  notes          String?
+  documentRef    String?  @db.VarChar(500)
+  createdAt      DateTime @default(now())
+
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  requestId String @db.Uuid
+  request   Request @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  executedByUserId String? @db.Uuid
+  executedBy       User?   @relation("RequestExecutionExecutedBy", fields: [executedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId])
+  @@index([requestId])
+  @@index([executedByUserId])
+  @@index([createdAt])
 }
 
 enum FinanceProcessStatus {

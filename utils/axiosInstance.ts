@@ -7,6 +7,9 @@ const axiosInstance = axios.create({
     "Content-Type": "application/json",
   },
   withCredentials: true,
+  // Evita que pedidos "pendurados" bloqueiem navegação (limite de ligações por origem no browser).
+  // Em redes lentas/servidor ocupado, isto falha rápido em vez de acumular pending requests.
+  timeout: Number(process.env.NEXT_PUBLIC_API_TIMEOUT_MS ?? 15000),
 });
 
 axiosInstance.interceptors.request.use((config) => {

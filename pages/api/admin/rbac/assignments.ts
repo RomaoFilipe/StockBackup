@@ -2,7 +2,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { z } from "zod";
 
 import { prisma } from "@/prisma/client";
-import { requireAdmin } from "@/pages/api/admin/_admin";
+import { requireAdminOrPermission } from "@/pages/api/admin/_admin";
 import { ensureTenantRbacBootstrap } from "@/utils/rbac";
 
 const createSchema = z.object({
@@ -18,9 +18,15 @@ const createSchema = z.object({
 const updateSchema = z.object({
   assignmentId: z.string().uuid(),
   isActive: z.boolean().optional(),
+  roleKey: z.string().min(2).max(120).optional(),
+  requestingServiceId: z.number().int().optional().nullable(),
   startsAt: z.string().datetime().optional().nullable(),
   endsAt: z.string().datetime().optional().nullable(),
   note: z.string().max(500).optional().nullable(),
+});
+
+const deleteSchema = z.object({
+  assignmentId: z.string().uuid(),
 });
 
 const querySchema = z.object({
@@ -32,7 +38,7 @@ const querySchema = z.object({
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const db = prisma as any;
-  const session = await requireAdmin(req, res);
+  const session = await requireAdminOrPermission(req, res, "users.manage");
   if (!session) return;
 
   const tenantId = session.tenantId;
@@ -182,6 +188,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (!svc) return res.status(400).json({ error: "Invalid requestingServiceId" });
     }
 
+    const existingForUser = await prisma.userRoleAssignment.findFirst({
+      where: { tenantId, userId },
+      select: { id: true },
+    });
+    if (existingForUser) {
+      return res.status(409).json({
+        error: "Este utilizador já tem um papel atribuído. Edita ou remove a atribuição existente.",
+      });
+    }
+
     const created = await prisma.userRoleAssignment.create({
       data: {
         tenantId,
@@ -249,6 +265,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const data: {
       isActive?: boolean;
+      roleId?: string;
+      requestingServiceId?: number | null;
       startsAt?: Date | null;
       endsAt?: Date | null;
       note?: string | null;
@@ -259,6 +277,24 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     if (Object.prototype.hasOwnProperty.call(parsed.data, "isActive")) {
       data.isActive = parsed.data.isActive;
+    }
+    if (Object.prototype.hasOwnProperty.call(parsed.data, "roleKey")) {
+      const role = await prisma.accessRole.findFirst({
+        where: { tenantId, key: parsed.data.roleKey },
+        select: { id: true },
+      });
+      if (!role) return res.status(404).json({ error: "Role not found" });
+      data.roleId = role.id;
+    }
+    if (Object.prototype.hasOwnProperty.call(parsed.data, "requestingServiceId")) {
+      if (parsed.data.requestingServiceId != null) {
+        const svc = await prisma.requestingService.findUnique({
+          where: { id: parsed.data.requestingServiceId },
+          select: { id: true },
+        });
+        if (!svc) return res.status(400).json({ error: "Invalid requestingServiceId" });
+      }
+      data.requestingServiceId = parsed.data.requestingServiceId ?? null;
     }
     if (Object.prototype.hasOwnProperty.call(parsed.data, "startsAt")) {
       nextStartsAt = parsed.data.startsAt ? new Date(parsed.data.startsAt) : null;
@@ -320,6 +356,45 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     });
   }
 
-  res.setHeader("Allow", ["GET", "POST", "PATCH"]);
+  if (req.method === "DELETE") {
+    const parsed = deleteSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: "Invalid request body", details: parsed.error.flatten() });
+    }
+
+    const current = await prisma.userRoleAssignment.findFirst({
+      where: {
+        id: parsed.data.assignmentId,
+        tenantId,
+      },
+      select: {
+        id: true,
+        userId: true,
+        role: { select: { key: true } },
+      },
+    });
+    if (!current) return res.status(404).json({ error: "Assignment not found" });
+
+    await prisma.userRoleAssignment.delete({
+      where: { id: parsed.data.assignmentId },
+    });
+
+    await db.rbacAudit.create({
+      data: {
+        tenantId,
+        actorUserId: session.id,
+        action: "ASSIGNMENT_DELETED",
+        payload: {
+          assignmentId: current.id,
+          userId: current.userId,
+          roleKey: current.role.key,
+        },
+      },
+    });
+
+    return res.status(200).json({ ok: true });
+  }
+
+  res.setHeader("Allow", ["GET", "POST", "PATCH", "DELETE"]);
   return res.status(405).json({ error: "Method Not Allowed" });
 }

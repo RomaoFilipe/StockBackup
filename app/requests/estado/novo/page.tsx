@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import AuthenticatedLayout from "@/app/components/AuthenticatedLayout";
 import { useAuth } from "@/app/authContext";
 import { useToast } from "@/hooks/use-toast";
@@ -19,12 +19,14 @@ type IntakeMeta = {
 
 export default function NewRequestFromStatusPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { toast } = useToast();
   const { isLoggedIn, isAuthLoading, user } = useAuth();
 
   const [meta, setMeta] = useState<IntakeMeta | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const ticketIdFromQuery = searchParams?.get("ticketId") || "";
 
   const [title, setTitle] = useState("");
   const [deliveryLocation, setDeliveryLocation] = useState("");
@@ -91,6 +93,7 @@ export default function NewRequestFromStatusPage() {
         title: title.trim() || undefined,
         deliveryLocation: deliveryLocation.trim(),
         notes: notes.trim(),
+        ticketId: ticketIdFromQuery || undefined,
       });
 
       const requestId = String(res.data?.id || "");

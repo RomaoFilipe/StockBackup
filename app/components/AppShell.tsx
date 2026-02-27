@@ -19,6 +19,7 @@ import {
   Menu,
   Package,
   PlusCircle,
+  ShieldCheck,
   Shield,
   KeyRound,
   Ticket,
@@ -63,6 +64,7 @@ type NavItem = {
   href?: string;
   icon: React.ElementType;
   roles?: Array<"ADMIN" | "USER">;
+  requiredAnyPermissions?: string[];
   disabled?: boolean;
   onSelect?: () => void;
   active?: (pathname: string, searchParams: ReadonlyURLSearchParams | null) => boolean;
@@ -73,180 +75,255 @@ type NavSection = {
   label: string;
   icon: React.ElementType;
   roles?: Array<"ADMIN" | "USER">;
+  requiredAnyPermissions?: string[];
   defaultOpen?: boolean;
   items: NavItem[];
 };
 
+type RouteAccessRule = {
+  prefix: string;
+  roles?: Array<"ADMIN" | "USER">;
+  requiredAnyPermissions?: string[];
+};
+
+const ROUTE_ACCESS_RULES: RouteAccessRule[] = [
+  { prefix: "/requests/novo", requiredAnyPermissions: ["requests.create"] },
+  // USER intake form: this route is intended for base role USER and does not need the broader requests.view permission.
+  { prefix: "/requests/estado/novo", roles: ["USER"] },
+  // USER self-service area (request intake/status).
+  { prefix: "/requests/estado", roles: ["USER"] },
+  { prefix: "/requests/aprovacoes", requiredAnyPermissions: ["requests.approve"] },
+  { prefix: "/requests/aprovacoes-finais", requiredAnyPermissions: ["requests.final_approve", "requests.final_reject"] },
+  { prefix: "/requests", requiredAnyPermissions: ["requests.view"] },
+  { prefix: "/governanca/permissoes", requiredAnyPermissions: ["users.manage"] },
+  { prefix: "/governanca/financiamento", requiredAnyPermissions: ["finance.manage", "finance.view"] },
+  { prefix: "/governanca/patrimonio", requiredAnyPermissions: ["assets.manage", "assets.view"] },
+  { prefix: "/governanca/requerimentos", requiredAnyPermissions: ["public_requests.handle", "public_requests.view"] },
+  { prefix: "/governanca/recebidos", requiredAnyPermissions: ["public_requests.handle", "public_requests.view"] },
+  {
+    prefix: "/governanca",
+    requiredAnyPermissions: ["finance.manage", "finance.view", "assets.manage", "assets.view", "public_requests.handle", "public_requests.view", "reports.view"],
+  },
+  { prefix: "/users", requiredAnyPermissions: ["users.manage"] },
+  { prefix: "/business-insights", requiredAnyPermissions: ["reports.view"] },
+  { prefix: "/reports", requiredAnyPermissions: ["reports.view"] },
+  { prefix: "/DB", requiredAnyPermissions: ["users.manage"] },
+  { prefix: "/api-docs", requiredAnyPermissions: ["users.manage"] },
+  { prefix: "/api-status", requiredAnyPermissions: ["users.manage"] },
+  { prefix: "/storage", requiredAnyPermissions: ["assets.manage", "assets.view"] },
+  { prefix: "/equipamentos", requiredAnyPermissions: ["assets.manage", "assets.view"] },
+  { prefix: "/", requiredAnyPermissions: ["assets.manage", "assets.view"] },
+];
+
 const navSections: NavSection[] = [
   {
-    id: "work",
-    label: "Trabalho",
-    icon: BriefcaseBusiness,
+    id: "mydesktop",
+    label: "MyDesktop",
+    icon: StretchHorizontal,
     defaultOpen: true,
     items: [
       {
-        id: "backlog",
-        label: "Backlog",
-        href: "/requests/estado",
-        icon: ListTodo,
-      },
-      {
-        id: "requests",
-        label: "Requisições",
-        href: "/requests",
-        icon: ClipboardList,
-        roles: ["ADMIN"],
-      },
-      {
-        id: "tickets",
-        label: "Tickets",
-        href: "/tickets",
-        icon: Ticket,
-      },
-      {
-        id: "my-items",
-        label: "Meus Itens",
-        href: "/requests/estado",
-        icon: UserRoundCheck,
-      },
-      {
         id: "mydesktop",
-        label: "Recebidos",
+        label: "MyDesktop",
         href: "/mydesktop",
         icon: StretchHorizontal,
         roles: ["USER"],
       },
+    ],
+  },
+  {
+    id: "requests",
+    label: "Pedidos",
+    icon: ClipboardList,
+    defaultOpen: true,
+    items: [
       {
-        id: "new",
-        label: "Criar Novo",
+        id: "my-requests",
+        label: "Meus Pedidos",
+        href: "/requests/estado",
+        icon: ListTodo,
+        roles: ["USER"],
+      },
+      {
+        id: "new-request",
+        label: "Novo Pedido",
+        href: "/requests/estado/novo",
+        icon: PlusCircle,
+        roles: ["USER"],
+      },
+      {
+        id: "pending-approvals",
+        label: "Pendentes para mim",
+        href: "/requests/aprovacoes",
+        icon: ShieldCheck,
+        requiredAnyPermissions: ["requests.approve"],
+      },
+      {
+        id: "final-approvals",
+        label: "Aprovação final",
+        href: "/requests/aprovacoes-finais",
+        icon: ShieldCheck,
+        requiredAnyPermissions: ["requests.final_approve", "requests.final_reject"],
+      },
+      {
+        id: "requests-backoffice",
+        label: "Backoffice",
+        href: "/requests",
+        icon: ClipboardList,
+        requiredAnyPermissions: ["requests.view"],
+      },
+      {
+        id: "create-backoffice",
+        label: "Criar (Backoffice)",
         href: "/requests/novo",
         icon: PlusCircle,
+        requiredAnyPermissions: ["requests.create"],
+      },
+    ],
+  },
+  {
+    id: "tickets",
+    label: "Tickets",
+    icon: Ticket,
+    defaultOpen: true,
+    items: [
+      {
+        id: "tickets",
+        label: "Meus Tickets",
+        href: "/tickets",
+        icon: Ticket,
+      },
+    ],
+  },
+  {
+    id: "recebidos",
+    label: "Recebidos",
+    icon: FileCheck,
+    requiredAnyPermissions: ["public_requests.handle", "public_requests.view"],
+    items: [
+      {
+        id: "external-received",
+        label: "Recebidos (portal)",
+        href: "/governanca/recebidos",
+        icon: FileCheck,
+        requiredAnyPermissions: ["public_requests.handle", "public_requests.view"],
       },
     ],
   },
   {
     id: "inventory",
-    label: "Inventário & Ativos",
+    label: "Inventário",
     icon: Boxes,
-    roles: ["ADMIN"],
+    requiredAnyPermissions: ["assets.manage", "assets.view"],
     items: [
       {
         id: "products",
         label: "Produtos",
         href: "/",
         icon: Package,
+        requiredAnyPermissions: ["assets.manage", "assets.view"],
       },
       {
         id: "equipment",
         label: "Equipamentos",
         href: "/equipamentos",
         icon: Boxes,
+        requiredAnyPermissions: ["assets.manage", "assets.view"],
       },
       {
         id: "storage",
         label: "Armazém",
         href: "/storage",
         icon: Archive,
+        requiredAnyPermissions: ["assets.manage", "assets.view"],
         active: (pathname, currentSearchParams) =>
           pathname === "/storage" && currentSearchParams?.get("tab") !== "documents",
       },
-    ],
-  },
-  {
-    id: "municipal-governance",
-    label: "Governança Municipal",
-    icon: Building2,
-    defaultOpen: true,
-    items: [
       {
-        id: "governance",
-        label: "Visão Geral",
-        href: "/governanca",
-        icon: Building2,
-      },
-      {
-        id: "assets",
-        label: "Património",
+        id: "assets-governance",
+        label: "Património (governança)",
         href: "/governanca/patrimonio",
         icon: Archive,
-      },
-      {
-        id: "finance",
-        label: "Financiamento",
-        href: "/governanca/financiamento",
-        icon: HandCoins,
-      },
-      {
-        id: "external-internal-requests",
-        label: "Requerimentos",
-        href: "/governanca/requerimentos",
-        icon: FileCheck,
-      },
-      {
-        id: "rbac",
-        label: "Permissões",
-        href: "/governanca/permissoes",
-        icon: KeyRound,
-        roles: ["ADMIN"],
+        requiredAnyPermissions: ["assets.manage", "assets.view"],
       },
     ],
   },
   {
-    id: "people",
-    label: "Pessoas & Análise",
-    icon: Users,
+    id: "reports",
+    label: "Relatórios",
+    icon: BarChart3,
+    requiredAnyPermissions: ["reports.view"],
     items: [
       {
-        id: "people",
-        label: "Pessoas",
-        href: "/users",
-        icon: Users,
-        roles: ["ADMIN"],
+        id: "approvals-report",
+        label: "Aprovações",
+        href: "/reports/aprovacoes",
+        icon: Rows3,
+        requiredAnyPermissions: ["reports.view"],
       },
       {
         id: "insights",
         label: "Insights",
         href: "/business-insights",
         icon: BarChart3,
+        requiredAnyPermissions: ["reports.view"],
       },
       {
-        id: "reports",
-        label: "Relatórios",
+        id: "reports-ticket-ops",
+        label: "Operações (Tickets)",
         href: "/reports/ticket-operations",
         icon: Rows3,
-        roles: ["ADMIN"],
+        requiredAnyPermissions: ["reports.view"],
       },
     ],
   },
   {
-    id: "system",
-    label: "Sistema",
+    id: "admin",
+    label: "Admin",
     icon: Shield,
-    roles: ["ADMIN"],
+    requiredAnyPermissions: ["users.manage", "finance.manage", "finance.view"],
     items: [
+      {
+        id: "finance",
+        label: "Financiamento",
+        href: "/governanca/financiamento",
+        icon: HandCoins,
+        requiredAnyPermissions: ["finance.manage", "finance.view"],
+      },
+      {
+        id: "rbac",
+        label: "Permissões",
+        href: "/governanca/permissoes",
+        icon: KeyRound,
+        requiredAnyPermissions: ["users.manage"],
+      },
+      {
+        id: "people",
+        label: "Pessoas",
+        href: "/users",
+        icon: Users,
+        requiredAnyPermissions: ["users.manage"],
+      },
       {
         id: "database",
         label: "Base de Dados",
         href: "/DB",
         icon: Database,
+        requiredAnyPermissions: ["users.manage"],
       },
       {
         id: "api-docs",
         label: "Documentação da API",
         href: "/api-docs",
         icon: BookOpen,
+        requiredAnyPermissions: ["users.manage"],
       },
       {
         id: "api-status",
         label: "Estado da API",
         href: "/api-status",
         icon: Activity,
-      },
-      {
-        id: "logs",
-        label: "Logs (em breve)",
-        icon: Archive,
-        disabled: true,
+        requiredAnyPermissions: ["users.manage"],
       },
     ],
   },
@@ -264,6 +341,7 @@ const getPersonalItems = (openProfile: () => void): NavItem[] => [
     label: "Meus Itens",
     href: "/requests/estado",
     icon: UserRoundCheck,
+    requiredAnyPermissions: ["requests.view"],
   },
   {
     id: "presence",
@@ -294,6 +372,7 @@ export default function AppShell({ children }: AppShellProps) {
   const [sectionOpen, setSectionOpen] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(navSections.map((section) => [section.id, section.defaultOpen ?? false])),
   );
+  const lastDeniedPathRef = React.useRef<string | null>(null);
 
   React.useEffect(() => {
     const stored = window.localStorage.getItem("ui-density");
@@ -308,17 +387,34 @@ export default function AppShell({ children }: AppShellProps) {
     window.localStorage.setItem("ui-density", density);
   }, [density]);
 
+  const permissionSet = useMemo(() => {
+    const direct = user?.permissions ?? [];
+    const scoped = (user?.permissionGrants ?? []).map((grant) => grant.key);
+    return new Set<string>([...direct, ...scoped]);
+  }, [user?.permissionGrants, user?.permissions]);
+
+  const canAccess = React.useCallback(
+    (rules?: { roles?: Array<"ADMIN" | "USER">; requiredAnyPermissions?: string[] }) => {
+      const role = user?.role;
+      if (!role) return false;
+      if (rules?.roles?.length && !rules.roles.includes(role)) return false;
+      if (!rules?.requiredAnyPermissions?.length) return true;
+      if (permissionSet.has("*")) return true;
+      return rules.requiredAnyPermissions.some((permissionKey) => permissionSet.has(permissionKey));
+    },
+    [permissionSet, user?.role],
+  );
+
   const visibleSections = useMemo(() => {
-    const role = user?.role;
-    if (!role) return [];
+    if (!user?.role) return [];
     return navSections
-      .filter((section) => !section.roles || section.roles.includes(role))
+      .filter((section) => canAccess(section))
       .map((section) => ({
         ...section,
-        items: section.items.filter((item) => !item.roles || item.roles.includes(role)),
+        items: section.items.filter((item) => canAccess(item)),
       }))
       .filter((section) => section.items.length > 0);
-  }, [user?.role]);
+  }, [canAccess, user?.role]);
 
   const personalItems = useMemo(() => getPersonalItems(() => setPwOpen(true)), []);
 
@@ -328,26 +424,62 @@ export default function AppShell({ children }: AppShellProps) {
   }, [visibleSections]);
 
   const mobilePrimaryNav = useMemo<NavItem[]>(() => {
-    if (user?.role === "USER") {
-      return [
-        { id: "backlog", label: "Backlog", href: "/requests/estado", icon: ListTodo },
-        { id: "mydesktop", label: "Recebidos", href: "/mydesktop", icon: StretchHorizontal },
-        { id: "tickets", label: "Tickets", href: "/tickets", icon: MessageCircle },
-        { id: "new", label: "Criar", href: "/requests/novo", icon: PlusCircle },
-      ];
-    }
-
-    return [
-      { id: "backlog", label: "Backlog", href: "/requests", icon: ListTodo },
-      { id: "tickets", label: "Tickets", href: "/tickets", icon: MessageCircle },
-      { id: "products", label: "Produtos", href: "/", icon: Package },
-      { id: "new", label: "Criar", href: "/requests/novo", icon: PlusCircle },
-    ];
-  }, [user?.role]);
+    const options: NavItem[] = user?.role === "USER"
+      ? [
+          { id: "mydesktop", label: "MyDesktop", href: "/mydesktop", icon: StretchHorizontal, roles: ["USER"] },
+          { id: "my-requests", label: "Pedidos", href: "/requests/estado", icon: ListTodo, roles: ["USER"] },
+          { id: "tickets", label: "Tickets", href: "/tickets", icon: MessageCircle },
+          { id: "approvals", label: "Aprovações", href: "/requests/aprovacoes", icon: ShieldCheck, requiredAnyPermissions: ["requests.approve"] },
+          { id: "new", label: "Criar", href: "/requests/estado/novo", icon: PlusCircle, roles: ["USER"] },
+        ]
+      : [
+          { id: "requests", label: "Pedidos", href: "/requests", icon: ListTodo, requiredAnyPermissions: ["requests.view"] },
+          { id: "tickets", label: "Tickets", href: "/tickets", icon: MessageCircle },
+          { id: "products", label: "Produtos", href: "/", icon: Package, requiredAnyPermissions: ["assets.manage", "assets.view"] },
+          { id: "approvals", label: "Aprovações", href: "/requests/aprovacoes", icon: ShieldCheck, requiredAnyPermissions: ["requests.approve"] },
+          { id: "new", label: "Criar", href: "/requests/novo", icon: PlusCircle, requiredAnyPermissions: ["requests.create"] },
+        ];
+    return options.filter((item) => canAccess(item));
+  }, [canAccess, user?.role]);
 
   const mobileSecondaryNav = useMemo<NavItem[]>(() => {
     return [...visibleSections.flatMap((section) => section.items), ...personalItems].filter((item) => !item.disabled);
   }, [visibleSections, personalItems]);
+
+  const defaultAllowedHref = useMemo(() => {
+    const firstVisible = visibleSections.flatMap((section) => section.items).find((item) => item.href && !item.disabled);
+    if (firstVisible?.href) return firstVisible.href;
+    return "/requests/estado";
+  }, [visibleSections]);
+
+  const isCurrentPathAllowed = useMemo(() => {
+    if (!pathname || !user?.role) return true;
+    const matchingRule = ROUTE_ACCESS_RULES
+      .slice()
+      .sort((a, b) => b.prefix.length - a.prefix.length)
+      .find((rule) => pathname === rule.prefix || pathname.startsWith(`${rule.prefix}/`));
+    if (!matchingRule) return true;
+    return canAccess(matchingRule);
+  }, [canAccess, pathname, user?.role]);
+
+  React.useEffect(() => {
+    if (!pathname || !user?.role) return;
+    if (isCurrentPathAllowed) {
+      lastDeniedPathRef.current = null;
+      return;
+    }
+    if (lastDeniedPathRef.current === pathname) return;
+    lastDeniedPathRef.current = pathname;
+    const target = defaultAllowedHref === pathname ? "/requests/estado" : defaultAllowedHref;
+    toast({
+      title: "Acesso negado",
+      description: "Não tens permissão para abrir esta área.",
+      variant: "destructive",
+    });
+    if (target !== pathname) {
+      router.replace(target);
+    }
+  }, [defaultAllowedHref, isCurrentPathAllowed, pathname, router, toast, user?.role]);
 
   const isActive = (item: NavItem) => {
     if (item.active) return item.active(pathname || "", searchParams);
@@ -690,7 +822,7 @@ export default function AppShell({ children }: AppShellProps) {
           </header>
 
           <main className="content-density flex flex-1 flex-col px-4 pb-24 pt-8 sm:px-6 sm:pt-8 lg:px-10 lg:pb-10 lg:pt-10 animate-fade-up">
-            {children}
+            {isCurrentPathAllowed ? children : null}
           </main>
         </div>
       </div>

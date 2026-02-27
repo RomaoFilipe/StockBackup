@@ -2,13 +2,23 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { z } from "zod";
 import { prisma } from "@/prisma/client";
 import { getSessionServer } from "@/utils/auth";
-import { canAccessTicket, createTicketAudit } from "../_utils";
+import { canAccessTicketWithParticipants, createTicketAudit, getTicketPermissionGrants, isTicketManager } from "../_utils";
 import { applyTicketSlaEscalations } from "../_sla";
 import { publishRealtimeEvent } from "@/utils/realtime";
 
 const createMessageSchema = z.object({
   body: z.string().trim().min(1).max(4000),
 });
+
+function extractMentions(body: string): string[] {
+  const out = new Set<string>();
+  const re = /@([a-zA-Z0-9._-]{2,50})/g;
+  for (const match of body.matchAll(re)) {
+    const token = String(match[1] ?? "").trim();
+    if (token) out.add(token);
+  }
+  return Array.from(out);
+}
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const session = await getSessionServer(req, res);
@@ -19,13 +29,27 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const ticketId = typeof req.query.id === "string" ? req.query.id : "";
   if (!ticketId) return res.status(400).json({ error: "Invalid ticket id" });
 
+  const grants = await getTicketPermissionGrants(session as any);
+  const manager = isTicketManager(grants);
+
   const ticket = await prisma.ticket.findFirst({
     where: { id: ticketId, tenantId: session.tenantId },
-    select: { id: true, code: true, status: true, createdByUserId: true, assignedToUserId: true, firstResponseAt: true },
+    select: {
+      id: true,
+      code: true,
+      status: true,
+      createdByUserId: true,
+      assignedToUserId: true,
+      firstResponseAt: true,
+      participants: { select: { userId: true } },
+    },
   });
 
   if (!ticket) return res.status(404).json({ error: "Ticket not found" });
-  if (!canAccessTicket(session, ticket)) return res.status(403).json({ error: "Forbidden" });
+  const participantUserIds = ticket.participants.map((p) => p.userId);
+  if (!canAccessTicketWithParticipants(session, ticket, participantUserIds, { isManager: manager })) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
 
   if (req.method === "GET") {
     try {
@@ -60,6 +84,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     try {
+      const mentions = extractMentions(parsed.data.body);
+      const myServiceId = (session as any).requestingServiceId ?? null;
+      const mentionedUsers = mentions.length
+        ? await prisma.user.findMany({
+            where: {
+              tenantId: session.tenantId,
+              isActive: true,
+              username: { in: mentions },
+              ...(!manager ? (myServiceId == null ? { id: "__NO_MATCH__" } : { requestingServiceId: myServiceId }) : {}),
+            },
+            select: { id: true },
+          })
+        : [];
+      const mentionedUserIds = mentionedUsers.map((u) => u.id);
+
       const message = await prisma.$transaction(async (tx) => {
         const current = await tx.ticket.findFirst({
           where: { id: ticket.id, tenantId: session.tenantId },
@@ -84,6 +123,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           },
         });
 
+        const baseParticipantIds = Array.from(
+          new Set([session.id, ticket.createdByUserId, ticket.assignedToUserId, ...mentionedUserIds].filter(Boolean) as string[])
+        );
+        if (baseParticipantIds.length) {
+          await tx.ticketParticipant.createMany({
+            data: baseParticipantIds.map((uid) => ({
+              tenantId: session.tenantId,
+              ticketId: ticket.id,
+              userId: uid,
+              addedByUserId: session.id,
+            })),
+            skipDuplicates: true,
+          });
+        }
+
         if (!ticket.firstResponseAt && session.id !== ticket.createdByUserId) {
           await tx.ticket.update({
             where: { id: ticket.id },
@@ -101,7 +155,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         action: "MESSAGE_CREATED",
       });
 
-      const notifyUserIds = Array.from(new Set([ticket.createdByUserId, ticket.assignedToUserId].filter(Boolean) as string[]));
+      const participantRows = await prisma.ticketParticipant.findMany({
+        where: { tenantId: session.tenantId, ticketId: ticket.id },
+        select: { userId: true },
+      });
+      const notifyUserIds = Array.from(
+        new Set([ticket.createdByUserId, ticket.assignedToUserId, ...participantRows.map((p) => p.userId)].filter(Boolean) as string[])
+      );
       publishRealtimeEvent({
         type: "ticket.message_created",
         tenantId: session.tenantId,

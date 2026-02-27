@@ -11,19 +11,18 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Info } from "lucide-react";
 
 type RequestDto = {
   id: string;
   gtmiNumber: string;
   status: "DRAFT" | "SUBMITTED" | "APPROVED" | "REJECTED" | "FULFILLED";
   requestedAt: string;
+  workflowState?: { code: string; name: string } | null;
   items?: any[];
   requestingService?: string | null;
   title?: string | null;
   userId?: string;
-  source?: "REQUEST" | "INTAKE_REJECTED";
-  handledNote?: string | null;
+  source?: "REQUEST";
 };
 
 const statusMeta = (s: RequestDto["status"]) => {
@@ -43,10 +42,10 @@ const statusMeta = (s: RequestDto["status"]) => {
   }
 };
 
-const pickupMeta = (s: RequestDto["status"]) => {
-  switch (s) {
+const pickupMeta = (r: Pick<RequestDto, "status" | "workflowState">) => {
+  switch (r.status) {
     case "SUBMITTED":
-      return "A preparar";
+      return r.workflowState?.code === "AWAITING_ADMIN_APPROVAL" ? "Aguarda aprovação final" : "Em validação (chefia)";
     case "APPROVED":
       return "Por levantar";
     case "FULFILLED":
@@ -56,7 +55,7 @@ const pickupMeta = (s: RequestDto["status"]) => {
     case "DRAFT":
       return "Por submeter";
     default:
-      return s;
+      return r.status;
   }
 };
 
@@ -92,32 +91,13 @@ export default function RequestsStatusPage() {
     setLoading(true);
     try {
       if (user.role === "USER") {
-        const [reqRes, rejectedRes] = await Promise.all([
-          axiosInstance.get("/requests"),
-          axiosInstance.get("/requests/user-intake/rejected"),
+        const [reqRes] = await Promise.all([
+          axiosInstance.get("/requests?mine=1"),
         ]);
 
         const reqData = Array.isArray(reqRes.data) ? reqRes.data : [];
-        const myRequests: RequestDto[] = reqData
-          .filter((r: any) => !r.userId || r.userId === user.id)
-          .map((r: any) => ({ ...r, source: "REQUEST" as const }));
-
-        const rejectedData = Array.isArray(rejectedRes.data) ? rejectedRes.data : [];
-        const rejectedRows: RequestDto[] = rejectedData.map((r: any) => ({
-          id: `intake-rejected:${r.id}`,
-          gtmiNumber: "—",
-          status: "REJECTED" as const,
-          requestedAt: r.createdAt,
-          items: Array.from({ length: Number(r.itemsCount ?? 0) }),
-          requestingService: r.requestingService
-            ? `${r.requestingService.designacao}${r.requestingService.codigo ? ` (${r.requestingService.codigo})` : ""}`
-            : "—",
-          title: r.title || r.notes || "Pedido recusado (sem criação de requisição)",
-          source: "INTAKE_REJECTED" as const,
-          handledNote: r.handledNote ?? null,
-        }));
-
-        setRequests([...myRequests, ...rejectedRows]);
+        const myRequests: RequestDto[] = reqData.map((r: any) => ({ ...r, source: "REQUEST" as const }));
+        setRequests(myRequests);
       } else {
         const res = await axiosInstance.get("/requests");
         const data = Array.isArray(res.data) ? res.data : [];
@@ -259,15 +239,6 @@ export default function RequestsStatusPage() {
                             <TableCell className="font-mono text-xs">{r.gtmiNumber}</TableCell>
                             <TableCell className="max-w-[320px]">
                               <div className="truncate">{r.title ?? "—"}</div>
-                              {r.source === "INTAKE_REJECTED" && r.handledNote?.trim() ? (
-                                <div
-                                  className="mt-1 flex items-start gap-1 text-xs text-rose-700 dark:text-rose-300 line-clamp-2"
-                                  title={r.handledNote}
-                                >
-                                  <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                                  <span>Motivo: {r.handledNote}</span>
-                                </div>
-                              ) : null}
                             </TableCell>
                             <TableCell>{r.requestingService ?? "—"}</TableCell>
                             <TableCell>
@@ -275,18 +246,14 @@ export default function RequestsStatusPage() {
                             </TableCell>
                             <TableCell>
                               <Badge variant="outline" className={pickupBadgeClass(r.status)}>
-                                {pickupMeta(r.status)}
+                                {pickupMeta(r)}
                               </Badge>
                             </TableCell>
                             <TableCell>{new Date(r.requestedAt).toLocaleString()}</TableCell>
                             <TableCell className="text-right">
-                              {r.source === "INTAKE_REJECTED" ? (
-                                <span className="text-xs text-muted-foreground">Sem detalhe</span>
-                              ) : (
-                                <Button variant="ghost" size="sm" onClick={() => router.push(`/requests/${r.id}`)}>
-                                  Ver
-                                </Button>
-                              )}
+                              <Button variant="ghost" size="sm" onClick={() => router.push(`/requests/${r.id}`)}>
+                                Ver
+                              </Button>
                             </TableCell>
                           </TableRow>
                         );

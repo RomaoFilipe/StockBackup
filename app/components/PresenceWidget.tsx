@@ -40,6 +40,8 @@ export default function PresenceWidget() {
   const [manualStatus, setManualStatus] = useState<"AUTO" | "ONLINE" | "BUSY" | "MEETING">("AUTO");
   const [savingStatus, setSavingStatus] = useState(false);
   const lastActivePingRef = useRef(0);
+  const presenceFetchInFlightRef = useRef(false);
+  const heartbeatInFlightRef = useRef(false);
 
   const sortedRows = useMemo(
     () =>
@@ -62,6 +64,8 @@ export default function PresenceWidget() {
   }, [sortedRows, search]);
 
   const fetchPresence = async () => {
+    if (presenceFetchInFlightRef.current) return;
+    presenceFetchInFlightRef.current = true;
     setLoading(true);
     try {
       const res = await axiosInstance.get("/presence");
@@ -72,14 +76,19 @@ export default function PresenceWidget() {
       setRows([]);
     } finally {
       setLoading(false);
+      presenceFetchInFlightRef.current = false;
     }
   };
 
   const pingHeartbeat = async (active: boolean) => {
+    if (heartbeatInFlightRef.current) return;
+    heartbeatInFlightRef.current = true;
     try {
       await axiosInstance.post("/presence/heartbeat", { active });
     } catch {
       // ignore
+    } finally {
+      heartbeatInFlightRef.current = false;
     }
   };
 

@@ -5,7 +5,8 @@ import { getSessionServer } from "@/utils/auth";
 import { createRequestStatusAudit, notifyAdmin, notifyUser } from "@/utils/notifications";
 import { publishRealtimeEvent } from "@/utils/realtime";
 import { createTicketAudit } from "@/pages/api/tickets/_utils";
-import { ensureRequestWorkflowDefinition, ensureRequestWorkflowInstance } from "@/utils/workflow";
+import { getUserPermissionGrants, hasPermission } from "@/utils/rbac";
+import { ensureRequestWorkflowDefinition, ensureRequestWorkflowInstance, transitionRequestWorkflowByActionTx } from "@/utils/workflow";
 
 const goodsTypeSchema = z.enum(["MATERIALS_SERVICES", "WAREHOUSE_MATERIALS", "OTHER_PRODUCTS"]);
 const requestTypeSchema = z.enum(["STANDARD", "RETURN"]);
@@ -24,6 +25,7 @@ const createRequestSchema = z.object({
   priority: z.enum(["LOW", "NORMAL", "HIGH", "URGENT"]).optional(),
   dueAt: dateLikeString.optional(),
   requestType: requestTypeSchema.optional(),
+  autoSubmit: z.boolean().optional(),
 
   requestingServiceId: z.number().int(),
   requesterName: z.string().max(120).optional(),
@@ -52,25 +54,6 @@ const createRequestSchema = z.object({
     .min(1),
 });
 
-class StockAllocationError extends Error {
-  code: string;
-  details?: Record<string, any>;
-
-  constructor(code: string, message: string, details?: Record<string, any>) {
-    super(message);
-    this.code = code;
-    this.details = details;
-  }
-}
-
-function computeProductStatus(quantity: number) {
-  return quantity > 20 ? "Available" : quantity > 0 ? "Stock Low" : "Stock Out";
-}
-
-function isUuidLike(v: string) {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
-}
-
 function formatGtmiNumber(gtmiYear: number, gtmiSeq: number) {
   return `GTMI-${gtmiYear}-${String(gtmiSeq).padStart(6, "0")}`;
 }
@@ -79,6 +62,7 @@ async function createRequestWithGtmiSeq(args: {
   tenantId: string;
   userId: string;
   createdByUserId: string;
+  autoSubmit: boolean;
   title?: string;
   notes?: string;
   requestedAt: Date;
@@ -126,7 +110,7 @@ async function createRequestWithGtmiSeq(args: {
             tenantId: args.tenantId,
             userId: args.userId,
             createdByUserId: args.createdByUserId,
-            status: "SUBMITTED",
+            status: "DRAFT",
             requestType: args.requestType,
 
             title: args.title,
@@ -178,180 +162,18 @@ async function createRequestWithGtmiSeq(args: {
           requestId: created.id,
         });
 
-        // === Stock deduction / unit allocation ===
-        if (args.requestType === "RETURN") {
-          const final = await tx.request.findUnique({
-            where: { id: created.id },
-            include: {
-              user: { select: { id: true, name: true, email: true } },
-              createdBy: { select: { id: true, name: true, email: true } },
-              items: {
-                include: { product: { select: { id: true, name: true, sku: true } } },
-                orderBy: { createdAt: "asc" },
-              },
-            },
+        if (args.autoSubmit) {
+          await transitionRequestWorkflowByActionTx(tx, {
+            tenantId: args.tenantId,
+            requestId: created.id,
+            action: "SUBMIT",
+            actorUserId: args.createdByUserId,
+            note: "auto-submit",
           });
-
-          return final ?? created;
         }
 
-        const performerUserId = args.createdByUserId;
-        const assignedToUserId = args.userId;
-        const stockReason = `Requisi\u00e7\u00e3o ${gtmiNumber}`;
-
-        const unitCountByProductId = new Map<string, number>();
-
-        for (const item of created.items as any[]) {
-          const qty = Number(item.quantity);
-          if (!Number.isFinite(qty) || qty <= 0) {
-            continue;
-          }
-
-          const productId: string = item.productId;
-
-          let unitCount: number | undefined = unitCountByProductId.get(productId);
-          if (unitCount === undefined) {
-            unitCount = Number(
-              await txAny.productUnit.count({
-              where: { tenantId: args.tenantId, productId },
-              })
-            );
-            unitCountByProductId.set(productId, unitCount);
-          }
-
-          const isUnitTracked = unitCount > 0;
-          const requestedCode = typeof item.destination === "string" ? item.destination.trim() : "";
-
-          if (isUnitTracked) {
-            if (qty !== 1) {
-              throw new StockAllocationError(
-                "UNIT_QTY_MUST_BE_1",
-                "Para produtos com QR (unidades), use linhas separadas (Qtd=1 por unidade).",
-                { productId, quantity: qty }
-              );
-            }
-
-            const unit = requestedCode && isUuidLike(requestedCode)
-              ? await txAny.productUnit.findFirst({
-                  where: {
-                    tenantId: args.tenantId,
-                    productId,
-                    code: requestedCode,
-                    status: "IN_STOCK",
-                  },
-                  select: { id: true, code: true, invoiceId: true },
-                })
-              : await txAny.productUnit.findFirst({
-                  where: {
-                    tenantId: args.tenantId,
-                    productId,
-                    status: "IN_STOCK",
-                  },
-                  orderBy: { createdAt: "asc" },
-                  select: { id: true, code: true, invoiceId: true },
-                });
-
-            if (!unit) {
-              throw new StockAllocationError(
-                "NO_UNIT_IN_STOCK",
-                "Sem unidades em stock para um dos produtos selecionados.",
-                { productId, requestedCode: requestedCode || null }
-              );
-            }
-
-            const updated = await txAny.productUnit.updateMany({
-              where: { id: unit.id, status: "IN_STOCK" },
-              data: {
-                status: "ACQUIRED",
-                acquiredAt: new Date(),
-                acquiredByUserId: performerUserId,
-                assignedToUserId,
-                acquiredReason: stockReason,
-              },
-            });
-
-            if (!updated?.count) {
-              throw new StockAllocationError(
-                "UNIT_RACE_CONDITION",
-                "A unidade foi alocada por outro utilizador. Tente novamente.",
-                { productId, code: unit.code }
-              );
-            }
-
-            if (!requestedCode || requestedCode !== unit.code) {
-              await tx.requestItem.update({
-                where: { id: item.id },
-                data: { destination: unit.code },
-              });
-            }
-
-            await txAny.stockMovement.create({
-              data: {
-                type: "OUT",
-                quantity: BigInt(1) as any,
-                tenantId: args.tenantId,
-                productId,
-                unitId: unit.id,
-                invoiceId: unit.invoiceId ?? null,
-                requestId: created.id,
-                performedByUserId: performerUserId,
-                assignedToUserId,
-                reason: stockReason,
-              },
-              select: { id: true },
-            });
-
-            const productAfter = await tx.product.update({
-              where: { id: productId },
-              data: { quantity: { decrement: BigInt(1) as any } },
-              select: { quantity: true },
-            });
-            const finalQuantity = Number(productAfter.quantity);
-            await tx.product.update({
-              where: { id: productId },
-              data: { status: computeProductStatus(finalQuantity) },
-            });
-          } else {
-            // Bulk stock item (no per-unit tracking)
-            const product = await tx.product.findUnique({
-              where: { id: productId },
-              select: { quantity: true },
-            });
-            const currentQty = Number(product?.quantity ?? BigInt(0));
-            if (currentQty < qty) {
-              throw new StockAllocationError(
-                "INSUFFICIENT_STOCK",
-                "Stock insuficiente para um dos produtos selecionados.",
-                { productId, requested: qty, available: currentQty }
-              );
-            }
-
-            await txAny.stockMovement.create({
-              data: {
-                type: "OUT",
-                quantity: BigInt(qty) as any,
-                tenantId: args.tenantId,
-                productId,
-                requestId: created.id,
-                performedByUserId: performerUserId,
-                assignedToUserId,
-                reason: stockReason,
-              },
-              select: { id: true },
-            });
-
-            const productAfter = await tx.product.update({
-              where: { id: productId },
-              data: { quantity: { decrement: BigInt(qty) as any } },
-              select: { quantity: true },
-            });
-            const finalQuantity = Number(productAfter.quantity);
-            await tx.product.update({
-              where: { id: productId },
-              data: { status: computeProductStatus(finalQuantity) },
-            });
-          }
-        }
+        // Warehouse execution is now explicit and happens in /api/requests/[id]/execute.
+        // At creation time we only register the request intent and its requested lines.
 
         const final = await tx.request.findUnique({
           where: { id: created.id },
@@ -393,6 +215,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const mine = mineFlag === "1" || mineFlag === "true";
   const paged = String(req.query.paged ?? "") === "1" || String(req.query.paged ?? "") === "true";
 
+  const permissionGrants = await getUserPermissionGrants(prisma, {
+    id: session.id,
+    tenantId,
+    role: session.role,
+  });
+
   // By default, requests are tenant-wide (visible to all users in the tenant).
   // Optional filters:
   // - mine=1: only the current user's requests
@@ -400,6 +228,33 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const userIdFilter = isAdmin && asUserIdFromQuery ? asUserIdFromQuery : mine ? session.id : undefined;
 
   if (req.method === "GET") {
+    // Self-service list: allow any authenticated user, but only for their own requests.
+    if (mine && userIdFilter !== session.id) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    // Backoffice list: requires requests.view (scoped).
+    if (!mine) {
+      const hasWildcard = permissionGrants.some((g) => g.key === "*");
+      const hasGlobalView = hasWildcard || permissionGrants.some((g) => g.key === "requests.view" && g.requestingServiceId == null);
+      const allowedServiceIds = Array.from(
+        new Set(
+          permissionGrants
+            .filter((g) => g.key === "requests.view" && typeof g.requestingServiceId === "number" && Number.isFinite(g.requestingServiceId))
+            .map((g) => g.requestingServiceId as number),
+        ),
+      );
+
+      if (!hasGlobalView && allowedServiceIds.length === 0) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      // Enforce scope in query (unless the user has a global grant).
+      if (!hasGlobalView) {
+        (req as any).__rbacAllowedServiceIds = allowedServiceIds;
+      }
+    }
+
     try {
       const page = Math.max(1, Number(req.query.page || 1) || 1);
       const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize || 20) || 20));
@@ -409,9 +264,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const dateFrom = typeof req.query.dateFrom === "string" && req.query.dateFrom ? new Date(req.query.dateFrom) : null;
       const dateTo = typeof req.query.dateTo === "string" && req.query.dateTo ? new Date(req.query.dateTo) : null;
 
+      const rbacAllowedServiceIds = ((req as any).__rbacAllowedServiceIds ?? null) as number[] | null;
+
       const where: any = {
         tenantId,
         ...(userIdFilter ? { userId: userIdFilter } : {}),
+        ...(rbacAllowedServiceIds ? { requestingServiceId: { in: rbacAllowedServiceIds } } : {}),
         ...(statusParam ? { status: statusParam } : {}),
         ...(priorityParam ? { priority: priorityParam } : {}),
         ...(q
@@ -464,10 +322,25 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         paged ? prisma.request.count({ where }) : Promise.resolve(0),
       ]);
 
+      const requestIds = requests.map((r) => r.id);
+      const workflowRows = requestIds.length
+        ? await (prisma as any).workflowInstance.findMany({
+            where: { tenantId, requestId: { in: requestIds } },
+            select: {
+              requestId: true,
+              currentState: { select: { code: true, name: true } },
+            },
+          })
+        : [];
+      const workflowByRequestId = new Map(
+        workflowRows.map((w: any) => [w.requestId, w.currentState ? { code: w.currentState.code, name: w.currentState.name } : null]),
+      );
+
       const mapped = requests.map((r) => {
           const { pickupSignatureDataUrl: _pickupSignatureDataUrl, ...rest } = r as any;
           return {
             ...rest,
+            workflowState: workflowByRequestId.get(r.id) ?? null,
             createdAt: r.createdAt.toISOString(),
             updatedAt: r.updatedAt.toISOString(),
             requestedAt: r.requestedAt.toISOString(),
@@ -509,6 +382,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   if (req.method === "POST") {
+    // Creation via backoffice API requires requests.create scoped to the target service.
     const parsed = createRequestSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ error: "Invalid request body" });
@@ -521,6 +395,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       priority,
       dueAt,
       requestType,
+      autoSubmit,
       requestingServiceId,
       requesterName,
       requesterEmployeeNo,
@@ -535,6 +410,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       items,
     } = parsed.data;
     const effectiveRequestType = requestType ?? "STANDARD";
+    const shouldAutoSubmit = autoSubmit !== false;
+
+    if (!hasPermission(permissionGrants, "requests.create", requestingServiceId)) {
+      return res.status(403).json({ error: "Sem permissão para criar pedidos para este serviço." });
+    }
 
     if (effectiveRequestType === "RETURN") {
       const hasOld = items.some((it) => (it.role ?? "NORMAL") === "OLD");
@@ -571,11 +451,56 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         return res.status(404).json({ error: "One or more products were not found" });
       }
 
+      // Stock validation only (no reservation). Real allocation occurs at warehouse execution.
+      for (const item of items) {
+        const qty = Number(item.quantity);
+        if (!Number.isFinite(qty) || qty <= 0) {
+          return res.status(400).json({ error: "Invalid quantity" });
+        }
+
+        const unitCount = Number(
+          await (prisma as any).productUnit.count({
+            where: { tenantId, productId: item.productId },
+          })
+        );
+        const isUnitTracked = unitCount > 0;
+
+        if (isUnitTracked) {
+          if (qty !== 1) {
+            return res.status(400).json({
+              error: "Para produtos com QR (unidades), use linhas separadas (Qtd=1 por unidade).",
+            });
+          }
+
+          const destinationCode = typeof item.destination === "string" ? item.destination.trim() : "";
+          const unitWhere = destinationCode
+            ? { tenantId, productId: item.productId, status: "IN_STOCK", code: destinationCode }
+            : { tenantId, productId: item.productId, status: "IN_STOCK" };
+          const unit = await (prisma as any).productUnit.findFirst({
+            where: unitWhere,
+            select: { id: true },
+          });
+          if (!unit) {
+            return res.status(400).json({ error: "Sem unidades em stock para um dos produtos selecionados." });
+          }
+        } else {
+          const product = await prisma.product.findUnique({
+            where: { id: item.productId },
+            select: { quantity: true },
+          });
+          const available = Number(product?.quantity ?? BigInt(0));
+          if (available < qty) {
+            return res.status(400).json({ error: "Stock insuficiente para um dos produtos selecionados." });
+          }
+        }
+      }
+
       const effectiveRequestedAt = requestedAt ?? new Date();
       const created = await createRequestWithGtmiSeq({
         tenantId,
         userId: session.id,
         createdByUserId: session.id,
+        autoSubmit: shouldAutoSubmit,
         title,
         notes,
         requestedAt: effectiveRequestedAt,
@@ -669,7 +594,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           tenantId,
           requestId: created.id,
           fromStatus: null,
-          toStatus: "SUBMITTED",
+          toStatus: created.status,
           changedByUserId: session.id,
           source: "api/requests:POST",
         });
@@ -737,9 +662,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         })),
       });
     } catch (error) {
-      if (error instanceof StockAllocationError) {
-        return res.status(400).json({ error: error.message, code: error.code, details: error.details ?? null });
-      }
       console.error("POST /api/requests error:", error);
       return res.status(500).json({ error: "Failed to create request" });
     }

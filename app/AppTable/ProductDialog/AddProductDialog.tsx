@@ -107,6 +107,7 @@ export default function AddProductDialog({
 
   const [selectedCategory, setSelectedCategory] = useState<string>("");
   const [selectedSupplier, setSelectedSupplier] = useState<string>("");
+  const [isPatrimonializable, setIsPatrimonializable] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false); // Button loading state
   const dialogCloseRef = useRef<HTMLButtonElement | null>(null);
   const [attachment, setAttachment] = useState<File | null>(null);
@@ -166,6 +167,7 @@ export default function AddProductDialog({
       });
       setSelectedCategory(selectedProduct.categoryId || "");
       setSelectedSupplier(selectedProduct.supplierId || "");
+      setIsPatrimonializable(Boolean((selectedProduct as any).isPatrimonializable));
     } else {
       // Reset form to default values for adding a new product
       reset({
@@ -187,6 +189,7 @@ export default function AddProductDialog({
       setCreatedInvoiceId(null);
       setCreatedUnitPreviewCodes([]);
       setRequestingServiceId("");
+      setIsPatrimonializable(false);
     }
   }, [selectedProduct, openProductDialog, reset]);
 
@@ -228,6 +231,7 @@ export default function AddProductDialog({
             price: data.price,
             categoryId: selectedCategory,
             supplierId: selectedSupplier,
+            isPatrimonializable,
           },
         });
 
@@ -284,6 +288,7 @@ export default function AddProductDialog({
           status,
           categoryId: selectedCategory,
           userId: selectedProduct.userId,
+          isPatrimonializable,
         };
 
         const result = await updateProduct(productToUpdate);
@@ -484,6 +489,20 @@ export default function AddProductDialog({
                         ))}
                       </select>
                     </div>
+                    <div className="space-y-1 sm:col-span-2">
+                      <label className="text-sm font-medium">Tipo de bem</label>
+                      <div className="flex items-center gap-2 rounded-md border border-input px-3 py-2">
+                        <input
+                          id="isPatrimonializable"
+                          type="checkbox"
+                          checked={isPatrimonializable}
+                          onChange={(e) => setIsPatrimonializable(e.target.checked)}
+                        />
+                        <label htmlFor="isPatrimonializable" className="text-sm">
+                          Equipamento/Património (criar/ligar ativo em execução de requisição)
+                        </label>
+                      </div>
+                    </div>
                   </CardContent>
                 </Card>
 
@@ -611,6 +630,20 @@ export default function AddProductDialog({
                       </option>
                     ))}
                   </select>
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-sm font-medium">Tipo de bem</label>
+                  <div className="mt-1 flex items-center gap-2 rounded-md border border-input px-3 py-2">
+                    <input
+                      id="isPatrimonializableEdit"
+                      type="checkbox"
+                      checked={isPatrimonializable}
+                      onChange={(e) => setIsPatrimonializable(e.target.checked)}
+                    />
+                    <label htmlFor="isPatrimonializableEdit" className="text-sm">
+                      Equipamento/Património
+                    </label>
+                  </div>
                 </div>
               </div>
             )}

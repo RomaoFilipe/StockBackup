@@ -17,7 +17,7 @@ export default async function handler(
   switch (method) {
     case "POST":
       try {
-        const { name, description, sku, price, quantity, status, categoryId, supplierId } =
+        const { name, description, sku, price, quantity, status, categoryId, supplierId, isPatrimonializable } =
           req.body;
 
         // Check if SKU already exists
@@ -51,6 +51,7 @@ export default async function handler(
             price,
             quantity: BigInt(quantity) as any,
             status,
+            isPatrimonializable: Boolean(isPatrimonializable),
             tenantId,
             categoryId,
             supplierId,
@@ -67,6 +68,7 @@ export default async function handler(
           price: product.price,
           quantity: Number(product.quantity),
           status: product.status,
+          isPatrimonializable: product.isPatrimonializable,
           tenantId: product.tenantId,
           categoryId: product.categoryId,
           supplierId: product.supplierId,
@@ -117,6 +119,7 @@ export default async function handler(
           status,
           categoryId,
           supplierId,
+          isPatrimonializable,
         } = req.body;
 
         const existing = await prisma.product.findFirst({
@@ -150,6 +153,7 @@ export default async function handler(
             price,
             quantity: BigInt(quantity) as any, // Convert to BigInt for database
             status,
+            isPatrimonializable: Boolean(isPatrimonializable),
             categoryId,
             supplierId,
           },
@@ -164,6 +168,7 @@ export default async function handler(
           price: updatedProduct.price,
           quantity: Number(updatedProduct.quantity), // Convert BigInt to Number
           status: updatedProduct.status,
+          isPatrimonializable: updatedProduct.isPatrimonializable,
           tenantId: updatedProduct.tenantId,
           categoryId: updatedProduct.categoryId,
           supplierId: updatedProduct.supplierId,

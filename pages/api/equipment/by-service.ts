@@ -2,6 +2,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { z } from "zod";
 import { prisma } from "@/prisma/client";
 import { getSessionServer } from "@/utils/auth";
+import { getUserPermissionGrants, hasPermission } from "@/utils/rbac";
 
 const StatusSchema = z.enum(["IN_STOCK", "ACQUIRED", "IN_REPAIR", "SCRAPPED", "LOST"]);
 
@@ -88,6 +89,32 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   try {
     const prismaAny = prisma as any;
+    const grants = await getUserPermissionGrants(prisma, {
+      id: session.id,
+      tenantId,
+      role: session.role,
+    });
+
+    const canViewAny =
+      hasPermission(grants, "assets.view", null) ||
+      hasPermission(grants, "assets.manage", null);
+
+    const allowedServiceIds = Array.from(
+      new Set(
+        grants
+          .filter(
+            (g) =>
+              (g.key === "assets.view" || g.key === "assets.manage") &&
+              typeof g.requestingServiceId === "number" &&
+              Number.isFinite(g.requestingServiceId),
+          )
+          .map((g) => g.requestingServiceId as number),
+      ),
+    );
+
+    if (!canViewAny && allowedServiceIds.length === 0) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
 
     const units = await prismaAny.productUnit.findMany({
       where: {
@@ -145,6 +172,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       } else if (fallbackServiceText) {
         key = `txt:${fallbackServiceText.toLowerCase()}`;
         label = fallbackServiceText;
+      }
+
+      if (!canViewAny) {
+        if (typeof requestingServiceId !== "number") {
+          continue;
+        }
+        if (!allowedServiceIds.includes(requestingServiceId)) {
+          continue;
+        }
       }
 
       const assignedTo = (u.assignedTo ?? out?.assignedTo ?? null) as

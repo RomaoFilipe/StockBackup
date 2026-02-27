@@ -1,7 +1,8 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { z } from "zod";
 import { prisma } from "@/prisma/client";
-import { requireAdminOrPermission } from "../_admin";
+import { getSessionServer } from "@/utils/auth";
+import { getUserPermissionGrants, hasPermission } from "@/utils/rbac";
 
 const querySchema = z.object({
   status: z.enum(["RECEIVED", "ACCEPTED", "REJECTED"]).optional(),
@@ -9,8 +10,8 @@ const querySchema = z.object({
 });
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  const session = await requireAdminOrPermission(req, res, "public_requests.handle");
-  if (!session) return;
+  const session = await getSessionServer(req, res);
+  if (!session) return res.status(401).json({ error: "Unauthorized" });
 
   if (req.method !== "GET") {
     res.setHeader("Allow", ["GET"]);
@@ -23,10 +24,37 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const tenantId = session.tenantId;
   const take = parsed.data.limit ?? 100;
 
+  const grants = await getUserPermissionGrants(prisma, {
+    id: session.id,
+    tenantId,
+    role: session.role,
+  });
+
+  const canViewAll =
+    hasPermission(grants, "public_requests.handle", null) ||
+    hasPermission(grants, "public_requests.view", null);
+  const allowedServiceIds = Array.from(
+    new Set(
+      grants
+        .filter(
+          (g) =>
+            (g.key === "public_requests.handle" || g.key === "public_requests.view") &&
+            typeof g.requestingServiceId === "number" &&
+            Number.isFinite(g.requestingServiceId),
+        )
+        .map((g) => g.requestingServiceId as number),
+    ),
+  );
+
+  if (!canViewAll && allowedServiceIds.length === 0) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+
   const rows = await prisma.publicRequest.findMany({
     where: {
       tenantId,
       ...(parsed.data.status ? { status: parsed.data.status } : {}),
+      ...(canViewAll ? {} : { requestingServiceId: { in: allowedServiceIds } }),
     },
     orderBy: { createdAt: "desc" },
     take,
@@ -56,6 +84,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       handledNote: r.handledNote,
       handledBy: r.handledBy,
       requestingService: r.requestingService,
+      requesterUserId: (r as any).requesterUserId ?? null,
       acceptedRequest: r.acceptedRequest,
       items: r.items.map((it) => ({
         id: it.id,

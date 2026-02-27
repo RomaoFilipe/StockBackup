@@ -12,6 +12,30 @@ const createUserSchema = z.object({
   role: z.enum(["USER", "ADMIN"]).optional(),
 });
 
+function normalizeUsernameCandidate(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, ".")
+    .replace(/^\.+|\.+$/g, "")
+    .replace(/\.+/g, ".")
+    .slice(0, 40);
+}
+
+async function nextUniqueUsername(tenantId: string, email: string) {
+  const local = email.split("@")[0] ?? "";
+  const base = normalizeUsernameCandidate(local) || "user";
+  for (let i = 0; i < 20; i++) {
+    const candidate = i === 0 ? base : `${base}-${i + 1}`;
+    const exists = await prisma.user.findFirst({
+      where: { tenantId, username: candidate },
+      select: { id: true },
+    });
+    if (!exists) return candidate;
+  }
+  return `${base}-${Date.now().toString(36)}`.slice(0, 40);
+}
+
 const requireAdmin = async (req: NextApiRequest, res: NextApiResponse) => {
   const session = await getSessionServer(req, res);
   if (!session) {
@@ -76,12 +100,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     try {
       const hashedPassword = await bcrypt.hash(password, 10);
+      const normalizedEmail = email.trim().toLowerCase();
+      const username = await nextUniqueUsername(session.tenantId, normalizedEmail);
 
       const created = await prisma.user.create({
         data: {
           tenantId: session.tenantId,
           name: name.trim(),
-          email: email.trim().toLowerCase(),
+          email: normalizedEmail,
+          username,
           passwordHash: hashedPassword,
           role: role ?? "USER",
           isActive: true,

@@ -2,7 +2,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { z } from "zod";
 import { prisma } from "@/prisma/client";
 import { getSessionServer } from "@/utils/auth";
-import { createTicketAudit, inferLevelFromPriority, nextUniqueTicketCode } from "./_utils";
+import { createTicketAudit, getTicketPermissionGrants, inferLevelFromPriority, isTicketManager, nextUniqueTicketCode } from "./_utils";
 import { applyTicketSlaEscalations, computeSlaTargets } from "./_sla";
 import { publishRealtimeEvent } from "@/utils/realtime";
 
@@ -26,6 +26,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (!session) return res.status(401).json({ error: "Unauthorized" });
 
   const tenantId = session.tenantId;
+  const grants = await getTicketPermissionGrants(session as any);
+  const manager = isTicketManager(grants);
 
   if (req.method === "GET") {
     try {
@@ -41,8 +43,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         ...(status ? { status } : {}),
         ...(level ? { level } : {}),
         ...(priority ? { priority } : {}),
-        ...(session.role !== "ADMIN"
-          ? { OR: [{ createdByUserId: session.id }, { assignedToUserId: session.id }] }
+        ...(!manager
+          ? {
+              OR: [
+                { createdByUserId: session.id },
+                { assignedToUserId: session.id },
+                { participants: { some: { userId: session.id } } },
+              ],
+            }
           : {}),
         ...(q
           ? {
@@ -67,6 +75,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
               request: { select: { id: true, gtmiNumber: true, status: true, title: true, requestedAt: true } },
             },
           },
+          participants: { select: { userId: true } },
           _count: { select: { messages: true } },
         },
       });
@@ -74,6 +83,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(200).json(
         tickets.map((t) => ({
           ...t,
+          participantCount: Array.isArray(t.participants) ? t.participants.length : 0,
           createdAt: t.createdAt.toISOString(),
           updatedAt: t.updatedAt.toISOString(),
           dueAt: t.dueAt ? t.dueAt.toISOString() : null,
@@ -142,6 +152,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           resolutionDueAt: sla.resolutionDueAt,
           createdByUserId: session.id,
           assignedToUserId: assignedToUserId ?? null,
+          participants: {
+            createMany: {
+              skipDuplicates: true,
+              data: Array.from(new Set([session.id, assignedToUserId].filter(Boolean) as string[])).map((uid) => ({
+                tenantId,
+                userId: uid,
+                addedByUserId: session.id,
+              })),
+            },
+          },
           messages: initialMessage
             ? {
                 create: {
@@ -161,6 +181,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
               request: { select: { id: true, gtmiNumber: true, status: true, title: true, requestedAt: true } },
             },
           },
+          participants: { select: { userId: true } },
           _count: { select: { messages: true } },
         },
       });
@@ -192,6 +213,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       return res.status(201).json({
         ...ticket,
+        participantCount: Array.isArray((ticket as any).participants) ? (ticket as any).participants.length : 0,
         createdAt: ticket.createdAt.toISOString(),
         updatedAt: ticket.updatedAt.toISOString(),
         dueAt: ticket.dueAt ? ticket.dueAt.toISOString() : null,

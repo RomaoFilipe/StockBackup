@@ -1369,7 +1369,13 @@ export default function AdminPage() {
               <button
                 key={item.key}
                 type="button"
-                onClick={() => setTab(item.key as any)}
+                onClick={() => {
+                  if (item.key === "received") {
+                    router.push("/governanca/recebidos");
+                    return;
+                  }
+                  setTab(item.key as any);
+                }}
                 className={`relative flex items-center gap-2 rounded-xl px-4 py-2 text-sm transition ${
                   tab === item.key ? "bg-[hsl(var(--surface-1)/0.95)] text-foreground shadow-sm" : "text-muted-foreground"
                 }`}

@@ -1,10 +1,12 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { z } from "zod";
 import { prisma } from "@/prisma/client";
-import { requireAdminOrPermission } from "../../_admin";
+import { getSessionServer } from "@/utils/auth";
+import { getUserPermissionGrants, hasPermission } from "@/utils/rbac";
 import { createRequestStatusAudit, notifyAdmin, notifyUser } from "@/utils/notifications";
 import { publishRealtimeEvent } from "@/utils/realtime";
-import { ensureRequestWorkflowDefinition, ensureRequestWorkflowInstance } from "@/utils/workflow";
+import { ensureRequestWorkflowDefinition, ensureRequestWorkflowInstance, transitionRequestWorkflowByActionTx } from "@/utils/workflow";
+import { createTicketAudit } from "@/pages/api/tickets/_utils";
 
 const bodySchema = z.object({
   note: z.string().max(500).optional(),
@@ -30,8 +32,8 @@ function formatGtmiNumber(gtmiYear: number, gtmiSeq: number) {
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  const session = await requireAdminOrPermission(req, res, "public_requests.handle");
-  if (!session) return;
+  const session = await getSessionServer(req, res);
+  if (!session) return res.status(401).json({ error: "Unauthorized" });
 
   const id = typeof req.query.id === "string" ? req.query.id : "";
   if (!id) return res.status(400).json({ error: "id is required" });
@@ -54,6 +56,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   if (!publicReq) return res.status(404).json({ error: "Not found" });
   if (publicReq.status !== "RECEIVED") return res.status(400).json({ error: "Request already handled" });
+
+  const grants = await getUserPermissionGrants(prisma, {
+    id: session.id,
+    tenantId: session.tenantId,
+    role: session.role,
+  });
+  const scopeServiceId = publicReq.requestingServiceId ?? null;
+  if (!hasPermission(grants, "public_requests.handle", scopeServiceId)) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
 
   const requestedAt = publicReq.createdAt;
   const tenantId = session.tenantId;
@@ -122,7 +134,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           tenantId,
           userId: requestOwnerUserId,
           createdByUserId: adminUserId,
-          status: "SUBMITTED",
+          status: "DRAFT",
           title: publicReq.title,
           notes: publicReq.notes,
           gtmiYear,
@@ -151,9 +163,80 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         },
       });
 
+      // If the original intake came from a Ticket, auto-link it to the created Request.
+      if (publicReq.ticketId) {
+        const ticket = await tx.ticket.findFirst({
+          where: { id: publicReq.ticketId, tenantId },
+          select: { id: true, code: true },
+        });
+        if (!ticket) {
+          throw new Error("Ticket inválido para associação.");
+        }
+
+        await tx.ticket.update({
+          where: { id: ticket.id },
+          data: { type: "REQUEST" },
+        });
+
+        await tx.ticketRequestLink.upsert({
+          where: {
+            ticketId_requestId: {
+              ticketId: ticket.id,
+              requestId: created.id,
+            },
+          },
+          create: {
+            tenantId,
+            ticketId: ticket.id,
+            requestId: created.id,
+            linkedByUserId: adminUserId,
+          },
+          update: {},
+        });
+
+        await tx.ticketMessage.create({
+          data: {
+            tenantId,
+            ticketId: ticket.id,
+            authorUserId: adminUserId,
+            body: `Requisição associada: ${gtmiNumber}.`,
+          },
+        });
+
+        await createTicketAudit({
+          tenantId,
+          ticketId: ticket.id,
+          actorUserId: adminUserId,
+          action: "REQUEST_LINKED",
+          note: `Requisição ${gtmiNumber} associada ao ticket`,
+          data: { requestId: created.id, gtmiNumber },
+        });
+
+        publishRealtimeEvent({
+          type: "ticket.updated",
+          tenantId,
+          audience: "ALL",
+          payload: { ticketId: ticket.id, code: ticket.code, requestId: created.id },
+        });
+        publishRealtimeEvent({
+          type: "ticket.message_created",
+          tenantId,
+          audience: "ALL",
+          payload: { ticketId: ticket.id, code: ticket.code, requestId: created.id, authorUserId: adminUserId },
+        });
+      }
+
       await ensureRequestWorkflowInstance(tx, {
         tenantId,
         requestId: created.id,
+      });
+
+      await transitionRequestWorkflowByActionTx(tx, {
+        tenantId,
+        requestId: created.id,
+        action: "SUBMIT",
+        actorUserId: adminUserId,
+        note: "auto-submit (accept public request)",
       });
 
       // Allocate stock similarly to /api/requests create logic

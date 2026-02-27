@@ -2,7 +2,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { z } from "zod";
 import { prisma } from "@/prisma/client";
 import { getSessionServer } from "@/utils/auth";
-import { canAccessTicket, createTicketAudit, inferLevelFromPriority } from "./_utils";
+import { canAccessTicketWithParticipants, createTicketAudit, getTicketPermissionGrants, inferLevelFromPriority, isTicketManager } from "./_utils";
 import { applyTicketSlaEscalations, computeSlaTargets } from "./_sla";
 import { publishRealtimeEvent } from "@/utils/realtime";
 
@@ -58,6 +58,15 @@ function serializeTicket(t: any) {
           updatedAt: m.updatedAt.toISOString(),
         }))
       : undefined,
+    participants: Array.isArray(t.participants)
+      ? t.participants.map((p: any) => ({
+          id: p.id,
+          userId: p.userId,
+          createdAt: p.createdAt.toISOString(),
+          user: p.user,
+          addedBy: p.addedBy ?? null,
+        }))
+      : [],
   };
 }
 
@@ -67,16 +76,26 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   const id = typeof req.query.id === "string" ? req.query.id : "";
   if (!id) return res.status(400).json({ error: "Invalid ticket id" });
+  const tenantId = session.tenantId;
+  const grants = await getTicketPermissionGrants(session as any);
+  const manager = isTicketManager(grants);
 
   if (req.method === "GET") {
     try {
       await applyTicketSlaEscalations(session.tenantId);
 
       const ticket = await prisma.ticket.findFirst({
-        where: { id, tenantId: session.tenantId },
+        where: { id, tenantId },
         include: {
           createdBy: { select: { id: true, name: true, email: true } },
           assignedTo: { select: { id: true, name: true, email: true } },
+          participants: {
+            orderBy: [{ createdAt: "asc" }],
+            include: {
+              user: { select: { id: true, name: true, email: true, username: true, role: true } },
+              addedBy: { select: { id: true, name: true, email: true } },
+            },
+          },
           requestLinks: {
             orderBy: { createdAt: "desc" },
             include: {
@@ -101,7 +120,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       });
 
       if (!ticket) return res.status(404).json({ error: "Ticket not found" });
-      if (!canAccessTicket(session, ticket)) return res.status(403).json({ error: "Forbidden" });
+      const participantUserIds = Array.isArray((ticket as any).participants)
+        ? (ticket as any).participants.map((p: any) => p.userId).filter(Boolean)
+        : [];
+      if (!canAccessTicketWithParticipants(session, ticket, participantUserIds, { isManager: manager })) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
 
       return res.status(200).json(serializeTicket(ticket));
     } catch (error) {
@@ -117,7 +141,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     try {
-      const isAdmin = session.role === "ADMIN";
+      const isAdmin = manager;
       const hasAdminOnlyChanges = [
         parsed.data.title,
         parsed.data.description,
@@ -138,7 +162,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
 
       const current = await prisma.ticket.findFirst({
-        where: { id, tenantId: session.tenantId },
+        where: { id, tenantId },
         select: {
           id: true,
           code: true,
@@ -147,10 +171,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           createdAt: true,
           createdByUserId: true,
           assignedToUserId: true,
+          participants: { select: { userId: true } },
         },
       });
       if (!current) return res.status(404).json({ error: "Ticket not found" });
-      if (!canAccessTicket(session, current)) return res.status(403).json({ error: "Forbidden" });
+      const participantUserIds = current.participants.map((p) => p.userId);
+      if (!canAccessTicketWithParticipants(session, current, participantUserIds, { isManager: manager })) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
 
       if (parsed.data.assignedToUserId) {
         const assignee = await prisma.user.findFirst({

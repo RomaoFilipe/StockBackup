@@ -4,6 +4,7 @@ import { prisma } from "@/prisma/client";
 import { getSessionServer } from "@/utils/auth";
 import { logUserAdminAction } from "@/utils/adminAudit";
 import { logInfo } from "@/utils/logger";
+import { ensureRequestWorkflowDefinition, ensureRequestWorkflowInstance, transitionRequestWorkflowByActionTx } from "@/utils/workflow";
 
 const bodySchema = z.object({
   code: z.string().uuid(),
@@ -39,6 +40,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const tenantId = session.tenantId;
   const performedByUserId = session.id;
   const { code, reason, costCenter, notes } = parsed.data;
+
+  await ensureRequestWorkflowDefinition(prisma, tenantId);
 
   try {
     const result = await prisma.$transaction(async (tx) => {
@@ -95,7 +98,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           tenantId,
           userId: requestOwner.id,
           createdByUserId: performedByUserId,
-          status: "SUBMITTED",
+          status: "DRAFT",
           requestType: "RETURN",
           title: "Requisição de Devolução",
           notes: notes ?? null,
@@ -124,6 +127,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           },
         },
         select: { id: true, gtmiNumber: true },
+      });
+
+      await ensureRequestWorkflowInstance(tx, { tenantId, requestId: linkedRequest.id });
+      await transitionRequestWorkflowByActionTx(tx, {
+        tenantId,
+        requestId: linkedRequest.id,
+        action: "SUBMIT",
+        actorUserId: performedByUserId,
+        note: "auto-submit (unit return)",
       });
 
       await tx.requestStatusAudit.create({

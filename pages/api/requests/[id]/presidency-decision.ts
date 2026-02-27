@@ -4,7 +4,7 @@ import { z } from "zod";
 import { prisma } from "@/prisma/client";
 import { getSessionServer } from "@/utils/auth";
 import { getUserPermissionGrants, hasPermission } from "@/utils/rbac";
-import { transitionRequestWorkflowToStatus } from "@/utils/workflow";
+import { transitionRequestWorkflowByAction } from "@/utils/workflow";
 
 const schema = z.object({
   decision: z.enum(["APPROVE", "REJECT"]),
@@ -41,11 +41,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   });
   if (!dispatch) return res.status(404).json({ error: "Dispatch not found" });
 
-  const nextStatus = parsed.data.decision === "APPROVE" ? "APPROVED" : "REJECTED";
-  const transition = await transitionRequestWorkflowToStatus(prisma, {
+  const action = parsed.data.decision === "APPROVE" ? "PRESIDENCY_APPROVE" : "PRESIDENCY_REJECT";
+  const transition = await transitionRequestWorkflowByAction(prisma, {
     tenantId: session.tenantId,
     requestId,
-    targetStatus: nextStatus,
+    action,
     actorUserId: session.id,
     note: parsed.data.note ?? null,
   });

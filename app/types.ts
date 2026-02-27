@@ -9,6 +9,7 @@ export interface Product {
   price: number;
   quantity: number;
   status?: string;
+  isPatrimonializable?: boolean;
   createdAt: Date | string;
   updatedAt?: Date | string;
   userId: string;

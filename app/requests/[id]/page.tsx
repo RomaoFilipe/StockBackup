@@ -16,6 +16,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { SignaturePad, type SignaturePadHandle } from "@/components/ui/signature-pad";
@@ -116,6 +117,45 @@ type RequestDto = {
 
   user?: { id: string; name: string; email: string } | null;
   createdBy?: { id: string; name: string; email: string } | null;
+  tickets?: Array<{ id: string; code: string; status: string; linkedAt: string }>;
+};
+
+type WorkflowEventDto = {
+  id: string;
+  action: string;
+  note: string | null;
+  createdAt: string;
+  actor: { id: string; name: string | null; email: string };
+  fromState: { code: string; name: string; requestStatus: string } | null;
+  toState: { code: string; name: string; requestStatus: string } | null;
+};
+
+type WorkflowInstanceDto = {
+  id: string;
+  completedAt: string | null;
+  definition: { id: string; key: string; name: string; version: number };
+  currentState: { id: string; code: string; name: string; requestStatus: string } | null;
+  events: WorkflowEventDto[];
+};
+
+type ExecutionUnitOption = {
+  id: string;
+  code: string;
+  status: string;
+  serialNumber: string | null;
+};
+
+type ExecutionPreview = {
+  request: {
+    id: string;
+    status: string;
+    requestType: string;
+    gtmiNumber: string;
+    deliveryLocation?: string | null;
+    requesterName?: string | null;
+    requestingServiceId?: number | null;
+  };
+  optionsByItemId: Record<string, ExecutionUnitOption[]>;
 };
 
 const goodsTypeLabels: Record<GoodsType, string> = {
@@ -192,6 +232,7 @@ export default function RequestDetailsPage() {
 
   const [request, setRequest] = useState<RequestDto | null>(null);
   const [loading, setLoading] = useState(true);
+  const [workflow, setWorkflow] = useState<WorkflowInstanceDto | null>(null);
 
   const isSignedLocked = Boolean(request?.signedAt);
 
@@ -220,12 +261,20 @@ export default function RequestDetailsPage() {
 
     setLoading(true);
     try {
-      const res = await axiosInstance.get(`/requests/${requestId}`);
-      setRequest(res.data);
+      const reqRes = await axiosInstance.get(`/requests/${requestId}`);
+      setRequest(reqRes.data);
+
+      try {
+        const wfRes = await axiosInstance.get(`/workflows/requests/${requestId}/action`);
+        setWorkflow(wfRes.data);
+      } catch {
+        setWorkflow(null);
+      }
     } catch (error: any) {
       const msg = error?.response?.data?.error || "Não foi possível carregar a requisição.";
       toast({ title: "Erro", description: msg, variant: "destructive" });
       setRequest(null);
+      setWorkflow(null);
     } finally {
       setLoading(false);
     }
@@ -343,6 +392,70 @@ export default function RequestDetailsPage() {
     }
   };
 
+  const [executeOpen, setExecuteOpen] = useState(false);
+  const [executeSaving, setExecuteSaving] = useState(false);
+  const [executePreview, setExecutePreview] = useState<ExecutionPreview | null>(null);
+  const [executeDocRef, setExecuteDocRef] = useState("");
+  const [executeNote, setExecuteNote] = useState("");
+  const [executeReceivedBy, setExecuteReceivedBy] = useState("");
+  const [executeReceivedByTitle, setExecuteReceivedByTitle] = useState("");
+  const [executeUnitByItemId, setExecuteUnitByItemId] = useState<Record<string, string>>({});
+
+  const openExecute = async () => {
+    if (!requestId) return;
+    setExecuteSaving(true);
+    try {
+      const res = await axiosInstance.get<ExecutionPreview>(`/requests/${requestId}/execute`);
+      setExecutePreview(res.data);
+      setExecuteDocRef(`AUTO-${request?.gtmiNumber || ""}`.replace(/-$/, ""));
+      setExecuteNote("");
+      setExecuteReceivedBy((request?.requesterName || request?.user?.name || "").trim());
+      setExecuteReceivedByTitle("");
+      const preselected: Record<string, string> = {};
+      for (const item of request?.items || []) {
+        if (item.destination?.trim()) preselected[item.id] = item.destination.trim();
+      }
+      setExecuteUnitByItemId(preselected);
+      setExecuteOpen(true);
+    } catch (error: any) {
+      const msg = error?.response?.data?.error || error?.message || "Não foi possível carregar opções de execução.";
+      toast({ title: "Execução", description: msg, variant: "destructive" });
+    } finally {
+      setExecuteSaving(false);
+    }
+  };
+
+  const submitExecute = async () => {
+    if (!requestId) return;
+    if (!executeDocRef.trim()) {
+      toast({ title: "Execução", description: "Documento/Auto é obrigatório.", variant: "destructive" });
+      return;
+    }
+    setExecuteSaving(true);
+    try {
+      const lines = Object.entries(executeUnitByItemId).map(([requestItemId, unitCode]) => ({
+        requestItemId,
+        unitCode: unitCode?.trim() || null,
+      }));
+      await axiosInstance.post(`/requests/${requestId}/execute`, {
+        idempotencyKey: makeClientKey(),
+        documentRef: executeDocRef.trim(),
+        note: executeNote.trim() || null,
+        receivedByName: executeReceivedBy.trim() || null,
+        receivedByTitle: executeReceivedByTitle.trim() || null,
+        lines,
+      });
+      await loadRequest();
+      setExecuteOpen(false);
+      toast({ title: "Execução", description: "Requisição executada e concluída com sucesso." });
+    } catch (error: any) {
+      const msg = error?.response?.data?.error || error?.message || "Falha na execução de armazém.";
+      toast({ title: "Execução", description: msg, variant: "destructive" });
+    } finally {
+      setExecuteSaving(false);
+    }
+  };
+
   const [voidSignOpen, setVoidSignOpen] = useState(false);
   const [voidSignSaving, setVoidSignSaving] = useState(false);
   const [voidSignReason, setVoidSignReason] = useState("");
@@ -405,6 +518,17 @@ export default function RequestDetailsPage() {
             <p className="text-sm text-muted-foreground">
               {request?.gtmiNumber || (loading ? "A carregar…" : "—")}
             </p>
+            {request?.status === "SUBMITTED" && workflow?.currentState?.code ? (
+              <div className="mt-2">
+                <Badge variant="outline" className="border-border/60 bg-[hsl(var(--surface-2)/0.7)] text-muted-foreground">
+                  {workflow.currentState.code === "AWAITING_ADMIN_APPROVAL"
+                    ? "Aguarda aprovação final"
+                    : workflow.currentState.code === "SUBMITTED"
+                      ? "Em validação (chefia)"
+                      : workflow.currentState.name}
+                </Badge>
+              </div>
+            ) : null}
           </div>
 
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -424,6 +548,15 @@ export default function RequestDetailsPage() {
 
             {isAdmin ? (
               <>
+                <Button
+                  variant="secondary"
+                  onClick={openExecute}
+                  disabled={!request || request.status !== "APPROVED" || executeSaving}
+                  title={request?.status === "APPROVED" ? "Executar entrega de armazém" : "Apenas para requisições aprovadas"}
+                >
+                  {executeSaving ? "A preparar..." : "Executar armazém"}
+                </Button>
+
                 <Button
                   variant={request?.pickupSignedAt ? "outline" : "default"}
                   onClick={openPickupSign}
@@ -641,7 +774,64 @@ export default function RequestDetailsPage() {
                   </div>
                 </CardContent>
               </Card>
+
+              <Card>
+                <CardHeader className="py-3">
+                  <CardTitle className="text-base">Tickets associados</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {request.tickets?.length ? (
+                    <div className="space-y-2">
+                      {request.tickets.map((t) => (
+                        <div key={t.id} className="flex items-center justify-between gap-3 rounded-lg border border-border/60 bg-background p-2">
+                          <div className="min-w-0">
+                            <div className="text-sm font-medium truncate">{t.code}</div>
+                            <div className="text-xs text-muted-foreground">
+                              Estado: {t.status} • ligado em {new Date(t.linkedAt).toLocaleString("pt-PT")}
+                            </div>
+                          </div>
+                          <Button size="sm" variant="outline" onClick={() => router.push(`/tickets/${t.id}`)}>
+                            Abrir
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-sm text-muted-foreground">Sem tickets associados.</div>
+                  )}
+                </CardContent>
+              </Card>
             </div>
+
+            <Card>
+              <CardHeader className="py-3">
+                <CardTitle className="text-base">Histórico (workflow)</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {workflow?.events?.length ? (
+                  <div className="space-y-2">
+                    {workflow.events.slice(0, 12).map((ev) => (
+                      <div key={ev.id} className="rounded-lg border border-border/60 bg-background p-2">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="text-sm font-medium">{ev.action}</div>
+                          <div className="text-xs text-muted-foreground">{new Date(ev.createdAt).toLocaleString("pt-PT")}</div>
+                        </div>
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          {(ev.actor?.name || ev.actor?.email || "—") + " • "}
+                          {(ev.fromState?.name || "—") + " → " + (ev.toState?.name || "—")}
+                        </div>
+                        {ev.note ? <div className="mt-1 text-sm whitespace-pre-wrap">{ev.note}</div> : null}
+                      </div>
+                    ))}
+                    {workflow.events.length > 12 ? (
+                      <div className="text-xs text-muted-foreground">A mostrar os últimos 12 eventos.</div>
+                    ) : null}
+                  </div>
+                ) : (
+                  <div className="text-sm text-muted-foreground">Sem eventos disponíveis.</div>
+                )}
+              </CardContent>
+            </Card>
 
             <div>
               <div className="text-sm font-medium mb-2">
@@ -925,6 +1115,89 @@ export default function RequestDetailsPage() {
             ) : null}
           </div>
         )}
+
+        <Dialog open={executeOpen} onOpenChange={setExecuteOpen}>
+          <DialogContent className="w-[calc(100vw-2rem)] max-h-[88vh] overflow-y-auto sm:max-w-[860px]">
+            <DialogHeader>
+              <DialogTitle>Execução de Armazém</DialogTitle>
+              <DialogDescription>
+                Seleciona as unidades físicas, associa o documento (auto/guia) e conclui a requisição.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="space-y-1">
+                  <div className="text-sm font-medium">Documento (obrigatório)</div>
+                  <Input value={executeDocRef} onChange={(e) => setExecuteDocRef(e.target.value)} placeholder="AUTO-2026-0001 / GUIA-..." />
+                </div>
+                <div className="space-y-1">
+                  <div className="text-sm font-medium">Recebido por</div>
+                  <Input value={executeReceivedBy} onChange={(e) => setExecuteReceivedBy(e.target.value)} placeholder="Nome de receção" />
+                </div>
+                <div className="space-y-1">
+                  <div className="text-sm font-medium">Cargo (opcional)</div>
+                  <Input value={executeReceivedByTitle} onChange={(e) => setExecuteReceivedByTitle(e.target.value)} placeholder="Cargo" />
+                </div>
+                <div className="space-y-1">
+                  <div className="text-sm font-medium">Notas</div>
+                  <Input value={executeNote} onChange={(e) => setExecuteNote(e.target.value)} placeholder="Observações de execução" />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <div className="text-sm font-medium">Linhas com seleção de unidade</div>
+                <div className="space-y-2">
+                  {(request?.items || []).map((it) => {
+                    const options = executePreview?.optionsByItemId?.[it.id] || [];
+                    return (
+                      <div key={it.id} className="rounded border border-border/60 p-3">
+                        <div className="text-sm font-medium">{it.product?.name || it.productId}</div>
+                        <div className="text-xs text-muted-foreground">Qtd: {it.quantity} • SKU: {it.product?.sku || "—"}</div>
+                        {options.length > 0 ? (
+                          <div className="mt-2">
+                            <Select
+                              value={executeUnitByItemId[it.id] || "auto"}
+                              onValueChange={(value) =>
+                                setExecuteUnitByItemId((prev) => ({
+                                  ...prev,
+                                  [it.id]: value === "auto" ? "" : value,
+                                }))
+                              }
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="Selecionar unidade" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="auto">Auto selecionar primeira IN_STOCK</SelectItem>
+                                {options.map((opt) => (
+                                  <SelectItem key={opt.id} value={opt.code}>
+                                    {opt.code}{opt.serialNumber ? ` • SN ${opt.serialNumber}` : ""}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        ) : (
+                          <div className="mt-2 text-xs text-muted-foreground">Sem seleção de unidade (consumível / sem tracking unitário).</div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setExecuteOpen(false)} disabled={executeSaving}>
+                Cancelar
+              </Button>
+              <Button onClick={submitExecute} disabled={executeSaving || !executeDocRef.trim()}>
+                {executeSaving ? "A executar..." : "Executar e concluir"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         <Dialog open={signOpen} onOpenChange={setSignOpen}>
           <DialogContent className="sm:max-w-[520px]">

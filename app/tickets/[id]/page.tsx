@@ -49,6 +49,13 @@ type TicketDetails = {
   updatedAt: string;
   createdBy: TicketUser;
   assignedTo?: TicketUser | null;
+  participants?: Array<{
+    id: string;
+    userId: string;
+    createdAt: string;
+    user: TicketUser & { username?: string | null; requestingServiceId?: number | null };
+    addedBy?: { id: string; name?: string | null; email: string } | null;
+  }>;
   requests?: Array<{
     id: string;
     gtmiNumber: string;
@@ -69,6 +76,7 @@ type TicketDetails = {
 };
 
 type AdminUserRow = { id: string; name: string; email: string; role: "USER" | "ADMIN"; isActive: boolean };
+type UserSearchRow = { id: string; name: string; email: string; username?: string | null; role: "USER" | "ADMIN"; requestingServiceId?: number | null };
 type MyRequestRow = {
   id: string;
   gtmiNumber?: string | null;
@@ -142,9 +150,19 @@ export default function TicketDetailsPage() {
   const [linkedRequestId, setLinkedRequestId] = useState("");
   const [linkingRequest, setLinkingRequest] = useState(false);
   const [closingTicket, setClosingTicket] = useState(false);
+  const [participantQuery, setParticipantQuery] = useState("");
+  const [participantResults, setParticipantResults] = useState<UserSearchRow[]>([]);
+  const [participantLoading, setParticipantLoading] = useState(false);
+  const [participantSelectedId, setParticipantSelectedId] = useState("");
+  const [participantSaving, setParticipantSaving] = useState(false);
 
   const isTicketClosed = ticket?.status === "CLOSED";
   const canSend = Boolean(messageBody.trim());
+  const canManageParticipants =
+    Boolean(user?.permissions?.includes("tickets.manage")) ||
+    Boolean((user?.permissionGrants ?? []).some((g) => g.key === "*" || g.key === "tickets.manage")) ||
+    (ticket?.createdBy?.id === user?.id) ||
+    (ticket?.assignedTo?.id === user?.id);
 
   const loadTicket = async () => {
     if (!ticketId) return;
@@ -189,6 +207,60 @@ export default function TicketDetailsPage() {
       setMyRequests(rows);
     } catch {
       setMyRequests([]);
+    }
+  };
+
+  useEffect(() => {
+    if (!isLoggedIn || isAuthLoading) return;
+    const q = participantQuery.trim();
+    if (q.length < 2) {
+      setParticipantResults([]);
+      return;
+    }
+    const id = window.setTimeout(async () => {
+      setParticipantLoading(true);
+      try {
+        const res = await axiosInstance.get("/users/search", { params: { q, limit: 20 } });
+        setParticipantResults(Array.isArray(res.data) ? (res.data as UserSearchRow[]) : []);
+      } catch {
+        setParticipantResults([]);
+      } finally {
+        setParticipantLoading(false);
+      }
+    }, 250);
+    return () => window.clearTimeout(id);
+  }, [participantQuery, isAuthLoading, isLoggedIn]);
+
+  const addParticipant = async () => {
+    if (!ticketId || !participantSelectedId) return;
+    setParticipantSaving(true);
+    try {
+      await axiosInstance.post(`/tickets/${ticketId}/participants`, { userId: participantSelectedId });
+      setParticipantSelectedId("");
+      setParticipantQuery("");
+      setParticipantResults([]);
+      await loadTicket();
+      toast({ title: "Participante adicionado" });
+    } catch (error: any) {
+      const msg = error?.response?.data?.error || "Não foi possível adicionar participante.";
+      toast({ title: "Erro", description: msg, variant: "destructive" });
+    } finally {
+      setParticipantSaving(false);
+    }
+  };
+
+  const removeParticipant = async (userId: string) => {
+    if (!ticketId) return;
+    setParticipantSaving(true);
+    try {
+      await axiosInstance.delete(`/tickets/${ticketId}/participants`, { data: { userId } });
+      await loadTicket();
+      toast({ title: "Participante removido" });
+    } catch (error: any) {
+      const msg = error?.response?.data?.error || "Não foi possível remover participante.";
+      toast({ title: "Erro", description: msg, variant: "destructive" });
+    } finally {
+      setParticipantSaving(false);
     }
   };
 
@@ -452,6 +524,93 @@ export default function TicketDetailsPage() {
             <div className="mb-3 text-sm font-semibold">Gestão</div>
             <div className="space-y-3">
               <div className="rounded-xl border border-border/60 p-3">
+                <div className="mb-1 text-xs text-muted-foreground">Pessoas no ticket</div>
+                <div className="space-y-2">
+                  <div className="text-xs text-muted-foreground">
+                    Dica: podes mencionar alguém no chat com <span className="font-mono">@username</span>.
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Badge variant="outline">
+                      Criador: {ticket.createdBy?.name || ticket.createdBy?.email}
+                    </Badge>
+                    {ticket.assignedTo ? (
+                      <Badge variant="outline">
+                        Atribuído: {ticket.assignedTo?.name || ticket.assignedTo?.email}
+                      </Badge>
+                    ) : null}
+                  </div>
+
+                  {ticket.participants?.length ? (
+                    <div className="flex flex-wrap gap-2">
+                      {ticket.participants.map((p) => {
+                        const label = p.user?.username
+                          ? `${p.user.name || p.user.email} (@${p.user.username})`
+                          : (p.user?.name || p.user?.email);
+                        const isCreator = p.userId === ticket.createdBy?.id;
+                        return (
+                          <div key={p.id} className="inline-flex items-center gap-2 rounded-full border border-border/70 bg-background px-3 py-1 text-xs">
+                            <span className="max-w-[220px] truncate">{label}</span>
+                            {canManageParticipants && !isCreator ? (
+                              <button
+                                className="text-muted-foreground hover:text-foreground"
+                                onClick={() => void removeParticipant(p.userId)}
+                                disabled={participantSaving}
+                                title="Remover"
+                              >
+                                ×
+                              </button>
+                            ) : null}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="text-xs text-muted-foreground">Sem participantes extra.</div>
+                  )}
+
+                  {canManageParticipants ? (
+                    <div className="mt-2 space-y-2">
+                      <div className="text-xs text-muted-foreground">Adicionar pessoa</div>
+                      <Input
+                        value={participantQuery}
+                        onChange={(e) => setParticipantQuery(e.target.value)}
+                        placeholder="Pesquisar por nome/email/username..."
+                        disabled={participantSaving}
+                      />
+                      <div className="flex gap-2">
+                        <select
+                          className="h-10 w-full rounded-md border bg-background px-2 text-sm"
+                          value={participantSelectedId}
+                          onChange={(e) => setParticipantSelectedId(e.target.value)}
+                          disabled={participantSaving || participantLoading || participantResults.length === 0}
+                        >
+                          <option value="">
+                            {participantLoading
+                              ? "A pesquisar..."
+                              : participantResults.length
+                                ? "Seleciona uma pessoa"
+                                : "Sem resultados (mín. 2 letras)"}
+                          </option>
+                          {participantResults.map((u) => (
+                            <option key={u.id} value={u.id}>
+                              {u.name || u.email}
+                              {u.username ? ` (@${u.username})` : ""} · {u.email}
+                            </option>
+                          ))}
+                        </select>
+                        <Button size="sm" variant="outline" onClick={() => void addParticipant()} disabled={!participantSelectedId || participantSaving}>
+                          {participantSaving ? "A guardar..." : "Adicionar"}
+                        </Button>
+                      </div>
+                      <div className="text-[11px] text-muted-foreground">
+                        Nota: utilizadores sem permissão <span className="font-mono">tickets.manage</span> só conseguem adicionar pessoas do mesmo departamento.
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-border/60 p-3">
                 <div className="mb-1 text-xs text-muted-foreground">Requisições associadas</div>
                 {ticket.requests?.length ? (
                   <div className="space-y-2">
@@ -481,7 +640,14 @@ export default function TicketDetailsPage() {
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => router.push(`/requests?openCreate=1&ticketId=${ticket.id}`)}
+                    onClick={() => {
+                      if (isAdmin) {
+                        router.push(`/requests?openCreate=1&ticketId=${ticket.id}`);
+                        return;
+                      }
+                      // Base role USER can't access /requests (backoffice). Use the USER intake form instead.
+                      router.push(`/requests/estado/novo?ticketId=${ticket.id}`);
+                    }}
                   >
                     Criar novo pedido associado
                   </Button>

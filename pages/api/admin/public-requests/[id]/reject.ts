@@ -1,7 +1,8 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { z } from "zod";
 import { prisma } from "@/prisma/client";
-import { requireAdminOrPermission } from "../../_admin";
+import { getSessionServer } from "@/utils/auth";
+import { getUserPermissionGrants, hasPermission } from "@/utils/rbac";
 import { notifyAdmin, notifyUser } from "@/utils/notifications";
 import { publishRealtimeEvent } from "@/utils/realtime";
 
@@ -10,8 +11,8 @@ const bodySchema = z.object({
 });
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  const session = await requireAdminOrPermission(req, res, "public_requests.handle");
-  if (!session) return;
+  const session = await getSessionServer(req, res);
+  if (!session) return res.status(401).json({ error: "Unauthorized" });
 
   const id = typeof req.query.id === "string" ? req.query.id : "";
   if (!id) return res.status(400).json({ error: "id is required" });
@@ -26,11 +27,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   const row = await prisma.publicRequest.findFirst({
     where: { id, tenantId: session.tenantId },
-    select: { id: true, status: true, requesterUserId: true, requesterName: true },
+    select: { id: true, status: true, requesterUserId: true, requesterName: true, requestingServiceId: true },
   });
 
   if (!row) return res.status(404).json({ error: "Not found" });
   if (row.status !== "RECEIVED") return res.status(400).json({ error: "Request already handled" });
+
+  const grants = await getUserPermissionGrants(prisma, {
+    id: session.id,
+    tenantId: session.tenantId,
+    role: session.role,
+  });
+  const scopeServiceId = row.requestingServiceId ?? null;
+  if (!hasPermission(grants, "public_requests.handle", scopeServiceId)) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
 
   await prisma.publicRequest.update({
     where: { id },
