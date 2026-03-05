@@ -8,9 +8,33 @@ import { getSessionServer } from "@/utils/auth";
 const createUserSchema = z.object({
   name: z.string().min(1).max(100),
   email: z.string().email().max(255),
-  password: z.string().min(6).max(200),
+  password: z.string().min(8).max(200),
   role: z.enum(["USER", "ADMIN"]).optional(),
 });
+
+function normalizeUsernameCandidate(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, ".")
+    .replace(/^\.+|\.+$/g, "")
+    .replace(/\.+/g, ".")
+    .slice(0, 40);
+}
+
+async function nextUniqueUsername(tenantId: string, email: string) {
+  const local = email.split("@")[0] ?? "";
+  const base = normalizeUsernameCandidate(local) || "user";
+  for (let i = 0; i < 20; i++) {
+    const candidate = i === 0 ? base : `${base}-${i + 1}`;
+    const exists = await prisma.user.findFirst({
+      where: { tenantId, username: candidate },
+      select: { id: true },
+    });
+    if (!exists) return candidate;
+  }
+  return `${base}-${Date.now().toString(36)}`.slice(0, 40);
+}
 
 const requireAdmin = async (req: NextApiRequest, res: NextApiResponse) => {
   const session = await getSessionServer(req, res);
@@ -24,6 +48,11 @@ const requireAdmin = async (req: NextApiRequest, res: NextApiResponse) => {
     return null;
   }
 
+  if (!session.tenantId) {
+    res.status(500).json({ error: "Session missing tenant" });
+    return null;
+  }
+
   return session;
 };
 
@@ -34,6 +63,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (req.method === "GET") {
     try {
       const users = await prisma.user.findMany({
+        where: { tenantId: session.tenantId },
         orderBy: { createdAt: "desc" },
         select: {
           id: true,
@@ -41,6 +71,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           email: true,
           username: true,
           role: true,
+          isActive: true,
           createdAt: true,
           updatedAt: true,
         },
@@ -69,13 +100,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     try {
       const hashedPassword = await bcrypt.hash(password, 10);
+      const normalizedEmail = email.trim().toLowerCase();
+      const username = await nextUniqueUsername(session.tenantId, normalizedEmail);
 
       const created = await prisma.user.create({
         data: {
-          name,
-          email,
-          password: hashedPassword,
+          tenantId: session.tenantId,
+          name: name.trim(),
+          email: normalizedEmail,
+          username,
+          passwordHash: hashedPassword,
           role: role ?? "USER",
+          isActive: true,
+          createdByUserId: session.id,
         },
         select: {
           id: true,
@@ -83,6 +120,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           email: true,
           username: true,
           role: true,
+          isActive: true,
           createdAt: true,
           updatedAt: true,
         },

@@ -1,1332 +1,603 @@
+<p align="center">
+  <img src="public/branding/logo2.png" alt="CMCHUB" width="160" />
+</p>
 
+# CMCHUB — Municipal Operations Hub
 
-## Project Overview
+CMCHUB is a **municipal operations hub**: it centralizes **Requests**, **Tickets**, **Incoming (Portal)**, **Inventory/Assets**, **Approvals**, and **Audit**, with **service/department-scoped RBAC** and a **configurable workflow engine** to guarantee traceability.
 
-Stockly is designed to help businesses and individuals efficiently manage their product inventory. It provides a robust, full-stack solution with secure authentication, CRUD operations, filtering, sorting, analytics dashboard, QR code generation, data export capabilities, and a beautiful UI powered by shadcn/ui and Tailwind CSS. The project is open source and intended for learning, extension, and real-world use.
+> Goal: a single municipal platform for requests, approvals, assets, and compliance-grade audit trails.
 
----
+## Table of Contents
 
-## 🚀 Features
+- [At a Glance](#at-a-glance)
+- [Personas](#personas)
+- [Core Capabilities](#core-capabilities)
+- [Key Flows](#key-flows)
+- [Request Workflow (Internal Requests)](#request-workflow-internal-requests)
+- [Request State Machine](#request-state-machine)
+- [Project Structure](#project-structure)
+- [Getting Started](#getting-started)
+- [Go-live Checklist](#go-live-checklist)
+- [Definition of Done & Release Criteria](#definition-of-done--release-criteria)
+- [Technology Stack](#technology-stack)
+- [Deployment Topology](#deployment-topology)
+- [Architecture Overview](#architecture-overview)
+- [Architecture Diagram](#architecture-diagram)
+- [Operational Workflow Diagram](#operational-workflow-diagram)
+- [What Docker Compose Does](#what-docker-compose-does)
+- [Database Schema](#database-schema)
+- [API Endpoints](#api-endpoints)
+- [RBAC and Organizational Scope](#rbac-and-organizational-scope)
+- [Workflow Engine](#workflow-engine)
+- [Domain Breakdown](#domain-breakdown)
+- [Security and Audit](#security-and-audit)
+- [SLO/SLI and Observability](#slosli-and-observability)
+- [Architecture Decision Records](#architecture-decision-records)
+- [Roadmap](#roadmap)
+- [Contributing](#contributing)
+- [Quality Commands](#quality-commands)
+- [License](#license)
 
-### Core Functionality
+## At a Glance
 
-- **Product Management**: Complete CRUD operations for products with SKU tracking
-- **Category Management**: Organize products with custom categories
-- **Supplier Management**: Track and manage product suppliers
-- **Real-time Search**: Instant filtering by product name or SKU
-- **Advanced Filtering**: Filter by category, supplier, and status
-- **Responsive Design**: Works seamlessly on desktop, tablet, and mobile
-- **Dark/Light Theme**: Toggle between themes with system preference detection
+CMCHUB is built for real municipal constraints: **departments**, **management approvals**, **scope-based authorization**, evidence-driven decisions, and a complete “who did what and when” history.
 
-### Advanced Features
+**What it solves:**
+- Reduces manual work (email/Excel) with end-to-end flows
+- Prevents “random access” with consistent permissions
+- Improves response time with queues (“Pending for me”) and SLAs
+- Ensures traceability (workflow + audit)
 
-- **📊 Analytics Dashboard**: Comprehensive business insights with charts and metrics
-- **📈 Data Visualization**: Interactive charts showing inventory trends and statistics
-- **🔍 Advanced Search**: Enhanced search with multiple filter options
-- **📱 QR Code Generation**: Generate QR codes for products with click-to-view functionality
-- **📄 Data Export**: Export product data to CSV and Excel formats
-- **📚 API Documentation**: Built-in API documentation page with endpoint details
-- **🔧 API Status Monitor**: Real-time API health monitoring and status dashboard
-- **⚠️ Low Stock Alerts**: Visual alerts for products with low inventory
-- **📊 Performance Optimizations**: React memoization, lazy loading, and caching
+**Main screens:**
+- `Requests`: create, track, approvals (department + final), history
+- `Tickets`: support/triage, chat and participants, linked requests
+- `Incoming (Portal)`: external intake and legacy history
+- `Inventory/Assets`: catalog, units/equipment, movements
+- `Reports`: exports and audit views
 
-### Authentication & Security
+## Personas
 
-- **JWT Authentication**: Secure token-based authentication
-- **User Registration**: Secure account creation with password hashing
-- **Session Management**: Persistent login sessions with automatic token refresh
-- **Protected Routes**: Automatic redirection for unauthenticated users
-- **Password Security**: bcryptjs hashing for secure password storage
+These personas drive the menu and RBAC (menu items show/hide based on permissions):
 
-### User Experience
+| Persona | Objetivo | Acesso (resumo) |
+|---|---|---|
+| `USER` (worker) | “My work” | My requests, my tickets, incoming items assigned to me, MyDesktop |
+| `MANAGEMENT` (division/office heads) | Department management | Everything from USER + department requests, pending approvals, department reports |
+| `ADMIN` (platform) | Technical/platform ops | Catalogs, RBAC, global audit, technical management and support |
 
-- **Loading States**: Visual feedback during all operations
-- **Toast Notifications**: Success/error messages for all user actions
-- **Form Validation**: Client-side validation with error handling
-- **Accessibility**: ARIA-compliant components for screen readers
-- **Keyboard Navigation**: Full keyboard accessibility support
-- **Consistent Navigation**: AppHeader displayed on all authenticated pages
+Note: `ADMIN` should not be a “business bypass”; operational decisions must be enforced via permissions and scope.
 
----
+## Core Capabilities
 
-## 🛠️ Technology Stack
+- Internal requests with workflow (DRAFT → department approval → final approval → execution) and auditability
+- Approvals scoped by service (`requestingServiceId`) plus global final-approval permissions
+- Tickets with chat, participants, and `@username` mentions, with bidirectional Ticket ↔ Request linking
+- Incoming (portal) for external intake + legacy history
+- Inventory/Assets with movements, audit, and reporting
+- RBAC with roles/permissions (scoped) and audit trail (RBAC audit)
+- Multi-tenant isolation (`tenantId`)
 
-### Frontend
+## Key Flows
 
-- **Next.js 15.5.11**: React framework with App Router
-- **React 19**: Latest React with concurrent features
-- **TypeScript**: Type-safe development
-- **Tailwind CSS**: Utility-first CSS framework
-- **Shadcn/ui**: Modern component library
-- **Zustand**: Lightweight state management
-- **React Hook Form**: Form handling with validation
-- **React Table**: Advanced table functionality
-- **Recharts**: Data visualization and charting library
-- **QRCode**: QR code generation library
-- **Papaparse**: CSV parsing and generation
-- **ExcelJS**: Excel file generation
+### Internal Requests (Pedidos)
 
-### Backend
+- **Create** a request (user intake or backoffice) → starts as `DRAFT` and is submitted (`SUBMITTED`)
+- **Management** approves (only for requests belonging to the service(s) they manage) → `AWAITING_ADMIN_APPROVAL`
+- **Final** (platform/admin or another role with `requests.final_*`) decides → `APPROVED/REJECTED`
+- **Execution**/delivery/pickup → `FULFILLED` (when applicable)
 
-- **Next.js API Routes**: Server-side API endpoints
-- **Prisma ORM**: Type-safe database operations
-- **PostgreSQL**: SQL database
-- **JWT**: JSON Web Token authentication
-- **bcryptjs**: Password hashing
-- **Axios**: HTTP client for API requests
+### Tickets
 
-### Development Tools
+- Per-ticket chat with **participants** (followers) and `@username` mentions (auto-add)
+- Triage by status/priority and Ticket ↔ Request linking (single place for context)
 
-- **ESLint**: Code linting and formatting
-- **PostCSS**: CSS processing
-- **Autoprefixer**: CSS vendor prefixing
-- **TypeScript**: Static type checking
+### Incoming (Portal) (Recebidos)
 
----
+- External intake creates `PublicRequest` (portal) and is managed in `/governanca/recebidos`
 
-## 📁 Project Structure
+### Inventory/Assets (Inventário/Património)
 
-```bash
-stockly/
-├── app/                          # Next.js App Router
-│   ├── AppHeader/                # Application header component
-│   │   ├── AppHeader.tsx         # Main header with theme toggle
-│   │   └── ModeToggle.tsx       # Dark/light theme toggle
-│   ├── AppTable/                 # Main table component
-│   │   ├── AppTable.tsx          # Main table wrapper
-│   │   ├── dropdowns/            # Filter dropdowns
-│   │   │   ├── CategoryDropDown.tsx
-│   │   │   ├── StatusDropDown.tsx
-│   │   │   └── SupplierDropDown.tsx
-│   │   └── ProductDialog/        # Product management dialogs
-│   │       ├── AddProductDialog.tsx
-│   │       ├── AddCategoryDialog.tsx
-│   │       ├── AddSupplierDialog.tsx
-│   │       └── _components/      # Dialog sub-components
-│   ├── Products/                 # Product-related components
-│   │   ├── ProductTable.tsx      # Main product table
-│   │   ├── columns.tsx           # Table column definitions
-│   │   ├── ProductsDropDown.tsx  # Product action dropdown
-│   │   └── PaginationSelection.tsx
-│   ├── analytics/                # Analytics dashboard
-│   │   └── page.tsx              # Analytics page with charts
-│   ├── api-docs/                 # API documentation
-│   │   └── page.tsx              # API docs page
-│   ├── api-status/               # API status monitoring
-│   │   └── page.tsx              # API status page
-│   ├── login/                    # Authentication pages
-│   │   └── page.tsx
-│   ├── register/
-│   │   └── page.tsx
-│   ├── logout/
-│   │   └── page.tsx
-│   ├── authContext.tsx           # Authentication context
-│   ├── useProductStore.ts        # Zustand store for state management
-│   ├── types.ts                  # TypeScript type definitions
-│   ├── layout.tsx                # Root layout
-│   ├── page.tsx                  # Main page
-│   └── Home.tsx                  # Home component
-├── components/                   # Reusable UI components
-│   ├── ui/                       # Shadcn/ui components
-│   │   ├── button.tsx
-│   │   ├── dialog.tsx
-│   │   ├── input.tsx
-│   │   ├── table.tsx
-│   │   ├── toast.tsx
-│   │   ├── qr-code.tsx           # QR code component
-│   │   ├── qr-code-hover.tsx     # QR code hover component
-│   │   ├── analytics-card.tsx    # Analytics metrics card
-│   │   ├── chart-card.tsx        # Chart wrapper component
-│   │   ├── advanced-search.tsx  # Advanced search component
-│   │   ├── forecasting-card.tsx  # Forecasting insights card
-│   │   └── progress.tsx          # Progress bar component
-│   ├── GlobalLoading.tsx         # Global loading component
-│   ├── Loading.tsx               # Loading spinner
-│   └── Skeleton.tsx              # Skeleton loading
-├── pages/                        # API routes
-│   └── api/
-│       ├── auth/                 # Authentication endpoints
-│       │   ├── login.ts
-│       │   ├── register.ts
-│       │   ├── logout.ts
-│       │   └── session.ts
-│       ├── products/             # Product management
-│       │   └── index.ts
-│       ├── categories/           # Category management
-│       │   └── index.ts
-│       └── suppliers/            # Supplier management
-│           └── index.ts
-├── prisma/                       # Database schema and client
-│   ├── schema.prisma             # Database schema
-│   ├── client.ts                 # Prisma client
-│   ├── product.ts                # Product operations
-│   ├── category.ts               # Category operations
-│   └── supplier.ts               # Supplier operations
-├── utils/                        # Utility functions
-│   ├── auth.ts                   # Authentication utilities
-│   └── axiosInstance.ts          # Axios configuration
-├── hooks/                        # Custom React hooks
-│   └── use-toast.ts              # Toast hook
-├── middleware/                   # Next.js middleware
-│   └── authMiddleware.ts         # Authentication middleware
-├── middleware.ts                 # Route protection middleware
-└── public/                       # Static assets
-    ├── favicon.ico
-    └── ...                       # Other static files
+- Catalog (products/categories/suppliers), units/equipment and movements
+- Audit and reporting by period/service
+
+## Request Workflow (Internal Requests)
+
+The system uses 2 layers:
+- `Request.status` (a simple request state)
+- `WorkflowInstance.currentState` (the workflow state, used to distinguish “under management validation” vs “awaiting final approval”, etc.)
+
+Key rule for management:
+- A user with `requests.approve` can only approve requests where `requestingServiceId` is within the services they manage (scope).
+
+## Request State Machine
+
+The real (simplified) internal requests workflow:
+
+```mermaid
+stateDiagram-v2
+  [*] --> DRAFT
+  DRAFT --> SUBMITTED: submit
+  SUBMITTED --> AWAITING_ADMIN_APPROVAL: chefia approve
+  SUBMITTED --> REJECTED: chefia reject
+  AWAITING_ADMIN_APPROVAL --> APPROVED: final approve
+  AWAITING_ADMIN_APPROVAL --> REJECTED: final reject
+  APPROVED --> FULFILLED: execution/fulfillment
+  REJECTED --> [*]
+  FULFILLED --> [*]
 ```
 
----
+## Module x Endpoints x Permissions Matrix
 
-## 🚀 Getting Started
+| Module | Key Endpoints | Required Permission(s) |
+|---|---|---|
+| `internal_requests` | `GET/POST /api/requests`, `GET/PATCH /api/requests/[id]` | `requests.change_status`, `requests.approve` (chefia), `requests.final_approve` (final), `requests.reject` (chefia), `requests.final_reject` (final), `requests.pickup_sign`, `requests.sign_approval` |
+| `workflow` | `GET/POST /api/workflows/requests/[id]/action` | `requests.change_status` (view/ops), plus transition-specific permissions |
+| `citizen_requests` | `POST /api/portal/requests`, `GET /api/admin/public-requests`, `POST .../accept`, `POST .../reject` | `public_requests.handle` |
+| `assets` | `GET/POST /api/governanca/assets`, `GET/PATCH /api/governanca/assets/[id]` | `assets.manage` |
+| `finance` | `GET/POST /api/governanca/finance`, `GET/PATCH /api/governanca/finance/[id]` | `finance.manage` |
+| `presidency_dispatch` | `POST /api/requests/[id]/presidency-dispatch`, `POST /api/requests/[id]/presidency-decision` | `presidency.approve` (decision), plus dispatch-level governance permissions |
+| `rbac` | `GET/POST/PATCH /api/admin/rbac/*` | `users.manage` |
 
-## ▶️ Como executar localmente (PT)
+## Technology Stack
 
-Este projeto é um Next.js full‑stack (App Router + API Routes) usando Prisma + PostgreSQL.
+- Frontend: Next.js 15, React 19, TypeScript, Tailwind CSS
+- Backend: Next.js API Routes, Zod validation
+- Data Access: Prisma ORM
+- Database: PostgreSQL
+- Security: session cookies, CSRF controls, RBAC, IP controls
+- Storage: local file storage (`storage/`) with DB metadata indexing
 
-## ▶️ Como executar numa EC2 (Ubuntu) (PT)
+## Architecture Overview
 
-Setup típico: **PostgreSQL em Docker** + **Next.js a correr na máquina (Node)**.
+The platform follows a domain-oriented architecture with explicit cross-cutting governance services.
 
-### 0) Pré‑requisitos (EC2)
+- Business domains: requests, citizen portal, finance, assets
+- Platform services: workflow, RBAC, audit, notifications, documents
+- Policy-first transitions and permission checks
+- Scalable for multiple organizational units and municipal process variants
 
-- Security Group: abrir pelo menos **porta 3000** (ou 80/443 se tiveres Nginx)
-- Instalar Docker + Compose:
+## Architecture Diagram
 
-```bash
-sudo apt update
-sudo apt install -y ca-certificates curl gnupg
+```mermaid
+flowchart LR
+  UI[Backoffice + Citizen Portal] --> API[Application API]
 
-sudo install -m 0755 -d /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-sudo chmod a+r /etc/apt/keyrings/docker.gpg
+  API --> AUTH[Authentication & Session Security]
+  API --> RBAC[RBAC + Organizational Scope]
+  API --> WF[Workflow Engine]
+  API --> AUDIT[Audit & Event Trail]
+  API --> DOC[Official Documents]
+  API --> NOTIF[Notifications]
 
-echo \
-  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
-  $(. /etc/os-release && echo \"$VERSION_CODENAME\") stable" | \
-  sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+  API --> DREQ[internal_requests]
+  API --> DCIT[citizen_requests]
+  API --> DFIN[finance]
+  API --> DAST[assets]
 
-sudo apt update
-sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-sudo usermod -aG docker $USER
-newgrp docker
+  DREQ --> DB[(PostgreSQL)]
+  DCIT --> DB
+  DFIN --> DB
+  DAST --> DB
+  RBAC --> DB
+  WF --> DB
+  AUDIT --> DB
+
+  DOC --> FS[(Storage /storage)]
 ```
 
-- Instalar Node.js 20 (recomendado):
+## Operational Workflow Diagram
 
-```bash
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt install -y nodejs
-node -v
-npm -v
+```mermaid
+sequenceDiagram
+  participant OU as Organizational Unit
+  participant P as Platform
+  participant FIN as Finance
+  participant PRES as Presidency
+  participant AUD as Audit
+  participant CIT as Citizen
+
+  OU->>P: Submit internal request
+  P->>P: Create WorkflowInstance
+  P->>FIN: Financial validation
+  FIN->>P: Validation outcome
+
+  alt Amount > threshold
+    P->>PRES: Presidential dispatch required
+    PRES->>P: Approve or reject
+  end
+
+  P->>AUD: Persist decision trail
+  P->>OU: Notify status update
+
+  CIT->>P: Submit citizen request
+  P->>P: Route to dedicated workflow
+  P->>AUD: Persist full trace
+  P->>CIT: Return progress/decision
 ```
 
-### 1) Clonar e instalar deps (EC2)
+## Deployment Topology
 
-```bash
-git clone <URL_DO_REPO>
-cd StockBackup
-npm install
+```mermaid
+flowchart TB
+  subgraph DEV[Development]
+    DEVAPP[Next.js App]
+    DEVDB[(PostgreSQL via Docker Compose)]
+    DEVAPP --> DEVDB
+  end
+
+  subgraph STG[Staging]
+    STGWEB[Web Layer]
+    STGAPI[API Runtime]
+    STGDB[(Managed PostgreSQL)]
+    STGOBS[Logs/Metrics]
+    STGWEB --> STGAPI --> STGDB
+    STGAPI --> STGOBS
+  end
+
+  subgraph PRD[Production]
+    WAF[WAF + Load Balancer]
+    WEB[Backoffice/Citizen Frontends]
+    API[Application API]
+    DB[(PostgreSQL HA)]
+    STORE[(Document Storage)]
+    OBS[Central Observability]
+
+    WAF --> WEB --> API
+    API --> DB
+    API --> STORE
+    API --> OBS
+  end
 ```
 
-### 2) Configurar `.env` (EC2)
+## Project Structure
 
-```bash
-cp .env.example .env
+```text
+app/                      # Next.js App Router pages/components
+pages/api/                # API endpoints
+prisma/
+  schema.prisma           # Prisma data model
+  migrations/             # SQL migrations
+utils/                    # Auth, RBAC, workflow, notifications, utilities
+public/branding/          # Branding assets
+storage/                  # Local file storage
+docs/                     # Architecture, operations, governance documents
 ```
 
-Editar `.env` e garantir pelo menos:
-
-```env
-DATABASE_URL="postgresql://stockly:stockly_password@localhost:5432/stockly?schema=public"
-JWT_SECRET="<um-segredo-bom>"
-ALLOW_REGISTRATION="true"
-```
-
-### 3) Subir Postgres (EC2)
-
-```bash
-docker compose up -d
-docker compose ps
-```
-
-### 4) Aplicar migrations (EC2)
-
-```bash
-npx prisma migrate deploy
-```
-
-### 5) Correr a app (EC2)
-
-Dev (mais simples):
-
-```bash
-npm run dev
-```
-
-Ou em background (Linux):
-
-```bash
-nohup npm run dev -- --port 3000 > .next-dev.log 2>&1 &
-echo $! > .next-dev.pid
-tail -f .next-dev.log
-```
-
-Parar:
-
-```bash
-kill $(cat .next-dev.pid)
-```
-
-Notas:
-- O storage é **local em disco** na pasta `storage/` (já existe `storage/.gitkeep`).
-- Em EC2, garante que a pasta `storage/` tem permissões de escrita para o user que corre o Node.
-
-### 1) Pré‑requisitos
-
-- Node.js `18.17+` (ou `20+` recomendado)
-- `npm`
-- PostgreSQL a correr localmente (ou via Docker)
-- Docker + Docker Compose (recomendado para subir o Postgres)
-
-### 2) Clonar e instalar dependências
-
-```bash
-git clone <URL_DO_REPO>
-cd StockBackup
-npm install
-```
-
-### 3) Configurar variáveis de ambiente (`.env`)
-
-Cria um ficheiro `.env` na raiz (podes começar por copiar o `.env.example`):
-
-```bash
-cp .env.example .env
-```
-
-Edita o `.env` e ajusta pelo menos:
-
-- `DATABASE_URL` (ligação ao Postgres)
-- `JWT_SECRET` (segredo para assinar sessões)
-
-Nota: para permitir registo via UI, define `ALLOW_REGISTRATION=true`.
-
-### 4) Preparar a base de dados (Prisma)
-
-```bash
-# Se estiveres a usar Docker para o Postgres:
-docker compose up -d
-
-# Aplica migrações existentes ao Postgres
-npx prisma migrate deploy
-```
-
-Opcional (ver dados):
-
-```bash
-npm run prisma:studio
-```
-
-### 5) Executar em desenvolvimento
-
-```bash
-npm run dev
-```
-
-Abrir no browser: `http://localhost:3000`
-
-### 6) Build e execução em produção (local)
-
-```bash
-npm run build
-npm run start
-```
-
-Em ambientes de deploy, normalmente também corres:
-
-```bash
-npx prisma migrate deploy
-```
-
-### Troubleshooting rápido
-
-- Erro a ligar ao Postgres: confirma o serviço, user/password e `DATABASE_URL`.
-- Registo desativado (HTTP 410): define `ALLOW_REGISTRATION=true`.
-- CORS/Origin not allowed no login: define `ALLOWED_ORIGINS` com a lista de origens permitidas (separadas por vírgula).
-
----
+## Getting Started
 
 ### Prerequisites
 
-- **Node.js**: Version 18 or higher
-- **npm** or **yarn**: Package manager
-- **PostgreSQL**: Database (local instance)
-- **Git**: Version control
-
-### Installation
-
-1. **Clone the repository**
-
-   ```bash
-   git clone https://github.com/your-username/stockly.git
-  cd StockBackup
-   ```
-
-2. **Install dependencies**
-
-   ```bash
-   npm install
-   # or
-   yarn install
-   ```
-
-3. **Environment Setup**
-
-   Create a `.env` file in the root directory:
-
-   ```env
-   # Database Configuration
-  DATABASE_URL="postgresql://stockly:stockly_password@localhost:5432/stockly?schema=public"
-
-   # JWT Configuration
-   JWT_SECRET="your-super-secret-jwt-key-here"
-   # JWT_EXPIRES_IN="1h"
-
-   # Application Configuration (Optional)
-   # NEXTAUTH_URL="http://localhost:3000"
-   # NEXTAUTH_SECRET="your-nextauth-secret"
-   ```
-
-4. **Database Setup**
-
-   ```bash
-   # Generate Prisma client
-   npx prisma generate
-
-  # Create/apply migrations (recommended)
-  npx prisma migrate dev
-
-   # (Optional) View database in Prisma Studio
-   npx prisma studio
-   ```
-
-5. **Run the development server**
-
-   ```bash
-   npm run dev
-   # or
-   yarn dev
-   ```
-
-6. **Open your browser**
-   Navigate to [http://localhost:3000](http://localhost:3000)
-
----
-
-## 🔧 Environment Variables
-
-### Required Variables
-
-| Variable       | Description                         | Example |
-| ------------- | ----------------------------------- | ------- |
-| `DATABASE_URL` | PostgreSQL connection string         | `postgresql://stockly:stockly_password@localhost:5432/stockly?schema=public` |
-| `JWT_SECRET`   | Secret key to sign session JWTs      | `change-me-in-production` |
-
-### Optional Variables
-
-| Variable                  | Description | Default |
-| ------------------------ | ----------- | ------- |
-| `ALLOW_REGISTRATION`     | Enables registration endpoint (`/register`) when set to `true` | disabled |
-| `ALLOWED_ORIGINS`        | Comma-separated allowed origins for cross-site login | empty |
-| `NEXT_PUBLIC_API_BASE_URL` | API base URL (useful if front/back are split) | `/api` |
-
-### Local PostgreSQL Setup (non-Docker)
-
-1. Install PostgreSQL (Ubuntu/Debian example):
-
-  ```bash
-  sudo apt update
-  sudo apt install -y postgresql postgresql-contrib
-  ```
-
-2. Create a database user and database:
-
-  ```bash
-  sudo -u postgres psql
-  ```
-
-  Inside `psql`:
-
-  ```sql
-  CREATE USER stockly WITH PASSWORD 'stockly_password';
-  CREATE DATABASE stockly OWNER stockly;
-  GRANT ALL PRIVILEGES ON DATABASE stockly TO stockly;
-  ```
-
-3. Set `DATABASE_URL` in `.env`:
-
-  ```env
-  DATABASE_URL="postgresql://stockly:stockly_password@localhost:5432/stockly?schema=public"
-  ```
-
-4. Run migrations:
-
-  ```bash
-  npx prisma migrate dev
-  ```
-
----
-
-## 📊 Database Schema
-
-### User Model
-
-```prisma
-model User {
-  id        String   @id @default(uuid()) @db.Uuid
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  email    String  @unique
-  name     String
-  password String
-  username String? @unique
-}
-```
-
-### Product Model
-
-```prisma
-model Product {
-  id        String   @id @default(uuid()) @db.Uuid
-  createdAt DateTime @default(now())
-
-  name     String
-  sku      String @unique
-  price    Float
-  quantity BigInt
-  status   String
-
-  userId     String @db.Uuid
-  categoryId String @db.Uuid
-  supplierId String @db.Uuid
-}
-```
-
-### Category Model
-
-```prisma
-model Category {
-  id     String @id @default(auto()) @map("_id") @db.ObjectId
-  name   String
-  userId String @db.ObjectId
-}
-```
-
-### Supplier Model
-
-```prisma
-model Supplier {
-  id     String @id @default(auto()) @map("_id") @db.ObjectId
-  name   String
-  userId String @db.ObjectId
-}
-```
-
----
-
-## 🔌 API Endpoints
-
-### Authentication Endpoints
-
-This project is configured as **login-only** by default (accounts are created by an administrator). If you ever need to re-enable self-registration, set `ALLOW_REGISTRATION=true`.
-
-### Roles / Pessoas
-
-There is a simple role system:
-
-- `USER` (default)
-- `ADMIN` (can manage users)
-
-To bootstrap the first admin locally, open Prisma Studio (`npm run prisma:studio`), edit a row in the `User` table and set `role` to `ADMIN`.
-
-### Storage (Faturas / Requisições / Documentos / Outros)
-
-There is a local file storage module:
-
-- UI: `/storage` (tabs by type)
-- API: `GET/POST /api/storage`, `GET/DELETE /api/storage/[id]`
-- Files are stored on disk under `storage/<userId>/...` and indexed in Postgres (`StoredFile`).
-
-#### POST `/api/auth/login`
-
-Authenticate user and set a `session_id` HttpOnly cookie.
-
-```typescript
-// Request Body
-{
-  "email": "john@example.com",
-  "password": "securepassword123"
-}
-
-// Response (cookie is set via Set-Cookie header)
-{
-  "userId": "...",
-  "userName": "John Doe",
-  "userEmail": "john@example.com"
-}
-```
-
-#### POST `/api/auth/logout`
-
-Logout user and invalidate session.
-
-```typescript
-// Response
-{
-  "success": true,
-  "message": "Logged out successfully"
-}
-```
-
-#### GET `/api/auth/session`
-
-Get current user session information.
-
-```typescript
-// Response
-{
-  "id": "63488876-a7ff-4095-999c-2cc05cfefa7a",
-  "name": "John Doe",
-  "email": "john@example.com",
-  "role": "USER",
-  "createdAt": "2026-02-03T19:57:18.345Z",
-  "updatedAt": "2026-02-03T19:57:18.347Z"
-}
-```
-
-### Product Management Endpoints
-
-#### GET `/api/products`
-
-Get all products for the authenticated user.
-
-```typescript
-// Response
-[
-  {
-    id: "<uuid>",
-    name: "Laptop",
-    sku: "LAP001",
-    price: 999.99,
-    quantity: 10,
-    status: "Available",
-    category: "Electronics",
-    supplier: "TechCorp",
-    createdAt: "2024-01-01T00:00:00.000Z",
-  },
-];
-```
-
-#### POST `/api/products`
-
-Create a new product.
-
-```typescript
-// Request Body
-{
-  "name": "Laptop",
-  "sku": "LAP001",
-  "price": 999.99,
-  "quantity": 10,
-  "status": "Available",
-  "categoryId": "507f1f77bcf86cd799439011",
-  "supplierId": "507f1f77bcf86cd799439012"
-}
-
-// Response
-{
-  "id": "507f1f77bcf86cd799439013",
-  "name": "Laptop",
-  "sku": "LAP001",
-  "price": 999.99,
-  "quantity": 10,
-  "status": "Available",
-  "category": "Electronics",
-  "supplier": "TechCorp",
-  "createdAt": "2024-01-01T00:00:00.000Z"
-}
-```
-
-#### PUT `/api/products`
-
-Update an existing product.
-
-```typescript
-// Request Body
-{
-  "id": "507f1f77bcf86cd799439013",
-  "name": "Updated Laptop",
-  "sku": "LAP001",
-  "price": 1099.99,
-  "quantity": 15,
-  "status": "Available",
-  "categoryId": "507f1f77bcf86cd799439011",
-  "supplierId": "507f1f77bcf86cd799439012"
-}
-```
-
-#### DELETE `/api/products`
-
-Delete a product.
-
-```typescript
-// Request Body
-{
-  "id": "507f1f77bcf86cd799439013"
-}
-
-// Response
-204 No Content
-```
-
-### Category Management Endpoints
-
-#### GET `/api/categories`
-
-Get all categories for the authenticated user.
-
-#### POST `/api/categories`
-
-Create a new category.
-
-#### PUT `/api/categories`
-
-Update an existing category.
-
-#### DELETE `/api/categories`
-
-Delete a category.
-
-### Supplier Management Endpoints
-
-#### GET `/api/suppliers`
-
-Get all suppliers for the authenticated user.
-
-#### POST `/api/suppliers`
-
-Create a new supplier.
-
-#### PUT `/api/suppliers`
-
-Update an existing supplier.
-
-#### DELETE `/api/suppliers`
-
-Delete a supplier.
-
----
-
-## 🎨 Component Architecture
-
-### State Management with Zustand
-
-The application uses Zustand for state management, providing a simple and efficient way to manage global state.
-
-```typescript
-// Example: Product Store
-interface ProductState {
-  allProducts: Product[];
-  categories: Category[];
-  suppliers: Supplier[];
-  isLoading: boolean;
-  loadProducts: () => Promise<void>;
-  addProduct: (product: Product) => Promise<{ success: boolean }>;
-  updateProduct: (product: Product) => Promise<{ success: boolean }>;
-  deleteProduct: (id: string) => Promise<{ success: boolean }>;
-}
-
-export const useProductStore = create<ProductState>((set) => ({
-  allProducts: [],
-  categories: [],
-  suppliers: [],
-  isLoading: false,
-
-  loadProducts: async () => {
-    set({ isLoading: true });
-    try {
-      const response = await axiosInstance.get("/products");
-      set({ allProducts: response.data || [] });
-    } catch (error) {
-      console.error("Error loading products:", error);
-    } finally {
-      set({ isLoading: false });
-    }
-  },
-  // ... other methods
-}));
-```
-
-### Authentication Context
-
-The authentication context provides user state and authentication methods throughout the application.
-
-```typescript
-// Example: Auth Context Usage
-const { isLoggedIn, user, login, logout } = useAuth();
-
-// Protected route example
-useEffect(() => {
-  if (!isLoggedIn) {
-    router.push("/login");
-  }
-}, [isLoggedIn, router]);
-```
-
-### Reusable Components
-
-#### Dialog Components
-
-All dialogs follow a consistent pattern with proper accessibility attributes:
-
-```typescript
-// Example: Product Dialog
-<Dialog open={open} onOpenChange={setOpen}>
-  <DialogContent aria-describedby="product-dialog-description">
-    <DialogHeader>
-      <DialogTitle>Add Product</DialogTitle>
-    </DialogHeader>
-    <DialogDescription id="product-dialog-description">
-      Fill in the product details below.
-    </DialogDescription>
-    {/* Form content */}
-  </DialogContent>
-</Dialog>
-```
-
-#### Table Components
-
-The product table uses React Table for advanced functionality:
-
-```typescript
-// Example: Table Column Definition
-const columns: ColumnDef<Product>[] = [
-  {
-    accessorKey: "name",
-    header: "Product Name",
-    cell: ({ row }) => <div>{row.getValue("name")}</div>,
-  },
-  {
-    accessorKey: "sku",
-    header: "SKU",
-  },
-  // ... other columns
-];
-```
-
-#### QR Code Component
-
-QR code generation with click-to-view functionality:
-
-```typescript
-// Example: QR Code Usage
-<QRCodeHover
-  value={`Product: ${product.name}\nSKU: ${product.sku}\nPrice: $${product.price}`}
-  title="View QR Code"
-/>
-```
-
-#### Analytics Components
-
-Reusable analytics cards and charts:
-
-```typescript
-// Example: Analytics Card
-<AnalyticsCard
-  title="Total Products"
-  value={totalProducts}
-  description="Total products in inventory"
-  icon={<Package className="h-4 w-4" />}
-/>
-```
-
----
-
-## 🔒 Security Features
-
-### JWT Authentication
-
-- Secure token-based authentication
-- Automatic token refresh
-- Protected API routes
-- Session management
-
-### Password Security
-
-- bcryptjs hashing for passwords
-- Secure password validation
-- No plain text password storage
-
-### API Security
-
-- Request validation
-- Error handling without sensitive data exposure
-- CORS protection
-- Rate limiting (can be implemented)
-
-### Data Validation
-
-- Client-side form validation
-- Server-side data validation
-- TypeScript type safety
-- Prisma schema validation
-
----
-
-## 🎯 Key Features Implementation
-
-### Real-time Search
-
-The search functionality filters products instantly as users type:
-
-```typescript
-// Search implementation in ProductTable.tsx
-const filteredData = useMemo(() => {
-  return data.filter((product) => {
-    const searchMatch = searchTerm
-      ? product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        product.sku.toLowerCase().includes(searchTerm.toLowerCase())
-      : true;
-
-    return searchMatch && categoryFilter && supplierFilter && statusFilter;
-  });
-}, [data, searchTerm, categoryFilter, supplierFilter, statusFilter]);
-```
-
-### Toast Notifications
-
-Consistent user feedback with toast notifications:
-
-```typescript
-// Example: Success toast
-toast({
-  title: "Success!",
-  description: "Product created successfully.",
-  variant: "default",
-});
-
-// Example: Error toast
-toast({
-  title: "Error",
-  description: "Failed to create product. Please try again.",
-  variant: "destructive",
-});
-```
-
-### Loading States
-
-Visual feedback during async operations:
-
-```typescript
-// Example: Button loading state
-<Button disabled={isLoading}>
-  {isLoading ? "Creating..." : "Create Product"}
-</Button>
-```
-
-### Theme Toggle
-
-Dark/light theme with system preference detection:
-
-```typescript
-// Theme toggle implementation
-const { theme, setTheme } = useTheme();
-
-const toggleTheme = () => {
-  setTheme(theme === "dark" ? "light" : "dark");
-};
-```
-
-### Data Export
-
-CSV and Excel export functionality:
-
-```typescript
-// Example: Export to CSV
-const exportToCSV = () => {
-  const csv = Papa.unparse(filteredProducts);
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-  const link = document.createElement("a");
-  const url = URL.createObjectURL(blob);
-  link.setAttribute("href", url);
-  link.setAttribute("download", "products.csv");
-  link.style.visibility = "hidden";
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-};
-```
-
-### Analytics Dashboard
-
-Comprehensive business insights with charts:
-
-```typescript
-// Example: Analytics implementation
-const analyticsData = useMemo(() => {
-  return {
-    totalProducts: products.length,
-    totalValue: products.reduce(
-      (sum, p) => sum + p.price * Number(p.quantity),
-      0
-    ),
-    lowStockItems: products.filter((p) => Number(p.quantity) < 10).length,
-    categories: categoryStats,
-    monthlyTrends: monthlyData,
-  };
-}, [products]);
-```
-
----
-
-## 🚀 Deployment
-
-### Vercel Deployment (Recommended)
-
-1. **Connect your GitHub repository to Vercel**
-2. **Set environment variables in Vercel dashboard**
-3. **Deploy automatically on push to main branch**
-
-### Environment Variables for Production
-
-```env
-DATABASE_URL="postgresql://USER:PASSWORD@HOST:5432/DB?schema=public"
-JWT_SECRET="your-production-jwt-secret"
-```
-
-### Build Commands
+- Node.js 20+
+- PostgreSQL 16+
+- Docker + Docker Compose
+
+### Local Setup
 
 ```bash
-# Build the application
-npm run build
+npm install
+docker compose up -d postgres
+cp .env.example .env.local
+npm run prisma:deploy
+npm run dev
+```
 
-# Start production server
-npm start
+Open: `http://localhost:3000`
 
-# Run linting
+### Minimum Environment Variables
+
+```dotenv
+DATABASE_URL="postgresql://stockly:stockly_password@localhost:5432/stockly?schema=public"
+JWT_SECRET="change-me-in-development"
+DEFAULT_TENANT_SLUG="default"
+NEXT_PUBLIC_API_BASE_URL="/api"
+```
+
+## Go-live Checklist
+
+This is the short, practical checklist to validate before going to staging/production.
+
+### Already implemented in this repo
+
+- [x] RBAC bootstrap (system permissions/roles) on session load
+- [x] Scoped approvals by `requestingServiceId` (CHEFIA) + global final approval permissions
+- [x] Two-step approvals UI: `/requests/aprovacoes` (chefia) and `/requests/aprovacoes-finais` (final)
+- [x] Unified request creation flow: `DRAFT -> SUBMIT` (user intake + backoffice + external accept)
+- [x] Ticket participants + `@username` mentions (auto-add participant on mention)
+- [x] Minimal flow script: `npm run test:approval-2step`
+- [x] RBAC management UI: `/governanca/permissoes` (custom roles + toggle permissions)
+
+### Must confirm before go-live
+
+- [ ] **Dependency security**: run `npm audit` and ensure there are no `critical/high` (or accept a documented exception)
+- [ ] **Lockfile stability**: use `npm ci` in CI/CD (avoid `npm audit fix --force` in production branches)
+- [ ] **Database migrations**: `npm run prisma:deploy` in staging/prod (never `migrate dev` in prod)
+- [ ] **Secrets**: set a strong `JWT_SECRET` (required in production) and verify cookie security behind TLS
+- [ ] **Tenant bootstrap**: validate `DEFAULT_TENANT_SLUG` and at least 1 admin user exists for that tenant
+- [ ] **RBAC ops**: confirm at least one user has `users.manage` (break-glass path) and access is logged in RBAC audit
+- [ ] **Performance sanity**: check browser Network tab for no requests stuck in `(pending)` and navigation stays responsive
+- [ ] **Backups**: DB backup policy + restore test + rollback plan for migrations
+
+### Recommended smoke commands (staging/prod)
+
+```bash
+npm ci
+npm run prisma:deploy
+npm run prisma:generate
+npm run typecheck
 npm run lint
 ```
 
----
+### One-time operational backfills (optional but recommended)
 
-## 🧪 Testing
+- [ ] Ensure all users have `username` for `@username` mentions:
+  - `npm run backfill:usernames -- --dry-run`
+  - `npm run backfill:usernames`
 
-### Manual Testing Checklist
+## Definition of Done & Release Criteria
 
-- [ ] User registration and login
-- [ ] Product CRUD operations
-- [ ] Category management
-- [ ] Supplier management
-- [ ] Search and filtering
-- [ ] Theme toggle
-- [ ] Responsive design
-- [ ] Form validation
-- [ ] Error handling
-- [ ] Loading states
-- [ ] Analytics dashboard
-- [ ] QR code generation
-- [ ] Data export (CSV/Excel)
-- [ ] API documentation page
-- [ ] API status monitoring
+Para evitar o “já faz tudo” mas ainda não está “fechado” (pronto para produção municipal), os critérios vivem em:
+- `docs/definition-of-done.md`
+- `docs/release-criteria.md`
 
-### Automated Testing (Future Enhancement)
+E são aplicados no fluxo via template de PR e checklist de release:
+- `.github/pull_request_template.md`
+- `.github/ISSUE_TEMPLATE/release.md`
+
+## What Docker Compose Does
+
+`docker compose up -d postgres` boots the PostgreSQL service defined in `docker-compose.yml`, which is required for Prisma migrations and local runtime.
+
+Typical commands:
 
 ```bash
-# Install testing dependencies
-npm install --save-dev jest @testing-library/react @testing-library/jest-dom
-
-# Run tests
-npm test
-
-# Run tests with coverage
-npm test -- --coverage
+docker compose up -d postgres
+docker compose ps
+docker compose down
+docker compose down -v
 ```
 
----
+## Database Schema
 
-## 🔧 Customization
+### Core Entities
 
-### Adding New Features
+- Tenant, User, RequestingService
+- Request, RequestItem, RequestStatusAudit
+- PublicRequest, PublicRequestItem
+- AccessRole, AccessPermission, UserRoleAssignment, RbacAudit
+- WorkflowDefinition, WorkflowStateDefinition, WorkflowTransitionDefinition, WorkflowInstance, WorkflowEvent
+- MunicipalAsset, MunicipalAssetEvent, MunicipalAssetAssignment
+- FinanceProcess, FinanceProcessEvent
+- PresidencyDispatch
+- Notification, StoredFile
 
-1. **Create new API endpoints** in `pages/api/`
-2. **Add new Prisma models** in `schema.prisma`
-3. **Create new components** in `components/`
-4. **Update state management** in `useProductStore.ts`
-5. **Add new routes** in `app/`
+### Conceptual ER Diagram
 
-### Styling Customization
+```mermaid
+erDiagram
+  TENANT ||--o{ USER : has
+  TENANT ||--o{ REQUEST : owns
+  TENANT ||--o{ PUBLIC_REQUEST : owns
+  TENANT ||--o{ ACCESS_ROLE : owns
+  TENANT ||--o{ WORKFLOW_DEFINITION : owns
+  TENANT ||--o{ MUNICIPAL_ASSET : owns
+  TENANT ||--o{ FINANCE_PROCESS : owns
 
-The application uses Tailwind CSS with custom design tokens:
+  REQUEST ||--o{ REQUEST_ITEM : contains
+  REQUEST ||--o| WORKFLOW_INSTANCE : drives
+  REQUEST ||--o| PRESIDENCY_DISPATCH : may_have
 
-```typescript
-// tailwind.config.ts
-export default {
-  theme: {
-    extend: {
-      colors: {
-        primary: {
-          DEFAULT: "hsl(var(--primary))",
-          foreground: "hsl(var(--primary-foreground))",
-        },
-        // ... other custom colors
-      },
-    },
-  },
-};
+  PUBLIC_REQUEST ||--o{ PUBLIC_REQUEST_ITEM : contains
+  PUBLIC_REQUEST ||--o| WORKFLOW_INSTANCE : may_drive
+
+  ACCESS_ROLE ||--o{ USER_ROLE_ASSIGNMENT : grants
+  ACCESS_PERMISSION ||--o{ ACCESS_ROLE_PERMISSION : links
+
+  WORKFLOW_DEFINITION ||--o{ WORKFLOW_STATE_DEFINITION : has
+  WORKFLOW_DEFINITION ||--o{ WORKFLOW_TRANSITION_DEFINITION : has
+  WORKFLOW_INSTANCE ||--o{ WORKFLOW_EVENT : emits
+
+  MUNICIPAL_ASSET ||--o{ MUNICIPAL_ASSET_EVENT : emits
+  MUNICIPAL_ASSET ||--o{ MUNICIPAL_ASSET_ASSIGNMENT : assigned_to
+
+  FINANCE_PROCESS ||--o{ FINANCE_PROCESS_EVENT : emits
 ```
 
-### Component Customization
+## API Endpoints
 
-All UI components are built with Shadcn/ui and can be customized:
+### Auth and Session
+
+- `POST /api/auth/login`
+- `POST /api/auth/logout`
+- `GET /api/auth/session`
+
+### Internal Requests
+
+- `GET /api/requests`
+- `POST /api/requests`
+- `GET /api/requests/[id]`
+- `PATCH /api/requests/[id]`
+
+### Workflow
+
+- `GET /api/workflows/requests/[id]/action`
+- `POST /api/workflows/requests/[id]/action`
+
+### Citizen Requests
+
+- `POST /api/portal/requests`
+- `GET /api/admin/public-requests`
+- `POST /api/admin/public-requests/[id]/accept`
+- `POST /api/admin/public-requests/[id]/reject`
+
+### Assets
+
+- `GET /api/governanca/assets`
+- `POST /api/governanca/assets`
+- `GET /api/governanca/assets/[id]`
+- `PATCH /api/governanca/assets/[id]`
+
+### Finance
+
+- `GET /api/governanca/finance`
+- `POST /api/governanca/finance`
+- `GET /api/governanca/finance/[id]`
+- `PATCH /api/governanca/finance/[id]`
+
+### Presidency
+
+- `POST /api/requests/[id]/presidency-dispatch`
+- `POST /api/requests/[id]/presidency-decision`
+
+### RBAC Administration
+
+- `GET /api/admin/rbac/assignments`
+- `POST /api/admin/rbac/assignments`
+- `PATCH /api/admin/rbac/assignments`
+- `GET /api/admin/rbac/roles`
+- `POST /api/admin/rbac/roles`
+- `PATCH /api/admin/rbac/roles/[id]`
+- `DELETE /api/admin/rbac/roles/[id]`
+- `PATCH /api/admin/rbac/roles/[id]/permissions`
+
+## RBAC and Organizational Scope
+
+Access control combines fine-grained permissions with organizational scope.
+
+- Action-level permissions (`requests.approve`, `finance.manage`, `assets.manage`, etc.)
+- Role composition based on permission sets
+- User-role assignments scoped by Organizational Unit
+- Context-aware validation for each transition/action
+
+### Role Matrix (Ready to Use)
+
+| Role | Key Permissions | Recommended Scope |
+|---|---|---|
+| `PRESIDENT` | `presidency.approve`, `requests.approve`, `requests.final_approve`, `requests.reject`, `requests.final_reject`, `requests.sign_approval`, `requests.dispatch_presidency`, `reports.view` | Global municipal scope |
+| `VICE_PRESIDENT` | Same as `PRESIDENT` for formal substitution | Global municipal scope |
+| `COUNCILOR` | `requests.approve`, `requests.final_approve`, `requests.reject`, `requests.final_reject`, `requests.sign_approval`, `requests.dispatch_presidency`, `finance.view`, `assets.view` | By portfolio / Organizational Unit |
+| `DIVISION_HEAD` | `requests.create`, `requests.view`, `requests.approve`, `requests.reject`, `requests.sign_approval`, `requests.pickup_sign` | Division / Organizational Unit |
+| `FINANCE_MANAGER` | `finance.manage`, `finance.view`, `requests.approve`, `requests.final_approve`, `requests.reject`, `requests.final_reject`, `reports.view` | Finance department or municipal global (policy-based) |
+| `FINANCE_OFFICER` | `finance.manage`, `finance.view`, `requests.view` | Finance department operational scope |
+| `ASSET_MANAGER` | `assets.manage`, `assets.view`, `requests.change_status`, `requests.pickup_sign`, `requests.void_pickup_sign` | Asset/patrimony management scope |
+| `PROCUREMENT_OFFICER` | `requests.create`, `requests.view`, `finance.view`, `assets.view` | Procurement / supporting units |
+| `SERVICE_MANAGER` | `requests.create`, `requests.view`, `requests.approve`, `requests.reject`, `requests.sign_approval`, `requests.pickup_sign`, `requests.dispatch_presidency` | Specific requesting service |
+| `EXTERNAL_REQUEST_VIEWER` | `public_requests.view` | Citizen request monitoring units |
+| `EXTERNAL_REQUEST_REVIEWER` | `public_requests.view`, `public_requests.handle` | Citizen request handling units |
+| `SUPERVISOR_UO` | `requests.create`, `requests.view`, `public_requests.view`, `reports.view` | Specific Organizational Unit |
+| `OPERATOR_UO` | `requests.create`, `requests.view` | Specific Organizational Unit |
+| `AUDITOR` | `requests.view`, `assets.view`, `finance.view`, `public_requests.view`, `reports.view` | Read-only institutional/audit scope |
+| `SUPPORT_ADMIN` | `users.manage`, `tickets.manage`, `reports.view` | Platform administration scope (non-political) |
+
+Governance note: keep `ADMIN` as a technical/system role and enforce business decisions through scoped institutional roles above.
+
+## Workflow Engine
+
+The workflow is **configurable** per tenant and acts as the decision/audit backbone.
+
+- `WorkflowDefinition`: workflow type + version
+- `WorkflowStateDefinition`: states (with `isInitial/isTerminal`)
+- `WorkflowTransitionDefinition`: transitions (with `requiredPermission`)
+- `WorkflowInstance`: runtime instance per request (`currentState`)
+- `WorkflowEvent`: immutable events per transition/action
+
+Transitions are executed through **actions** (API `.../action`) and are always validated server-side by permission and scope.
+
+## Domain Breakdown
+
+- `internal_requests`: internal service requests and approvals
+- `citizen_requests`: citizen-facing submissions and routing
+- `finance`: appropriation, commitment, authorization, payment
+- `assets`: municipal asset registration, assignment, maintenance, disposal
+
+## Security and Audit
+
+- Server-side validated authenticated sessions
+- CSRF protection for unsafe methods
+- Tenant-level data isolation
+- Scoped RBAC authorization
+- IP allowlist / access request flow
+- Login rate limiting and lockout
+- Audit records and event trail for sensitive operations
+
+## SLO/SLI and Observability
+
+Recommended SLO targets:
+
+- Availability: `99.9%` monthly
+- API latency: `p95 < 500ms`
+- Workflow transition reliability: `>= 99.99%`
+- Notification delivery: `>= 99.5%`
+
+Recommended SLIs:
+
+- Uptime ratio
+- p50/p95/p99 latency by endpoint group
+- 4xx/5xx error rates by domain
+- Workflow transition success/failure counters
+- Queue depth and retry metrics (notifications/documents)
+- DB health metrics (slow queries, lock contention, pool saturation)
+
+Observability baseline:
+
+- Structured logs with correlation IDs
+- Domain dashboards and alerting
+- Distributed tracing across critical workflows
+
+## Architecture Decision Records
+
+Maintain ADRs under `docs/architecture/adr/`.
+
+Suggested initial ADRs:
+
+- Domain separation strategy
+- Workflow engine as core orchestration component
+- RBAC with organizational scope
+- Audit/event model as compliance baseline
+- Storage strategy and migration path
+- Deployment topology and security boundaries
+
+## Roadmap
+
+### Phase 1
+
+- Granular RBAC and organizational scope
+- Baseline security controls
+
+### Phase 2
+
+- Configurable workflow engine
+- Migration of request lifecycle to workflow-based transitions
+
+### Phase 3
+
+- Asset lifecycle consolidation
+
+### Phase 4
+
+- Financial lifecycle consolidation
+
+### Phase 5
+
+- Citizen portal hardening and presidency decision traceability
+
+## Contributing
+
+1. Create a dedicated branch per feature/fix.
+2. Run `npm run typecheck` and `npm run lint` before opening a PR.
+3. For data model changes, add/update Prisma migrations.
+4. Include API/UI evidence for behavior changes.
+5. Keep documentation aligned with functional changes.
+
+## Quality Commands
 
 ```bash
-# Add new Shadcn/ui components
-npx shadcn@latest add [component-name]
+npm run prisma:generate
+npm run typecheck
+npm run lint
+npm run prisma:deploy
 ```
 
----
+## License
 
-## 🐛 Troubleshooting
-
-### Common Issues
-
-#### Database Connection Issues
-
-```bash
-# Check connection/migration state
-npx prisma migrate status
-
-# Reset database (development only)
-npx prisma migrate reset
-```
-
-#### Build Errors
-
-```bash
-# Clear Next.js cache
-rm -rf .next
-
-# Reinstall dependencies
-rm -rf node_modules package-lock.json
-npm install
-```
-
-#### Authentication Issues
-
-- Check JWT_SECRET environment variable
-- Verify database connection
-- Check user credentials in database
-
-#### Performance Issues
-
-- Enable Next.js production mode
-- Optimize images and assets
-- Use proper caching strategies
-
-#### QR Code Issues
-
-- Ensure QR code library is properly installed
-- Check for hydration mismatches in development
-- Verify client-side rendering for dynamic content
-
----
-
-## 📚 Learning Resources
-
-### Next.js
-
-- [Next.js Documentation](https://nextjs.org/docs)
-- [App Router Guide](https://nextjs.org/docs/app)
-- [API Routes](https://nextjs.org/docs/api-routes/introduction)
-
-### React
-
-- [React Documentation](https://react.dev/)
-- [React Hooks](https://react.dev/reference/react)
-- [React Patterns](https://reactpatterns.com/)
-
-### Prisma
-
-- [Prisma Documentation](https://www.prisma.io/docs)
-- [Prisma with PostgreSQL](https://www.prisma.io/docs/orm/overview/databases/postgresql)
-- [Prisma Client](https://www.prisma.io/docs/concepts/components/prisma-client)
-
-### Zustand
-
-- [Zustand Documentation](https://github.com/pmndrs/zustand)
-- [Zustand Best Practices](https://github.com/pmndrs/zustand#best-practices)
-
-### Tailwind CSS
-
-- [Tailwind CSS Documentation](https://tailwindcss.com/docs)
-- [Tailwind CSS Components](https://tailwindui.com/)
-
-### Data Visualization
-
-- [Recharts Documentation](https://recharts.org/)
-- [Chart.js](https://www.chartjs.org/)
-
-### QR Code Generation
-
-- [QRCode Library](https://github.com/zpao/qrcode.react)
-
----
-
-## 🤝 Contributing
-
-### Development Workflow
-
-1. **Fork the repository**
-2. **Create a feature branch**
-
-   ```bash
-   git checkout -b feature/your-feature-name
-   ```
-
-3. **Make your changes**
-4. **Test thoroughly**
-5. **Commit your changes**
-
-   ```bash
-   git commit -m "feat: add new feature"
-   ```
-
-6. **Push to your fork**
-
-   ```bash
-   git push origin feature/your-feature-name
-   ```
-
-7. **Create a pull request**
-
-### Code Style Guidelines
-
-- Use TypeScript for type safety
-- Follow ESLint rules
-- Write meaningful commit messages
-- Add comments for complex logic
-- Test your changes
-
----
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
----
-
-## 🙏 Acknowledgments
-
-- **Next.js Team** for the amazing framework
-- **Vercel** for hosting and deployment
-- **Prisma Team** for the excellent ORM
-- **Shadcn/ui** for the beautiful components
-- **Tailwind CSS** for the utility-first CSS framework
-- **Recharts** for the data visualization library
-
----
-
-## 📞 Support
-
-If you encounter any issues or have questions:
-
-1. **Check the troubleshooting section**
-2. **Search existing issues**
-3. **Create a new issue** with detailed information
-4. **Contact the maintainer**
-
----
-
-## 🎯 Roadmap
-
-### Planned Features
-
-- [ ] User roles and permissions
-- [ ] Advanced reporting and analytics
-- [ ] Bulk import/export functionality
-- [ ] Email notifications
-- [ ] Mobile app
-- [ ] API rate limiting
-- [ ] Advanced search filters
-- [ ] Product images
-- [ ] Inventory alerts
-- [ ] Audit logs
-- [ ] Real-time notifications
-- [ ] Advanced forecasting algorithms
-- [ ] Multi-language support
-- [ ] Advanced user preferences
-
-### Performance Improvements
-
-- [ ] Database indexing optimization
-- [ ] Caching strategies
-- [ ] Code splitting
-- [ ] Image optimization
-- [ ] Bundle size optimization
-- [ ] Server-side rendering improvements
-- [ ] Progressive Web App (PWA) features
-
----
-
-## 📊 Project Statistics
-
-- **Lines of Code**: ~8,000+
-- **Components**: 30+
-- **API Endpoints**: 12+
-- **Database Models**: 4
-- **Dependencies**: 40+
-- **Pages**: 8+
-- **Features**: 20+
-
----
-
-## 🏆 Features Summary
-
-| Feature                   | Status      | Description                            |
-| ------------------------- | ----------- | -------------------------------------- |
-| User Authentication       | ✅ Complete | JWT-based auth with registration/login |
-| Product Management        | ✅ Complete | Full CRUD with search and filtering    |
-| Category Management       | ✅ Complete | Create, edit, delete categories        |
-| Supplier Management       | ✅ Complete | Manage product suppliers               |
-| Responsive Design         | ✅ Complete | Mobile-first design                    |
-| Dark/Light Theme          | ✅ Complete | Theme toggle with system preference    |
-| Real-time Search          | ✅ Complete | Instant product filtering              |
-| Toast Notifications       | ✅ Complete | User feedback system                   |
-| Loading States            | ✅ Complete | Visual feedback during operations      |
-| Form Validation           | ✅ Complete | Client and server-side validation      |
-| Accessibility             | ✅ Complete | ARIA-compliant components              |
-| TypeScript                | ✅ Complete | Full type safety                       |
-| Database Integration      | ✅ Complete | PostgreSQL with Prisma ORM             |
-| API Security              | ✅ Complete | Protected routes and validation        |
-| Analytics Dashboard       | ✅ Complete | Business insights with charts          |
-| QR Code Generation        | ✅ Complete | Product QR codes with click-to-view    |
-| Data Export               | ✅ Complete | CSV and Excel export functionality     |
-| API Documentation         | ✅ Complete | Built-in API docs page                 |
-| API Status Monitor        | ✅ Complete | Real-time API health monitoring        |
-| Performance Optimizations | ✅ Complete | React memoization and caching          |
-| Low Stock Alerts          | ✅ Complete | Visual alerts for low inventory        |
-| Advanced Search           | ✅ Complete | Enhanced search with multiple filters  |
-
----
-
-## 🎉 Happy Coding! 🎉
-
-Feel free to use this project repository and extend this project further!
-
-If you have any questions or want to share your work, reach out via GitHub or my portfolio at [https://arnob-mahmud.vercel.app/](https://arnob-mahmud.vercel.app/).
-
-**Enjoy building and learning!** 🚀
-
-Thank you! 😊
-# Stock
+To be defined according to municipal institutional policy.

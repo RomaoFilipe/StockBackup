@@ -10,6 +10,7 @@ import {
 import { useRouter } from "next/navigation";
 import { useToast } from "@/hooks/use-toast"; // Import toast hook
 import { useState } from "react"; // Import useState for loading states
+import { Copy, Ellipsis, Pencil, Trash2 } from "lucide-react";
 
 interface ProductsDropDownProps {
   row: {
@@ -128,35 +129,31 @@ export default function ProductsDropDown({ row }: ProductsDropDownProps) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" className="h-8 w-8 p-0">
+        <Button variant="ghost" className="h-8 w-8 rounded-full p-0 hover:bg-muted/70">
           <span className="sr-only">Open menu</span>
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            className="h-4 w-4"
-            viewBox="0 0 20 20"
-            fill="currentColor"
-          >
-            <path
-              fillRule="evenodd"
-              d="M10 3a1.5 1.5 0 100 3 1.5 1.5 0 000-3zM10 8a1.5 1.5 0 100 3 1.5 1.5 0 000-3zM10 13a1.5 1.5 0 100 3 1.5 1.5 0 000-3z"
-              clipRule="evenodd"
-            />
-          </svg>
+          <Ellipsis className="h-4 w-4" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
+      <DropdownMenuContent align="end" className="glass-panel min-w-[10rem] rounded-xl">
         <DropdownMenuItem
           onClick={handleCopyProduct}
           disabled={isCopying}
+          className="gap-2"
         >
-          {isCopying ? "Copying..." : "Copy"}
+          <Copy className="h-4 w-4" />
+          {isCopying ? "A copiar..." : "Copiar"}
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={handleEditProduct}>Edit</DropdownMenuItem>
+        <DropdownMenuItem onClick={handleEditProduct} className="gap-2">
+          <Pencil className="h-4 w-4" />
+          Editar
+        </DropdownMenuItem>
         <DropdownMenuItem
           onClick={handleDeleteProduct}
           disabled={isDeleting}
+          className="gap-2 text-destructive focus:text-destructive"
         >
-          {isDeleting ? "Deleting..." : "Delete"}
+          <Trash2 className="h-4 w-4" />
+          {isDeleting ? "A remover..." : "Remover"}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

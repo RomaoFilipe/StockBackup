@@ -4,10 +4,12 @@
 export interface Product {
   id: string;
   name: string;
+  description?: string | null;
   sku: string;
   price: number;
   quantity: number;
   status?: string;
+  isPatrimonializable?: boolean;
   createdAt: Date | string;
   updatedAt?: Date | string;
   userId: string;
@@ -23,6 +25,7 @@ export interface ProductInvoice {
   productId: string;
   requestId?: string | null;
   invoiceNumber: string;
+  reqNumber?: string | null;
   issuedAt: Date | string;
   quantity: number;
   unitPrice: number;
@@ -31,11 +34,39 @@ export interface ProductInvoice {
   updatedAt?: Date | string;
 }
 
+export type ProductUnitStatus = "IN_STOCK" | "ACQUIRED";
+
+export interface ProductUnit {
+  id: string;
+  code: string;
+  status: ProductUnitStatus;
+  productId: string;
+  invoiceId?: string | null;
+  acquiredByUserId?: string | null;
+  createdAt: Date | string;
+  acquiredAt?: Date | string | null;
+}
+
 // Define the Supplier interface
 export interface Supplier {
   id: string;
   name: string;
-  userId: string;
+  // Multi-tenant: DB column is userId but Prisma field is tenantId.
+  // Keep both optional to be compatible with existing code paths.
+  tenantId?: string;
+  userId?: string;
+
+  nif?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  contactName?: string | null;
+  address?: string | null;
+  notes?: string | null;
+
+  isActive?: boolean;
+
+  createdAt?: Date | string;
+  updatedAt?: Date | string;
 }
 
 // Define the Category interface

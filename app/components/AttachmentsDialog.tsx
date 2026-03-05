@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { ReactNode, useEffect, useMemo, useState } from "react";
 import axiosInstance from "@/utils/axiosInstance";
 import { Button } from "@/components/ui/button";
 import {
@@ -39,21 +39,22 @@ const formatBytes = (bytes: number) => {
   return `${size.toFixed(idx === 0 ? 0 : 1)} ${units[idx]}`;
 };
 
+type BaseProps = {
+  buttonText?: string;
+  title?: string;
+  description?: string;
+  trigger?: ReactNode;
+};
+
 type Props =
-  | {
+  | (BaseProps & {
       kind: "INVOICE";
       invoiceId: string;
-      buttonText?: string;
-      title?: string;
-      description?: string;
-    }
-  | {
+    })
+  | (BaseProps & {
       kind: "REQUEST";
       requestId: string;
-      buttonText?: string;
-      title?: string;
-      description?: string;
-    };
+    });
 
 export default function AttachmentsDialog(props: Props) {
   const { toast } = useToast();
@@ -150,9 +151,11 @@ export default function AttachmentsDialog(props: Props) {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm">
-          {buttonText}
-        </Button>
+        {props.trigger ?? (
+          <Button variant="outline" size="sm">
+            {buttonText}
+          </Button>
+        )}
       </DialogTrigger>
       <DialogContent className="sm:max-w-[720px]">
         <DialogHeader>

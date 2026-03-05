@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect } from "react";
+import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
 import axiosInstance from "@/utils/axiosInstance";
 import { getSessionClient } from "@/utils/authClient";
 
@@ -9,10 +9,17 @@ interface User {
   name?: string;
   email: string;
   role?: "USER" | "ADMIN";
+  tenantId?: string;
+  isActive?: boolean;
+  mustChangePassword?: boolean;
+  requestingServiceId?: number | null;
+  permissions?: string[];
+  permissionGrants?: Array<{ key: string; requestingServiceId: number | null }>;
 }
 
 interface AuthContextType {
   isLoggedIn: boolean;
+  isAuthLoading: boolean;
   user: User | null;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -24,7 +31,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [user, setUser] = useState<User | null>(null);
+
+  const clearAuthData = useCallback(() => {
+    setIsLoggedIn(false);
+    setUser(null);
+    // Clear attributes from local storage
+    localStorage.setItem("isAuth", "false");
+    localStorage.setItem("isLoggedIn", "false");
+    localStorage.setItem("getSession", "");
+  }, []);
+
+  const forceLogout = useCallback(async () => {
+    try {
+      await axiosInstance.post("/auth/logout");
+    } catch {
+      // best effort
+    }
+    clearAuthData();
+    if (typeof window !== "undefined" && window.location.pathname !== "/login") {
+      window.location.assign("/login");
+    }
+  }, [clearAuthData]);
 
   useEffect(() => {
     // Initialize local storage with default values if not already set
@@ -51,47 +80,88 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     }
 
     const checkSession = async () => {
-      const session = await getSessionClient();
-      if (session) {
-        setIsLoggedIn(true);
-        setUser({
-          id: session.id,
-          name: session.name ?? undefined,
-          email: session.email,
-          role: session.role,
-        });
-        localStorage.setItem("isAuth", "true");
-        localStorage.setItem("isLoggedIn", "true");
-        localStorage.setItem("getSession", JSON.stringify(session));
-        return;
-      }
+      setIsAuthLoading(true);
+      try {
+        const session = await getSessionClient();
+        if (session) {
+          setIsLoggedIn(true);
+          setUser({
+            id: session.id,
+            name: session.name ?? undefined,
+            email: session.email,
+            role: session.role,
+            tenantId: (session as any).tenantId,
+            isActive: (session as any).isActive,
+            mustChangePassword: (session as any).mustChangePassword ?? false,
+            requestingServiceId: (session as any).requestingServiceId ?? null,
+            permissions: (session as any).permissions ?? [],
+            permissionGrants: (session as any).permissionGrants ?? [],
+          });
+          localStorage.setItem("isAuth", "true");
+          localStorage.setItem("isLoggedIn", "true");
+          localStorage.setItem("getSession", JSON.stringify(session));
+          return;
+        }
 
-      clearAuthData();
+        clearAuthData();
+      } finally {
+        setIsAuthLoading(false);
+      }
     };
 
     checkSession();
-  }, []);
+  }, [clearAuthData]);
+
+  useEffect(() => {
+    if (!isLoggedIn || !user?.id) return;
+
+    const es = new EventSource("/api/realtime/stream");
+    const onForceLogout = (ev: MessageEvent) => {
+      try {
+        const data = JSON.parse(ev.data) as { userId?: string };
+        if (data?.userId && data.userId !== user.id) return;
+      } catch {
+        // ignore malformed payload and force logout anyway
+      }
+      void forceLogout();
+    };
+
+    es.addEventListener("auth.force_logout", onForceLogout);
+    return () => {
+      es.removeEventListener("auth.force_logout", onForceLogout);
+      es.close();
+    };
+  }, [forceLogout, isLoggedIn, user?.id]);
 
   const login = async (email: string, password: string) => {
     try {
-      const response = await axiosInstance.post("/auth/login", {
+      await axiosInstance.post("/auth/login", {
         email,
         password,
       });
 
-      const result = response.data;
+      const session = await getSessionClient();
+      if (!session) {
+        throw new Error("Login succeeded but session could not be loaded");
+      }
+
       setIsLoggedIn(true);
       setUser({
-        id: result.userId,
-        name: result.userName,
-        email: result.userEmail,
-        role: result.userRole,
+        id: session.id,
+        name: session.name ?? undefined,
+        email: session.email,
+        role: session.role,
+        tenantId: (session as any).tenantId,
+        isActive: (session as any).isActive,
+        mustChangePassword: (session as any).mustChangePassword ?? false,
+        requestingServiceId: (session as any).requestingServiceId ?? null,
+        permissions: (session as any).permissions ?? [],
+        permissionGrants: (session as any).permissionGrants ?? [],
       });
 
-      // Set necessary attributes in local storage
       localStorage.setItem("isAuth", "true");
       localStorage.setItem("isLoggedIn", "true");
-      localStorage.setItem("getSession", JSON.stringify(result));
+      localStorage.setItem("getSession", JSON.stringify(session));
     } catch (error) {
       console.error("Error logging in:", error);
       throw error;
@@ -112,17 +182,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   };
 
-  const clearAuthData = () => {
-    setIsLoggedIn(false);
-    setUser(null);
-    // Clear attributes from local storage
-    localStorage.setItem("isAuth", "false");
-    localStorage.setItem("isLoggedIn", "false");
-    localStorage.setItem("getSession", "");
-  };
-
   return (
-    <AuthContext.Provider value={{ isLoggedIn, user, login, logout }}>
+    <AuthContext.Provider value={{ isLoggedIn, isAuthLoading, user, login, logout }}>
       {children}
     </AuthContext.Provider>
   );

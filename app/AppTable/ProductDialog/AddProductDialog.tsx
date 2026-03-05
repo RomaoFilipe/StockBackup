@@ -3,6 +3,9 @@
 
 import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Textarea } from "@/components/ui/textarea";
+import { QRCodeComponent } from "@/components/ui/qr-code";
 import {
   Dialog,
   DialogContent,
@@ -23,25 +26,51 @@ import SKU from "./_components/SKU";
 import Quantity from "./_components/Quantity";
 import Price from "./_components/Price";
 import { Product } from "@/app/types";
+import { useAuth } from "@/app/authContext";
+import axiosInstance from "@/utils/axiosInstance";
+
+type RequestingServiceDto = {
+  id: number;
+  codigo: string;
+  designacao: string;
+  ativo: boolean;
+};
 
 const ProductSchema = z.object({
+  // Fatura
+  invoiceNumber: z.string().min(1, "Nº de fatura é obrigatório").max(64),
+  reqNumber: z.string().max(64).optional(),
+  invoiceDate: z.string().min(1, "Data da fatura é obrigatória"),
+  reqDate: z.string().optional(),
+  invoiceNotes: z.string().max(500).optional(),
+
+  // Produto
   productName: z
     .string()
-    .min(1, "Product Name is required")
-    .max(100, "Product Name must be 100 characters or less"),
+    .min(1, "Nome do produto é obrigatório")
+    .max(100, "Nome do produto deve ter no máximo 100 caracteres"),
+  productDescription: z.string().max(1000).optional(),
   sku: z
     .string()
-    .min(1, "SKU is required")
-    .regex(/^[a-zA-Z0-9-_]+$/, "SKU must be alphanumeric"),
+    .min(1, "SKU é obrigatório")
+    .regex(/^[a-zA-Z0-9-_]+$/, "SKU deve ser alfanumérico"),
+  price: z.number().nonnegative("Preço não pode ser negativo"),
+
+  // Stock (por unidade)
   quantity: z
     .number()
-    .int("Quantity must be an integer")
-    .nonnegative("Quantity cannot be negative"),
-  price: z.number().nonnegative("Price cannot be negative"),
+    .int("Quantidade tem de ser um número inteiro")
+    .positive("Quantidade tem de ser maior que 0"),
 });
 
 interface ProductFormData {
+  invoiceNumber: string;
+  reqNumber?: string;
+  invoiceDate: string;
+  reqDate?: string;
+  invoiceNotes?: string;
   productName: string;
+  productDescription?: string;
   sku: string;
   quantity: number;
   price: number;
@@ -61,9 +90,15 @@ export default function AddProductDialog({
   const methods = useForm<ProductFormData>({
     resolver: zodResolver(ProductSchema),
     defaultValues: {
+      invoiceNumber: "",
+      reqNumber: "",
+      invoiceDate: new Date().toISOString().slice(0, 10),
+      reqDate: "",
+      invoiceNotes: "",
       productName: "",
+      productDescription: "",
       sku: "",
-      quantity: 0,
+      quantity: 1,
       price: 0.0,
     },
   });
@@ -72,8 +107,15 @@ export default function AddProductDialog({
 
   const [selectedCategory, setSelectedCategory] = useState<string>("");
   const [selectedSupplier, setSelectedSupplier] = useState<string>("");
+  const [isPatrimonializable, setIsPatrimonializable] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false); // Button loading state
   const dialogCloseRef = useRef<HTMLButtonElement | null>(null);
+  const [attachment, setAttachment] = useState<File | null>(null);
+  const [requestAttachment, setRequestAttachment] = useState<File | null>(null);
+  const [createdInvoiceId, setCreatedInvoiceId] = useState<string | null>(null);
+  const [createdUnitPreviewCodes, setCreatedUnitPreviewCodes] = useState<string[]>([]);
+  const [requestingServices, setRequestingServices] = useState<RequestingServiceDto[]>([]);
+  const [requestingServiceId, setRequestingServiceId] = useState<string>("");
 
   const {
     isLoading,
@@ -84,31 +126,70 @@ export default function AddProductDialog({
     addProduct,
     updateProduct,
     loadProducts,
+    loadCategories,
+    loadSuppliers,
     categories,
     suppliers,
   } = useProductStore();
+  const { isLoggedIn } = useAuth();
   const { toast } = useToast();
+
+  useEffect(() => {
+    if (isLoggedIn && openProductDialog) {
+      loadCategories();
+      loadSuppliers();
+
+      (async () => {
+        try {
+          const res = await axiosInstance.get("/requesting-services");
+          setRequestingServices(res.data || []);
+        } catch {
+          // optional: keep form usable even if services list fails
+          setRequestingServices([]);
+        }
+      })();
+    }
+  }, [isLoggedIn, openProductDialog, loadCategories, loadSuppliers]);
 
   useEffect(() => {
     if (selectedProduct) {
       reset({
+        invoiceNumber: "",
+        reqNumber: "",
+        invoiceDate: new Date().toISOString().slice(0, 10),
+        reqDate: "",
+        invoiceNotes: "",
         productName: selectedProduct.name,
+        productDescription: (selectedProduct as any).description ?? "",
         sku: selectedProduct.sku,
         quantity: selectedProduct.quantity,
         price: selectedProduct.price,
       });
       setSelectedCategory(selectedProduct.categoryId || "");
       setSelectedSupplier(selectedProduct.supplierId || "");
+      setIsPatrimonializable(Boolean((selectedProduct as any).isPatrimonializable));
     } else {
       // Reset form to default values for adding a new product
       reset({
+        invoiceNumber: "",
+        reqNumber: "",
+        invoiceDate: new Date().toISOString().slice(0, 10),
+        reqDate: "",
+        invoiceNotes: "",
         productName: "",
+        productDescription: "",
         sku: "",
-        quantity: 0,
+        quantity: 1,
         price: 0.0,
       });
       setSelectedCategory("");
       setSelectedSupplier("");
+      setAttachment(null);
+      setRequestAttachment(null);
+      setCreatedInvoiceId(null);
+      setCreatedUnitPreviewCodes([]);
+      setRequestingServiceId("");
+      setIsPatrimonializable(false);
     }
   }, [selectedProduct, openProductDialog, reset]);
 
@@ -124,48 +205,90 @@ export default function AddProductDialog({
 
     try {
       if (!selectedProduct) {
-        const newProduct: Product = {
-          id: Date.now().toString(),
-          supplierId: selectedSupplier,
-          name: data.productName,
-          price: data.price,
-          quantity: data.quantity,
-          sku: data.sku,
-          status,
-          categoryId: selectedCategory,
-          createdAt: new Date(),
-          userId: userId,
-        };
-
-        const result = await addProduct(newProduct);
-
-        if (result.success) {
+        if (!selectedCategory || !selectedSupplier) {
           toast({
-            title: "Product Created Successfully!",
-            description: `"${data.productName}" has been added to your inventory.`,
-          });
-          dialogCloseRef.current?.click();
-          loadProducts();
-          setOpenProductDialog(false);
-        } else {
-          toast({
-            title: "Creation Failed",
-            description: "Failed to create the product. Please try again.",
+            title: "Campos em falta",
+            description: "Seleciona a categoria e o fornecedor.",
             variant: "destructive",
           });
+          return;
         }
+
+        // Create product + invoice + per-unit QR codes
+        const intakeRes = await axiosInstance.post("/intake", {
+          invoiceNumber: data.invoiceNumber,
+          reqNumber: data.reqNumber || undefined,
+          issuedAt: data.invoiceDate ? new Date(data.invoiceDate).toISOString() : undefined,
+          reqDate: data.reqDate?.trim() ? new Date(data.reqDate).toISOString() : undefined,
+          notes: data.invoiceNotes || undefined,
+          requestingServiceId: requestingServiceId ? Number(requestingServiceId) : undefined,
+          quantity: data.quantity,
+          unitPrice: data.price,
+          product: {
+            name: data.productName,
+            description: data.productDescription || undefined,
+            sku: data.sku,
+            price: data.price,
+            categoryId: selectedCategory,
+            supplierId: selectedSupplier,
+            isPatrimonializable,
+          },
+        });
+
+        const created = intakeRes.data as {
+          product: any;
+          invoice: { id: string };
+          units: { count: number; previewCodes: string[] };
+        };
+
+        setCreatedInvoiceId(created.invoice.id);
+        setCreatedUnitPreviewCodes(created.units.previewCodes || []);
+
+        // Upload invoice attachment (optional) linked to invoiceId
+        if (attachment) {
+          const form = new FormData();
+          form.append("kind", "INVOICE");
+          form.append("invoiceId", created.invoice.id);
+          form.append("file", attachment);
+          await fetch("/api/storage", {
+            method: "POST",
+            body: form,
+          });
+        }
+
+        // Upload request attachment (optional) also linked to invoiceId
+        if (requestAttachment) {
+          const form = new FormData();
+          form.append("kind", "INVOICE");
+          form.append("invoiceId", created.invoice.id);
+          form.append("file", requestAttachment);
+          await fetch("/api/storage", {
+            method: "POST",
+            body: form,
+          });
+        }
+
+        toast({
+          title: "Entrada registada",
+          description: `Fatura criada, anexos guardados (se escolhidos) e ${data.quantity} QR(s) gerado(s) por unidade.`,
+        });
+
+        // Refresh list
+        await loadProducts();
       } else {
         const productToUpdate: Product = {
           id: selectedProduct.id,
           createdAt: new Date(selectedProduct.createdAt), // Convert string to Date
           supplierId: selectedSupplier,
           name: data.productName,
+          description: data.productDescription || null,
           price: data.price,
           quantity: data.quantity,
           sku: data.sku,
           status,
           categoryId: selectedCategory,
           userId: selectedProduct.userId,
+          isPatrimonializable,
         };
 
         const result = await updateProduct(productToUpdate);
@@ -221,52 +344,309 @@ export default function AddProductDialog({
           </DialogTitle>
         </DialogHeader>
         <DialogDescription id="dialog-description">
-          Preenche os dados do produto para o adicionar ao inventário.
+          {selectedProduct
+            ? "Atualiza os dados do produto."
+            : "Regista a entrada por fatura e gera 1 QR por unidade."}
         </DialogDescription>
         <FormProvider {...methods}>
           <form onSubmit={methods.handleSubmit(onSubmit)}>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <ProductName />
-              <SKU allProducts={allProducts} />
-              <Quantity />
-              <Price />
-              <div>
-                <label htmlFor="category" className="block text-sm font-medium">
-                  Categoria
-                </label>
-                <select
-                  id="category"
-                  value={selectedCategory}
-                  onChange={(e) => setSelectedCategory(e.target.value)}
-                  className="mt-1 h-11 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                >
-                  <option value="">Selecionar categoria</option>
-                  {categories.map((category) => (
-                    <option key={category.id} value={category.id}>
-                      {category.name}
-                    </option>
-                  ))}
-                </select>
+            {!selectedProduct ? (
+              <div className="grid grid-cols-1 gap-4">
+                <Card className="border-border/60">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-base">1) Fatura</CardTitle>
+                  </CardHeader>
+                  <CardContent className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium">Fatura Nº</label>
+                      <input
+                        className="h-11 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm"
+                        {...methods.register("invoiceNumber")}
+                        placeholder="FT 2026/0001"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium">REQ Nº</label>
+                      <input
+                        className="h-11 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm"
+                        {...methods.register("reqNumber")}
+                        placeholder="REQ-1234"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium">Data da fatura</label>
+                      <input
+                        type="date"
+                        className="h-11 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm"
+                        {...methods.register("invoiceDate")}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium">Data da REQ</label>
+                      <input
+                        type="date"
+                        className="h-11 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm"
+                        {...methods.register("reqDate")}
+                      />
+                    </div>
+
+                    <div className="space-y-1 sm:col-span-2">
+                      <label className="text-sm font-medium">Serviço requisitante (opcional)</label>
+                      <select
+                        value={requestingServiceId}
+                        onChange={(e) => setRequestingServiceId(e.target.value)}
+                        className="h-11 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm"
+                      >
+                        <option value="">(Sem serviço)</option>
+                        {requestingServices.map((s) => (
+                          <option key={s.id} value={String(s.id)}>
+                            {s.codigo} — {s.designacao}
+                          </option>
+                        ))}
+                      </select>
+                      {requestingServices.length === 0 ? (
+                        <div className="text-xs text-muted-foreground">Lista de serviços indisponível.</div>
+                      ) : null}
+                    </div>
+
+                    <div className="space-y-1 sm:col-span-2">
+                      <label className="text-sm font-medium">Notas</label>
+                      <Textarea
+                        {...methods.register("invoiceNotes")}
+                        placeholder="Observações da fatura (opcional)"
+                        className="min-h-[90px]"
+                      />
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="border-border/60">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-base">2) Produto</CardTitle>
+                  </CardHeader>
+                  <CardContent className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div className="space-y-1 sm:col-span-2">
+                      <label className="text-sm font-medium">Nome do Produto</label>
+                      <input
+                        className="h-11 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm"
+                        {...methods.register("productName")}
+                        placeholder="Laptop HP 300 G3"
+                      />
+                    </div>
+                    <div className="space-y-1 sm:col-span-2">
+                      <label className="text-sm font-medium">Descrição do Produto</label>
+                      <Textarea
+                        {...methods.register("productDescription")}
+                        placeholder="Descrição (opcional)"
+                        className="min-h-[90px]"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium">SKU</label>
+                      <input
+                        className="h-11 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm"
+                        {...methods.register("sku")}
+                        placeholder="HP300G3-001"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium">Preço (unitário)</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        className="h-11 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm"
+                        {...methods.register("price", { valueAsNumber: true })}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium">Categoria</label>
+                      <select
+                        value={selectedCategory}
+                        onChange={(e) => setSelectedCategory(e.target.value)}
+                        className="h-11 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm"
+                      >
+                        <option value="">Selecionar categoria</option>
+                        {categories.map((category) => (
+                          <option key={category.id} value={category.id}>
+                            {category.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium">Fornecedor</label>
+                      <select
+                        value={selectedSupplier}
+                        onChange={(e) => setSelectedSupplier(e.target.value)}
+                        className="h-11 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm"
+                      >
+                        <option value="">Selecionar fornecedor</option>
+                        {suppliers.map((supplier) => (
+                          <option key={supplier.id} value={supplier.id}>
+                            {supplier.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="space-y-1 sm:col-span-2">
+                      <label className="text-sm font-medium">Tipo de bem</label>
+                      <div className="flex items-center gap-2 rounded-md border border-input px-3 py-2">
+                        <input
+                          id="isPatrimonializable"
+                          type="checkbox"
+                          checked={isPatrimonializable}
+                          onChange={(e) => setIsPatrimonializable(e.target.checked)}
+                        />
+                        <label htmlFor="isPatrimonializable" className="text-sm">
+                          Equipamento/Património (criar/ligar ativo em execução de requisição)
+                        </label>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="border-border/60">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-base">3) Stock</CardTitle>
+                  </CardHeader>
+                  <CardContent className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium">Quantidade (unidades)</label>
+                      <input
+                        type="number"
+                        step="1"
+                        className="h-11 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm"
+                        {...methods.register("quantity", { valueAsNumber: true })}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Vai gerar 1 QR por unidade.
+                      </p>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="border-border/60">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-base">4) Anexos</CardTitle>
+                  </CardHeader>
+                  <CardContent className="grid grid-cols-1 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium">Cópia da fatura</label>
+                      <input
+                        type="file"
+                        accept="application/pdf,image/*"
+                        className="block w-full text-sm"
+                        onChange={(e) => setAttachment(e.target.files?.[0] ?? null)}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        PDF ou imagem. (Opcional)
+                      </p>
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium">Cópia do pedido/requisição (se existir)</label>
+                      <input
+                        type="file"
+                        accept="application/pdf,image/*"
+                        className="block w-full text-sm"
+                        onChange={(e) => setRequestAttachment(e.target.files?.[0] ?? null)}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        PDF ou imagem. (Opcional)
+                      </p>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="border-border/60">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-base">5) QRs (pré-visualização)</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {!createdInvoiceId ? (
+                      <p className="text-sm text-muted-foreground">
+                        Depois de guardar, vais ver aqui uma pré-visualização dos QRs.
+                      </p>
+                    ) : (
+                      <div className="space-y-3">
+                        <p className="text-sm text-muted-foreground">
+                          Fatura criada. Pré-visualização de alguns QRs (podes listar todos via fatura).
+                        </p>
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                          {createdUnitPreviewCodes.map((code) => (
+                            <QRCodeComponent
+                              key={code}
+                              data={`${typeof window !== "undefined" ? window.location.origin : ""}/scan/${code}`}
+                              title="QR • Unidade"
+                              size={180}
+                              showDownload
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
               </div>
-              <div>
-                <label htmlFor="supplier" className="block text-sm font-medium">
-                  Fornecedor
-                </label>
-                <select
-                  id="supplier"
-                  value={selectedSupplier}
-                  onChange={(e) => setSelectedSupplier(e.target.value)}
-                  className="mt-1 h-11 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                >
-                  <option value="">Selecionar fornecedor</option>
-                  {suppliers.map((supplier) => (
-                    <option key={supplier.id} value={supplier.id}>
-                      {supplier.name}
-                    </option>
-                  ))}
-                </select>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <ProductName />
+                <SKU allProducts={allProducts} />
+                <Quantity />
+                <Price />
+                <div>
+                  <label htmlFor="category" className="block text-sm font-medium">
+                    Categoria
+                  </label>
+                  <select
+                    id="category"
+                    value={selectedCategory}
+                    onChange={(e) => setSelectedCategory(e.target.value)}
+                    className="mt-1 h-11 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  >
+                    <option value="">Selecionar categoria</option>
+                    {categories.map((category) => (
+                      <option key={category.id} value={category.id}>
+                        {category.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label htmlFor="supplier" className="block text-sm font-medium">
+                    Fornecedor
+                  </label>
+                  <select
+                    id="supplier"
+                    value={selectedSupplier}
+                    onChange={(e) => setSelectedSupplier(e.target.value)}
+                    className="mt-1 h-11 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  >
+                    <option value="">Selecionar fornecedor</option>
+                    {suppliers.map((supplier) => (
+                      <option key={supplier.id} value={supplier.id}>
+                        {supplier.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-sm font-medium">Tipo de bem</label>
+                  <div className="mt-1 flex items-center gap-2 rounded-md border border-input px-3 py-2">
+                    <input
+                      id="isPatrimonializableEdit"
+                      type="checkbox"
+                      checked={isPatrimonializable}
+                      onChange={(e) => setIsPatrimonializable(e.target.checked)}
+                    />
+                    <label htmlFor="isPatrimonializableEdit" className="text-sm">
+                      Equipamento/Património
+                    </label>
+                  </div>
+                </div>
               </div>
-            </div>
+            )}
             <DialogFooter className="mt-9 mb-4 flex flex-col sm:flex-row items-center gap-4">
               <DialogClose asChild>
                 <Button
@@ -286,7 +666,7 @@ export default function AddProductDialog({
                   ? "A guardar..."
                   : selectedProduct
                   ? "Atualizar produto"
-                  : "Adicionar produto"}
+                  : "Guardar entrada"}
               </Button>
             </DialogFooter>
           </form>

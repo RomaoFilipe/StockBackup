@@ -15,12 +15,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(400).json({ error: "Invalid file id" });
   }
 
-  const userId = session.id;
+  const tenantId = session.tenantId;
 
   if (req.method === "GET") {
     try {
       const file = await prisma.storedFile.findFirst({
-        where: { id, userId },
+        where: { id, tenantId },
       });
 
       if (!file) {
@@ -34,9 +34,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       res.setHeader("Content-Type", file.mimeType);
       res.setHeader("Content-Length", String(file.sizeBytes));
+
+      const downloadName = String(file.originalName).replace(/[\r\n\0]/g, " ");
       res.setHeader(
         "Content-Disposition",
-        `attachment; filename="${encodeURIComponent(file.originalName)}"`
+        `attachment; filename="${encodeURIComponent(downloadName)}"`
       );
 
       const stream = fs.createReadStream(absPath);
@@ -58,7 +60,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   if (req.method === "DELETE") {
     try {
-      const file = await prisma.storedFile.findFirst({ where: { id, userId } });
+      const file = await prisma.storedFile.findFirst({ where: { id, tenantId } });
+
       if (!file) {
         return res.status(404).json({ error: "File not found" });
       }

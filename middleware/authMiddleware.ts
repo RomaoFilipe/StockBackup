@@ -7,7 +7,6 @@ export const authMiddleware = async (
   next: () => void
 ) => {
   const user = await getSessionServer(req, res);
-  console.log("User from middleware:", user);
   if (!user) {
     return res.status(401).json({ error: "Unauthorized" });
   }

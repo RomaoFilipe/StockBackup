@@ -25,7 +25,7 @@ export default function AddCategoryDialog({ trigger }: { trigger?: React.ReactNo
   const [newCategoryName, setNewCategoryName] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false); // Button loading state
   const [isEditing, setIsEditing] = useState(false); // Loading state for edit
-  const [isDeleting, setIsDeleting] = useState(false); // Loading state for delete
+  const [deletingCategoryId, setDeletingCategoryId] = useState<string | null>(null);
   const {
     categories,
     addCategory,
@@ -45,8 +45,8 @@ export default function AddCategoryDialog({ trigger }: { trigger?: React.ReactNo
   const handleAddCategory = async () => {
     if (categoryName.trim() === "") {
       toast({
-        title: "Error",
-        description: "Category name cannot be empty",
+        title: "Erro",
+        description: "O nome da categoria não pode estar vazio.",
         variant: "destructive",
       });
       return;
@@ -67,14 +67,15 @@ export default function AddCategoryDialog({ trigger }: { trigger?: React.ReactNo
       addCategory(newCategory);
       setCategoryName("");
       toast({
-        title: "Category Created Successfully!",
-        description: `"${categoryName}" has been added to your categories.`,
+        title: "Categoria criada",
+        description: `"${categoryName}" foi adicionada.`,
       });
+      loadCategories();
     } catch (error) {
       console.error("Error adding category:", error);
       toast({
-        title: "Creation Failed",
-        description: "Failed to create the category. Please try again.",
+        title: "Falha ao criar",
+        description: "Não foi possível criar a categoria. Tenta novamente.",
         variant: "destructive",
       });
     } finally {
@@ -85,8 +86,8 @@ export default function AddCategoryDialog({ trigger }: { trigger?: React.ReactNo
   const handleEditCategory = async (categoryId: string) => {
     if (newCategoryName.trim() === "") {
       toast({
-        title: "Error",
-        description: "Category name cannot be empty",
+        title: "Erro",
+        description: "O nome da categoria não pode estar vazio.",
         variant: "destructive",
       });
       return;
@@ -108,14 +109,15 @@ export default function AddCategoryDialog({ trigger }: { trigger?: React.ReactNo
       setEditingCategory(null);
       setNewCategoryName("");
       toast({
-        title: "Category Updated Successfully!",
-        description: `"${newCategoryName}" has been updated in your categories.`,
+        title: "Categoria atualizada",
+        description: `"${updatedCategory.name}" foi atualizada.`,
       });
+      loadCategories();
     } catch (error) {
       console.error("Error editing category:", error);
       toast({
-        title: "Update Failed",
-        description: "Failed to update the category. Please try again.",
+        title: "Falha ao atualizar",
+        description: "Não foi possível atualizar a categoria. Tenta novamente.",
         variant: "destructive",
       });
     } finally {
@@ -124,7 +126,7 @@ export default function AddCategoryDialog({ trigger }: { trigger?: React.ReactNo
   };
 
   const handleDeleteCategory = async (categoryId: string) => {
-    setIsDeleting(true); // Start loading
+    setDeletingCategoryId(categoryId);
 
     // Find the category name before deleting for the toast message
     const categoryToDelete = categories.find(cat => cat.id === categoryId);
@@ -141,18 +143,19 @@ export default function AddCategoryDialog({ trigger }: { trigger?: React.ReactNo
 
       deleteCategory(categoryId);
       toast({
-        title: "Category Deleted Successfully!",
-        description: `"${categoryName}" has been permanently deleted.`,
+        title: "Categoria removida",
+        description: `"${categoryName}" foi removida.`,
       });
+      loadCategories();
     } catch (error) {
       console.error("Error deleting category:", error);
       toast({
-        title: "Delete Failed",
-        description: "Failed to delete the category. Please try again.",
+        title: "Falha ao remover",
+        description: "Não foi possível remover a categoria. Tenta novamente.",
         variant: "destructive",
       });
     } finally {
-      setIsDeleting(false); // Stop loading
+      setDeletingCategoryId(null);
     }
   };
 
@@ -193,15 +196,17 @@ export default function AddCategoryDialog({ trigger }: { trigger?: React.ReactNo
           <Button
             onClick={handleAddCategory}
             className="h-11 w-full sm:w-auto px-11"
-            disabled={isSubmitting} // Button loading effect
+            isLoading={isSubmitting}
           >
-            {isSubmitting ? "A criar..." : "Adicionar categoria"}
+            Adicionar categoria
           </Button>
         </DialogFooter>
         <div className="mt-4">
           <h3 className="text-lg font-semibold">Categorias</h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mt-4">
-            {categories.map((category) => (
+            {categories
+              .filter((category) => category.userId === user?.id)
+              .map((category) => (
               <div
                 key={category.id}
                 className="p-4 border rounded-lg shadow-sm flex flex-col justify-between"
@@ -218,15 +223,16 @@ export default function AddCategoryDialog({ trigger }: { trigger?: React.ReactNo
                       <Button
                         onClick={() => handleEditCategory(category.id)}
                         className="h-8 w-full"
-                        disabled={isEditing}
+                        isLoading={isEditing}
                       >
-                        {isEditing ? "Saving..." : "Save"}
+                        Guardar
                       </Button>
                       <Button
                         onClick={() => setEditingCategory(null)}
+                        variant="outline"
                         className="h-8 w-full"
                       >
-                        Cancel
+                        Cancelar
                       </Button>
                     </div>
                   </div>
@@ -239,16 +245,18 @@ export default function AddCategoryDialog({ trigger }: { trigger?: React.ReactNo
                           setEditingCategory(category.id);
                           setNewCategoryName(category.name);
                         }}
+                        variant="outline"
                         className="h-8 w-full"
                       >
                         <FaEdit />
                       </Button>
                       <Button
                         onClick={() => handleDeleteCategory(category.id)}
+                        variant="destructive"
                         className="h-8 w-full"
-                        disabled={isDeleting}
+                        isLoading={deletingCategoryId === category.id}
                       >
-                        {isDeleting ? "Deleting..." : <FaTrash />}
+                        <FaTrash />
                       </Button>
                     </div>
                   </div>

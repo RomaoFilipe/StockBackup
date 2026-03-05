@@ -2,21 +2,204 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { z } from "zod";
 import { prisma } from "@/prisma/client";
 import { getSessionServer } from "@/utils/auth";
+import { createRequestStatusAudit, notifyAdmin, notifyUser } from "@/utils/notifications";
+import { publishRealtimeEvent } from "@/utils/realtime";
+import { createTicketAudit } from "@/pages/api/tickets/_utils";
+import { getUserPermissionGrants, hasPermission } from "@/utils/rbac";
+import { ensureRequestWorkflowDefinition, ensureRequestWorkflowInstance, transitionRequestWorkflowByActionTx } from "@/utils/workflow";
+
+const goodsTypeSchema = z.enum(["MATERIALS_SERVICES", "WAREHOUSE_MATERIALS", "OTHER_PRODUCTS"]);
+const requestTypeSchema = z.enum(["STANDARD", "RETURN"]);
+const requestItemRoleSchema = z.enum(["NORMAL", "OLD", "NEW"]);
+
+const dateLikeString = z
+  .string()
+  .min(1)
+  .refine((v) => !Number.isNaN(new Date(v).getTime()), "Invalid date")
+  .transform((v) => new Date(v));
 
 const createRequestSchema = z.object({
-  asUserId: z.string().uuid().optional(),
   title: z.string().min(1).max(120).optional(),
   notes: z.string().max(1000).optional(),
+  requestedAt: dateLikeString.optional(),
+  priority: z.enum(["LOW", "NORMAL", "HIGH", "URGENT"]).optional(),
+  dueAt: dateLikeString.optional(),
+  requestType: requestTypeSchema.optional(),
+  autoSubmit: z.boolean().optional(),
+
+  requestingServiceId: z.number().int(),
+  requesterName: z.string().max(120).optional(),
+  requesterEmployeeNo: z.string().max(60).optional(),
+  deliveryLocation: z.string().max(200).optional(),
+  expectedDeliveryFrom: dateLikeString.optional(),
+  expectedDeliveryTo: dateLikeString.optional(),
+  goodsTypes: z.array(goodsTypeSchema).optional(),
+
+  supplierOption1: z.string().max(200).optional(),
+  supplierOption2: z.string().max(200).optional(),
+  supplierOption3: z.string().max(200).optional(),
+  ticketId: z.string().uuid().optional(),
   items: z
     .array(
       z.object({
         productId: z.string().uuid(),
         quantity: z.number().int().positive(),
         notes: z.string().max(500).optional(),
+        unit: z.string().max(60).optional(),
+        reference: z.string().max(120).optional(),
+        destination: z.string().max(120).optional(),
+        role: requestItemRoleSchema.optional(),
       })
     )
     .min(1),
 });
+
+function formatGtmiNumber(gtmiYear: number, gtmiSeq: number) {
+  return `GTMI-${gtmiYear}-${String(gtmiSeq).padStart(6, "0")}`;
+}
+
+async function createRequestWithGtmiSeq(args: {
+  tenantId: string;
+  userId: string;
+  createdByUserId: string;
+  autoSubmit: boolean;
+  title?: string;
+  notes?: string;
+  requestedAt: Date;
+  priority?: "LOW" | "NORMAL" | "HIGH" | "URGENT";
+  dueAt?: Date;
+  requestType: z.infer<typeof requestTypeSchema>;
+  requestingService?: string;
+  requestingServiceId?: number;
+  requesterName?: string;
+  requesterEmployeeNo?: string;
+  deliveryLocation?: string;
+  expectedDeliveryFrom?: Date;
+  expectedDeliveryTo?: Date;
+  goodsTypes: Array<z.infer<typeof goodsTypeSchema>>;
+  supplierOption1?: string;
+  supplierOption2?: string;
+  supplierOption3?: string;
+  items: Array<{
+    productId: string;
+    quantity: number;
+    notes?: string;
+    unit?: string;
+    reference?: string;
+    destination?: string;
+    role?: z.infer<typeof requestItemRoleSchema>;
+  }>;
+}) {
+  const gtmiYear = args.requestedAt.getFullYear();
+
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      return await prisma.$transaction(async (tx) => {
+        const txAny = tx as any;
+
+        const maxSeq = await tx.request.aggregate({
+          where: { tenantId: args.tenantId, gtmiYear },
+          _max: { gtmiSeq: true },
+        });
+
+        const nextSeq = (maxSeq._max.gtmiSeq ?? 0) + 1;
+        const gtmiNumber = formatGtmiNumber(gtmiYear, nextSeq);
+
+        const created = await tx.request.create({
+          data: {
+            tenantId: args.tenantId,
+            userId: args.userId,
+            createdByUserId: args.createdByUserId,
+            status: "DRAFT",
+            requestType: args.requestType,
+
+            title: args.title,
+            notes: args.notes,
+
+            gtmiYear,
+            gtmiSeq: nextSeq,
+            gtmiNumber,
+            requestedAt: args.requestedAt,
+            priority: args.priority ?? "NORMAL",
+            dueAt: args.dueAt ?? null,
+
+            requestingService: args.requestingService,
+            requestingServiceId: typeof args.requestingServiceId === "number" ? args.requestingServiceId : null,
+            requesterName: args.requesterName,
+            requesterEmployeeNo: args.requesterEmployeeNo,
+            deliveryLocation: args.deliveryLocation,
+            expectedDeliveryFrom: args.expectedDeliveryFrom,
+            expectedDeliveryTo: args.expectedDeliveryTo,
+            goodsTypes: args.goodsTypes,
+            supplierOption1: args.supplierOption1,
+            supplierOption2: args.supplierOption2,
+            supplierOption3: args.supplierOption3,
+
+            items: {
+              create: args.items.map((i) => ({
+                productId: i.productId,
+                quantity: BigInt(i.quantity) as any,
+                notes: i.notes,
+                unit: i.unit,
+                reference: i.reference,
+                destination: i.destination,
+                role: i.role ?? "NORMAL",
+              })),
+            },
+          },
+          include: {
+            user: { select: { id: true, name: true, email: true } },
+            createdBy: { select: { id: true, name: true, email: true } },
+            items: {
+              include: { product: { select: { id: true, name: true, sku: true } } },
+              orderBy: { createdAt: "asc" },
+            },
+          },
+        });
+
+        await ensureRequestWorkflowInstance(tx, {
+          tenantId: args.tenantId,
+          requestId: created.id,
+        });
+
+        if (args.autoSubmit) {
+          await transitionRequestWorkflowByActionTx(tx, {
+            tenantId: args.tenantId,
+            requestId: created.id,
+            action: "SUBMIT",
+            actorUserId: args.createdByUserId,
+            note: "auto-submit",
+          });
+        }
+
+        // Warehouse execution is now explicit and happens in /api/requests/[id]/execute.
+        // At creation time we only register the request intent and its requested lines.
+
+        const final = await tx.request.findUnique({
+          where: { id: created.id },
+          include: {
+            user: { select: { id: true, name: true, email: true } },
+            createdBy: { select: { id: true, name: true, email: true } },
+            items: {
+              include: { product: { select: { id: true, name: true, sku: true } } },
+              orderBy: { createdAt: "asc" },
+            },
+          },
+        });
+
+        return final ?? created;
+      });
+    } catch (error: any) {
+      // P2002 = Unique constraint violation (race on gtmiSeq or gtmiNumber)
+      if (error?.code === "P2002" && attempt < 4) {
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  throw new Error("Failed to allocate GTMI sequence");
+}
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const session = await getSessionServer(req, res);
@@ -24,53 +207,174 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(401).json({ error: "Unauthorized" });
   }
 
+  const tenantId = session.tenantId;
+
   const isAdmin = session.role === "ADMIN";
   const asUserIdFromQuery = typeof req.query.asUserId === "string" ? req.query.asUserId : undefined;
-  const userId = isAdmin && asUserIdFromQuery ? asUserIdFromQuery : session.id;
+  const mineFlag = typeof req.query.mine === "string" ? req.query.mine : undefined;
+  const mine = mineFlag === "1" || mineFlag === "true";
+  const paged = String(req.query.paged ?? "") === "1" || String(req.query.paged ?? "") === "true";
+
+  const permissionGrants = await getUserPermissionGrants(prisma, {
+    id: session.id,
+    tenantId,
+    role: session.role,
+  });
+
+  // By default, requests are tenant-wide (visible to all users in the tenant).
+  // Optional filters:
+  // - mine=1: only the current user's requests
+  // - asUserId=<uuid>: only allowed for ADMIN, filter by request owner
+  const userIdFilter = isAdmin && asUserIdFromQuery ? asUserIdFromQuery : mine ? session.id : undefined;
 
   if (req.method === "GET") {
-    try {
-      const requests = await prisma.request.findMany({
-        where: { userId },
-        orderBy: { createdAt: "desc" },
-        include: {
-          user: { select: { id: true, name: true, email: true } },
-          createdBy: { select: { id: true, name: true, email: true } },
-          invoices: {
-            select: {
-              id: true,
-              invoiceNumber: true,
-              issuedAt: true,
-              productId: true,
-            },
-            orderBy: { issuedAt: "desc" },
-          },
-          items: {
-            include: {
-              product: { select: { id: true, name: true, sku: true } },
-            },
-            orderBy: { createdAt: "asc" },
-          },
-        },
-      });
+    // Self-service list: allow any authenticated user, but only for their own requests.
+    if (mine && userIdFilter !== session.id) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
 
-      return res.status(200).json(
-        requests.map((r) => ({
-          ...r,
-          createdAt: r.createdAt.toISOString(),
-          updatedAt: r.updatedAt.toISOString(),
-          invoices: r.invoices.map((inv) => ({
-            ...inv,
-            issuedAt: inv.issuedAt.toISOString(),
-          })),
-          items: r.items.map((it) => ({
-            ...it,
-            quantity: Number(it.quantity),
-            createdAt: it.createdAt.toISOString(),
-            updatedAt: it.updatedAt.toISOString(),
-          })),
-        }))
+    // Backoffice list: requires requests.view (scoped).
+    if (!mine) {
+      const hasWildcard = permissionGrants.some((g) => g.key === "*");
+      const hasGlobalView = hasWildcard || permissionGrants.some((g) => g.key === "requests.view" && g.requestingServiceId == null);
+      const allowedServiceIds = Array.from(
+        new Set(
+          permissionGrants
+            .filter((g) => g.key === "requests.view" && typeof g.requestingServiceId === "number" && Number.isFinite(g.requestingServiceId))
+            .map((g) => g.requestingServiceId as number),
+        ),
       );
+
+      if (!hasGlobalView && allowedServiceIds.length === 0) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      // Enforce scope in query (unless the user has a global grant).
+      if (!hasGlobalView) {
+        (req as any).__rbacAllowedServiceIds = allowedServiceIds;
+      }
+    }
+
+    try {
+      const page = Math.max(1, Number(req.query.page || 1) || 1);
+      const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize || 20) || 20));
+      const statusParam = typeof req.query.status === "string" ? req.query.status.trim() : "";
+      const priorityParam = typeof req.query.priority === "string" ? req.query.priority.trim() : "";
+      const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
+      const dateFrom = typeof req.query.dateFrom === "string" && req.query.dateFrom ? new Date(req.query.dateFrom) : null;
+      const dateTo = typeof req.query.dateTo === "string" && req.query.dateTo ? new Date(req.query.dateTo) : null;
+
+      const rbacAllowedServiceIds = ((req as any).__rbacAllowedServiceIds ?? null) as number[] | null;
+
+      const where: any = {
+        tenantId,
+        ...(userIdFilter ? { userId: userIdFilter } : {}),
+        ...(rbacAllowedServiceIds ? { requestingServiceId: { in: rbacAllowedServiceIds } } : {}),
+        ...(statusParam ? { status: statusParam } : {}),
+        ...(priorityParam ? { priority: priorityParam } : {}),
+        ...(q
+          ? {
+              OR: [
+                { gtmiNumber: { contains: q, mode: "insensitive" as const } },
+                { title: { contains: q, mode: "insensitive" as const } },
+                { requesterName: { contains: q, mode: "insensitive" as const } },
+                { requestingService: { contains: q, mode: "insensitive" as const } },
+              ],
+            }
+          : {}),
+        ...(dateFrom || dateTo
+          ? {
+              requestedAt: {
+                ...(dateFrom && !Number.isNaN(dateFrom.getTime()) ? { gte: dateFrom } : {}),
+                ...(dateTo && !Number.isNaN(dateTo.getTime()) ? { lte: dateTo } : {}),
+              },
+            }
+          : {}),
+      };
+
+      const [requests, total] = await Promise.all([
+        prisma.request.findMany({
+          where,
+          orderBy: { requestedAt: "desc" },
+          include: {
+            user: { select: { id: true, name: true, email: true } },
+            createdBy: { select: { id: true, name: true, email: true } },
+            signedBy: { select: { id: true, name: true, email: true } },
+            requestingServiceRef: { select: { id: true, codigo: true, designacao: true, ativo: true } },
+            invoices: {
+              select: {
+                id: true,
+                invoiceNumber: true,
+                issuedAt: true,
+                productId: true,
+              },
+              orderBy: { issuedAt: "desc" },
+            },
+            items: {
+              include: {
+                product: { select: { id: true, name: true, sku: true } },
+              },
+              orderBy: { createdAt: "asc" },
+            },
+          },
+          ...(paged ? { skip: (page - 1) * pageSize, take: pageSize } : {}),
+        }),
+        paged ? prisma.request.count({ where }) : Promise.resolve(0),
+      ]);
+
+      const requestIds = requests.map((r) => r.id);
+      const workflowRows = requestIds.length
+        ? await (prisma as any).workflowInstance.findMany({
+            where: { tenantId, requestId: { in: requestIds } },
+            select: {
+              requestId: true,
+              currentState: { select: { code: true, name: true } },
+            },
+          })
+        : [];
+      const workflowByRequestId = new Map(
+        workflowRows.map((w: any) => [w.requestId, w.currentState ? { code: w.currentState.code, name: w.currentState.name } : null]),
+      );
+
+      const mapped = requests.map((r) => {
+          const { pickupSignatureDataUrl: _pickupSignatureDataUrl, ...rest } = r as any;
+          return {
+            ...rest,
+            workflowState: workflowByRequestId.get(r.id) ?? null,
+            createdAt: r.createdAt.toISOString(),
+            updatedAt: r.updatedAt.toISOString(),
+            requestedAt: r.requestedAt.toISOString(),
+            expectedDeliveryFrom: r.expectedDeliveryFrom ? r.expectedDeliveryFrom.toISOString() : null,
+            expectedDeliveryTo: r.expectedDeliveryTo ? r.expectedDeliveryTo.toISOString() : null,
+            signedAt: r.signedAt ? r.signedAt.toISOString() : null,
+            signedVoidedAt: (r as any).signedVoidedAt ? (r as any).signedVoidedAt.toISOString() : null,
+            pickupSignedAt: r.pickupSignedAt ? r.pickupSignedAt.toISOString() : null,
+            pickupVoidedAt: (r as any).pickupVoidedAt ? (r as any).pickupVoidedAt.toISOString() : null,
+            dueAt: (r as any).dueAt ? (r as any).dueAt.toISOString() : null,
+            invoices: r.invoices.map((inv) => ({
+              ...inv,
+              issuedAt: inv.issuedAt.toISOString(),
+            })),
+            items: r.items.map((it) => ({
+              ...it,
+              quantity: Number(it.quantity),
+              createdAt: it.createdAt.toISOString(),
+              updatedAt: it.updatedAt.toISOString(),
+            })),
+          };
+        });
+
+      if (paged) {
+        return res.status(200).json({
+          items: mapped,
+          page,
+          pageSize,
+          total,
+          totalPages: Math.max(1, Math.ceil(total / pageSize)),
+        });
+      }
+
+      return res.status(200).json(mapped);
     } catch (error) {
       console.error("GET /api/requests error:", error);
       return res.status(500).json({ error: "Failed to fetch requests" });
@@ -78,19 +382,66 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   if (req.method === "POST") {
+    // Creation via backoffice API requires requests.create scoped to the target service.
     const parsed = createRequestSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ error: "Invalid request body" });
     }
 
-    const { asUserId, title, notes, items } = parsed.data;
-    const createForUserId = isAdmin && asUserId ? asUserId : session.id;
+    const {
+      title,
+      notes,
+      requestedAt,
+      priority,
+      dueAt,
+      requestType,
+      autoSubmit,
+      requestingServiceId,
+      requesterName,
+      requesterEmployeeNo,
+      deliveryLocation,
+      expectedDeliveryFrom,
+      expectedDeliveryTo,
+      goodsTypes,
+      supplierOption1,
+      supplierOption2,
+      supplierOption3,
+      ticketId,
+      items,
+    } = parsed.data;
+    const effectiveRequestType = requestType ?? "STANDARD";
+    const shouldAutoSubmit = autoSubmit !== false;
+
+    if (!hasPermission(permissionGrants, "requests.create", requestingServiceId)) {
+      return res.status(403).json({ error: "Sem permissão para criar pedidos para este serviço." });
+    }
+
+    if (effectiveRequestType === "RETURN") {
+      const hasOld = items.some((it) => (it.role ?? "NORMAL") === "OLD");
+      const hasNew = items.some((it) => (it.role ?? "NORMAL") === "NEW");
+      if (!hasOld || !hasNew) {
+        return res.status(400).json({ error: "Requisição de devolução exige itens ANTIGOS e NOVOS." });
+      }
+    }
 
     try {
+      await ensureRequestWorkflowDefinition(prisma, tenantId);
+      const svc = await prisma.requestingService.findUnique({
+        where: { id: requestingServiceId },
+        select: { id: true, ativo: true, codigo: true, designacao: true },
+      });
+      if (!svc) {
+        return res.status(400).json({ error: "Serviço requisitante inválido" });
+      }
+      if (!svc.ativo) {
+        return res.status(400).json({ error: "Serviço requisitante inativo" });
+      }
+      const normalizedRequestingService = `${svc.codigo} — ${svc.designacao}`.slice(0, 120);
+
       // Ensure all products belong to the user
       const uniqueProductIds = Array.from(new Set(items.map((i) => i.productId)));
       const products = await prisma.product.findMany({
-        where: { userId: createForUserId, id: { in: uniqueProductIds } },
+        where: { tenantId, id: { in: uniqueProductIds } },
         select: { id: true },
       });
       const allowed = new Set(products.map((p) => p.id));
@@ -100,35 +451,209 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         return res.status(404).json({ error: "One or more products were not found" });
       }
 
-      const created = await prisma.request.create({
-        data: {
-          userId: createForUserId,
-          createdByUserId: session.id,
-          title,
-          notes,
-          status: "SUBMITTED",
-          items: {
-            create: items.map((i) => ({
-              productId: i.productId,
-              quantity: BigInt(i.quantity) as any,
-              notes: i.notes,
-            })),
-          },
-        },
-        include: {
-          user: { select: { id: true, name: true, email: true } },
-          createdBy: { select: { id: true, name: true, email: true } },
-          items: {
-            include: { product: { select: { id: true, name: true, sku: true } } },
-            orderBy: { createdAt: "asc" },
-          },
-        },
+      // Stock validation only (no reservation). Real allocation occurs at warehouse execution.
+      for (const item of items) {
+        const qty = Number(item.quantity);
+        if (!Number.isFinite(qty) || qty <= 0) {
+          return res.status(400).json({ error: "Invalid quantity" });
+        }
+
+        const unitCount = Number(
+          await (prisma as any).productUnit.count({
+            where: { tenantId, productId: item.productId },
+          })
+        );
+        const isUnitTracked = unitCount > 0;
+
+        if (isUnitTracked) {
+          if (qty !== 1) {
+            return res.status(400).json({
+              error: "Para produtos com QR (unidades), use linhas separadas (Qtd=1 por unidade).",
+            });
+          }
+
+          const destinationCode = typeof item.destination === "string" ? item.destination.trim() : "";
+          const unitWhere = destinationCode
+            ? { tenantId, productId: item.productId, status: "IN_STOCK", code: destinationCode }
+            : { tenantId, productId: item.productId, status: "IN_STOCK" };
+          const unit = await (prisma as any).productUnit.findFirst({
+            where: unitWhere,
+            select: { id: true },
+          });
+          if (!unit) {
+            return res.status(400).json({ error: "Sem unidades em stock para um dos produtos selecionados." });
+          }
+        } else {
+          const product = await prisma.product.findUnique({
+            where: { id: item.productId },
+            select: { quantity: true },
+          });
+          const available = Number(product?.quantity ?? BigInt(0));
+          if (available < qty) {
+            return res.status(400).json({ error: "Stock insuficiente para um dos produtos selecionados." });
+          }
+        }
+      }
+
+      const effectiveRequestedAt = requestedAt ?? new Date();
+      const created = await createRequestWithGtmiSeq({
+        tenantId,
+        userId: session.id,
+        createdByUserId: session.id,
+        autoSubmit: shouldAutoSubmit,
+        title,
+        notes,
+        requestedAt: effectiveRequestedAt,
+        priority: priority ?? "NORMAL",
+        dueAt,
+        requestType: effectiveRequestType,
+        requestingService: normalizedRequestingService,
+        requestingServiceId,
+        requesterName,
+        requesterEmployeeNo,
+        deliveryLocation,
+        expectedDeliveryFrom,
+        expectedDeliveryTo,
+        goodsTypes: goodsTypes ?? [],
+        supplierOption1,
+        supplierOption2,
+        supplierOption3,
+        items: items.map((it) => ({
+          ...it,
+          role: it.role ?? "NORMAL",
+        })),
       });
+
+      if (ticketId) {
+        const ticket = await prisma.ticket.findFirst({
+          where: {
+            id: ticketId,
+            tenantId,
+            ...(isAdmin ? {} : { OR: [{ createdByUserId: session.id }, { assignedToUserId: session.id }] }),
+          },
+          select: { id: true, code: true },
+        });
+
+        if (!ticket) {
+          return res.status(400).json({ error: "Ticket inválido para associação." });
+        }
+        await prisma.$transaction(async (tx) => {
+          await tx.ticket.update({
+            where: { id: ticket.id },
+            data: { type: "REQUEST" },
+          });
+          await tx.ticketRequestLink.upsert({
+            where: {
+              ticketId_requestId: {
+                ticketId: ticket.id,
+                requestId: created.id,
+              },
+            },
+            create: {
+              tenantId,
+              ticketId: ticket.id,
+              requestId: created.id,
+              linkedByUserId: session.id,
+            },
+            update: {},
+          });
+          await tx.ticketMessage.create({
+            data: {
+              tenantId,
+              ticketId: ticket.id,
+              authorUserId: session.id,
+              body: `Requisição associada: ${created.gtmiNumber}.`,
+            },
+          });
+        });
+        await createTicketAudit({
+          tenantId,
+          ticketId: ticket.id,
+          actorUserId: session.id,
+          action: "REQUEST_LINKED",
+          note: `Requisição ${created.gtmiNumber} associada ao ticket`,
+          data: { requestId: created.id, gtmiNumber: created.gtmiNumber },
+        });
+
+        publishRealtimeEvent({
+          type: "ticket.updated",
+          tenantId,
+          audience: "ALL",
+          payload: { ticketId: ticket.id, code: ticket.code, requestId: created.id },
+        });
+        publishRealtimeEvent({
+          type: "ticket.message_created",
+          tenantId,
+          audience: "ALL",
+          payload: { ticketId: ticket.id, code: ticket.code, requestId: created.id, authorUserId: session.id },
+        });
+      }
+
+      try {
+        await createRequestStatusAudit({
+          tenantId,
+          requestId: created.id,
+          fromStatus: null,
+          toStatus: created.status,
+          changedByUserId: session.id,
+          source: "api/requests:POST",
+        });
+
+        await notifyAdmin({
+          tenantId,
+          kind: "REQUEST_CREATED",
+          title: `Nova requisição ${created.gtmiNumber}`,
+          message: `${created.requesterName || created.user?.name || "Utilizador"} submeteu um pedido.`,
+          requestId: created.id,
+          data: {
+            requestId: created.id,
+            gtmiNumber: created.gtmiNumber,
+            status: created.status,
+            ownerUserId: created.userId,
+          },
+        });
+
+        if (created.userId) {
+          await notifyUser({
+            tenantId,
+            recipientUserId: created.userId,
+            kind: "REQUEST_CREATED",
+            title: `Pedido criado: ${created.gtmiNumber}`,
+            message: "A tua requisição foi criada com sucesso.",
+            requestId: created.id,
+            data: {
+              requestId: created.id,
+              gtmiNumber: created.gtmiNumber,
+              status: created.status,
+            },
+          });
+        }
+
+        publishRealtimeEvent({
+          type: "request.created",
+          tenantId,
+          audience: "ALL",
+          userId: created.userId,
+          payload: {
+            id: created.id,
+            gtmiNumber: created.gtmiNumber,
+            status: created.status,
+            requestedAt: created.requestedAt.toISOString(),
+            ownerUserId: created.userId,
+          },
+        });
+      } catch (notifyError) {
+        console.error("POST /api/requests notify/audit error:", notifyError);
+      }
 
       return res.status(201).json({
         ...created,
         createdAt: created.createdAt.toISOString(),
         updatedAt: created.updatedAt.toISOString(),
+        requestedAt: created.requestedAt.toISOString(),
+        expectedDeliveryFrom: created.expectedDeliveryFrom ? created.expectedDeliveryFrom.toISOString() : null,
+        expectedDeliveryTo: created.expectedDeliveryTo ? created.expectedDeliveryTo.toISOString() : null,
+        dueAt: created.dueAt ? created.dueAt.toISOString() : null,
         items: created.items.map((it) => ({
           ...it,
           quantity: Number(it.quantity),

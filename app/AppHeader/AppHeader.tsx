@@ -2,20 +2,32 @@
 
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { usePathname } from "next/navigation";
-import { useSearchParams } from "next/navigation";
 import { useState } from "react";
-import { AiFillProduct } from "react-icons/ai";
-import { FiActivity, FiBarChart, FiFileText, FiHome } from "react-icons/fi"; // Import icons for new nav items
+import {
+  FiActivity,
+  FiArchive,
+  FiBarChart2,
+  FiBookOpen,
+  FiCamera,
+  FiDatabase,
+  FiFileText,
+  FiLayers,
+  FiPackage,
+  FiRepeat,
+  FiUsers,
+} from "react-icons/fi";
+import { Plus } from "lucide-react";
 import { useAuth } from "../authContext";
 import { ModeToggle } from "./ModeToggle";
+import { RequestsNotificationsBell } from "./RequestsNotificationsBell";
 
 export default function AppHeader() {
   const { logout, user } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
-  const searchParams = useSearchParams();
   const { toast } = useToast();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
@@ -50,9 +62,8 @@ export default function AppHeader() {
 
   const isActive = (path: string) => pathname === path || pathname?.startsWith(`${path}/`);
 
-  const storageTab = searchParams?.get("tab");
-
   const isAdmin = user?.role === "ADMIN";
+  const isUser = user?.role === "USER";
 
   return (
     <div className="rounded-t-lg border-b bg-card text-card-foreground">
@@ -63,13 +74,20 @@ export default function AppHeader() {
             <button
               type="button"
               onClick={() => handleNavigation("/")}
-              className="flex aspect-square size-10 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm"
+              className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-lg bg-primary/10 shadow-sm"
               aria-label="Ir para Produtos"
             >
-              <AiFillProduct className="text-2xl" />
+              <Image
+                src="/branding/favicon.ico"
+                alt="CMCHUB Logo"
+                width={40}
+                height={40}
+                className="h-full w-full object-contain"
+                priority
+              />
             </button>
             <div>
-              <div className="text-lg font-semibold leading-tight">Stockly</div>
+              <div className="text-lg font-semibold leading-tight">CMCHUB</div>
               <div className="text-xs text-muted-foreground">
                 {user?.name ? `Bem-vindo, ${user.name}` : "Bem-vindo"}
                 {user?.email ? ` • ${user.email}` : ""}
@@ -79,6 +97,7 @@ export default function AppHeader() {
 
           <div className="flex items-center gap-2">
             <ModeToggle />
+            <RequestsNotificationsBell />
             <Button
               onClick={handleLogout}
               disabled={isLoggingOut}
@@ -92,22 +111,72 @@ export default function AppHeader() {
         {/* Navigation */}
         <div className="flex flex-col gap-2">
           <div className="flex flex-wrap items-center gap-2">
+            {!isUser ? (
+              <>
+                <Button
+                  variant={isActive("/") ? "secondary" : "ghost"}
+                  size="sm"
+                  onClick={() => handleNavigation("/")}
+                >
+                  <FiPackage className="mr-2 h-4 w-4" />
+                  Produtos
+                </Button>
+
+                <Button
+                  variant={isActive("/requests") ? "secondary" : "ghost"}
+                  size="sm"
+                  onClick={() => handleNavigation("/requests")}
+                >
+                  <FiFileText className="mr-2 h-4 w-4" />
+                  Requisições
+                </Button>
+
+                <Button
+                  variant={isActive("/equipamentos") ? "secondary" : "ghost"}
+                  size="sm"
+                  onClick={() => handleNavigation("/equipamentos")}
+                >
+                  <FiArchive className="mr-2 h-4 w-4" />
+                  Equipamentos
+                </Button>
+              </>
+            ) : null}
+
+            {/* Estado / Novo pedidos: visible to all roles (menu definitive) */}
             <Button
-              variant={isActive("/") ? "secondary" : "ghost"}
+              variant={isActive("/requests/estado") ? "secondary" : "ghost"}
               size="sm"
-              onClick={() => handleNavigation("/")}
+              onClick={() => handleNavigation("/requests/estado")}
             >
-              <FiHome className="mr-2 h-4 w-4" />
-              Produtos
+              <FiFileText className="mr-2 h-4 w-4" />
+              Estado do Pedido
             </Button>
 
             <Button
-              variant={isActive("/requests") ? "secondary" : "ghost"}
+              variant={isActive("/requests/novo") ? "secondary" : "ghost"}
               size="sm"
-              onClick={() => handleNavigation("/requests")}
+              onClick={() => handleNavigation("/requests/novo")}
             >
-              <FiFileText className="mr-2 h-4 w-4" />
-              Requisições
+              <Plus className="mr-2 h-4 w-4" />
+              Novo Pedido
+            </Button>
+
+            <Button
+              variant={isActive("/governanca") ? "secondary" : "ghost"}
+              size="sm"
+              onClick={() => handleNavigation("/governanca")}
+            >
+              <FiLayers className="mr-2 h-4 w-4" />
+              Governança
+            </Button>
+
+            <Button
+              variant={isActive("/movements") ? "secondary" : "ghost"}
+              size="sm"
+              onClick={() => handleNavigation("/movements")}
+            >
+              <FiRepeat className="mr-2 h-4 w-4" />
+              Movimentos
             </Button>
 
             <Button
@@ -115,17 +184,17 @@ export default function AppHeader() {
               size="sm"
               onClick={() => handleNavigation("/storage")}
             >
-              <FiFileText className="mr-2 h-4 w-4" />
+              <FiArchive className="mr-2 h-4 w-4" />
               Storage
             </Button>
 
             <Button
-              variant={isActive("/storage") && storageTab === "documents" ? "secondary" : "ghost"}
+              variant={isActive("/scan") ? "secondary" : "ghost"}
               size="sm"
-              onClick={() => handleNavigation("/storage?tab=documents")}
+              onClick={() => handleNavigation("/scan")}
             >
-              <FiFileText className="mr-2 h-4 w-4" />
-              Documentos
+              <FiCamera className="mr-2 h-4 w-4" />
+              Scan
             </Button>
 
             {isAdmin ? (
@@ -134,8 +203,19 @@ export default function AppHeader() {
                 size="sm"
                 onClick={() => handleNavigation("/users")}
               >
-                <FiFileText className="mr-2 h-4 w-4" />
+                <FiUsers className="mr-2 h-4 w-4" />
                 Pessoas
+              </Button>
+            ) : null}
+
+            {isAdmin ? (
+              <Button
+                variant={isActive("/DB") ? "secondary" : "ghost"}
+                size="sm"
+                onClick={() => handleNavigation("/DB")}
+              >
+                <FiDatabase className="mr-2 h-4 w-4" />
+                DB
               </Button>
             ) : null}
           </div>
@@ -147,7 +227,7 @@ export default function AppHeader() {
               size="sm"
               onClick={() => handleNavigation("/business-insights")}
             >
-              <FiBarChart className="mr-2 h-4 w-4" />
+              <FiBarChart2 className="mr-2 h-4 w-4" />
               Insights
             </Button>
 
@@ -156,7 +236,7 @@ export default function AppHeader() {
               size="sm"
               onClick={() => handleNavigation("/api-docs")}
             >
-              <FiFileText className="mr-2 h-4 w-4" />
+              <FiBookOpen className="mr-2 h-4 w-4" />
               Documentação API
             </Button>
 

@@ -6,10 +6,17 @@ import Loading from "@/components/Loading";
 
 export default function GlobalLoading() {
   const [isPageLoading, setIsPageLoading] = useState(false);
+  const [hasMounted, setHasMounted] = useState(false);
   const pathname = usePathname(); // Get the current pathname
   const searchParams = useSearchParams(); // Get the current search params
 
   useEffect(() => {
+    setHasMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (!hasMounted) return;
+
     let showTimer: ReturnType<typeof setTimeout> | null = null;
     let hideTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -23,7 +30,7 @@ export default function GlobalLoading() {
       if (showTimer) clearTimeout(showTimer);
       if (hideTimer) clearTimeout(hideTimer);
     };
-  }, [pathname, searchParams]);
+  }, [pathname, searchParams, hasMounted]);
 
   // Only render if we're actually loading
   if (!isPageLoading) {

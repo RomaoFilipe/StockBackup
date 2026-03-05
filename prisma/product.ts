@@ -4,9 +4,9 @@ export const createProduct = async (data: {
   name: string;
   sku: string;
   price: number;
-  quantity: number;
+  quantity: bigint;
   status: string;
-  userId: string;
+  tenantId: string;
   categoryId: string;
   supplierId: string;
   createdAt: Date;
@@ -16,9 +16,9 @@ export const createProduct = async (data: {
   });
 };
 
-export const getProductsByUser = async (userId: string) => {
+export const getProductsByUser = async (tenantId: string) => {
   return prisma.product.findMany({
-    where: { userId },
+    where: { tenantId },
   });
 };
 
