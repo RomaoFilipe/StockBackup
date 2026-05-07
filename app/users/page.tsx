@@ -26,7 +26,7 @@ import { useToast } from "@/hooks/use-toast";
 import PageHeader from "@/app/components/PageHeader";
 import SectionCard from "@/app/components/SectionCard";
 import { Badge } from "@/components/ui/badge";
-import { Database, HardDrive, Network, ShieldCheck, UserCog, Users } from "lucide-react";
+import { Network, ShieldCheck, UserCog, Users } from "lucide-react";
 
 type UserRole = "USER" | "ADMIN";
 
@@ -94,7 +94,7 @@ export default function UsersPage() {
   const { toast } = useToast();
   const { isLoggedIn, isAuthLoading, user } = useAuth();
 
-  const [tab, setTab] = useState<"users" | "ip" | "storage">("users");
+  const [tab, setTab] = useState<"users" | "ip">("users");
 
   const [users, setUsers] = useState<UserRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -122,36 +122,6 @@ export default function UsersPage() {
 
   const isAdmin = user?.role === "ADMIN";
 
-  type ReorgPreviewRow = {
-    id: string;
-    kind: string;
-    from: string;
-    to: string;
-    action: "moved" | "skipped" | "missing" | "error";
-    reason?: string;
-  };
-
-  type ReorgResult = {
-    dryRun: boolean;
-    tenantId: string;
-    processed: number;
-    moved: number;
-    skipped: number;
-    missing: number;
-    errored: number;
-    preview: ReorgPreviewRow[];
-    note?: string;
-  };
-
-  const [reorgScope, setReorgScope] = useState<
-    "ALL" | "REQUEST" | "INVOICE" | "DOCUMENT" | "OTHER"
-  >("ALL");
-  const [reorgLimit, setReorgLimit] = useState(1000);
-  const [reorgIncludeUnlinked, setReorgIncludeUnlinked] = useState(true);
-  const [reorgRenameFiles, setReorgRenameFiles] = useState(false);
-  const [reorgLoading, setReorgLoading] = useState(false);
-  const [reorgResult, setReorgResult] = useState<ReorgResult | null>(null);
-  const [reorgProgressPct, setReorgProgressPct] = useState<number | null>(null);
   const [ipRequests, setIpRequests] = useState<IpRequestRow[]>([]);
   const [allowedIps, setAllowedIps] = useState<AllowedIpRow[]>([]);
   const [ipLoading, setIpLoading] = useState(false);
@@ -294,30 +264,6 @@ export default function UsersPage() {
     loadRequestingServices();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthLoading, isLoggedIn, isAdmin]);
-
-  useEffect(() => {
-    if (!isLoggedIn || !isAdmin) return;
-    const es = new EventSource("/api/realtime/stream");
-    const onDone = (evt: Event) => {
-      try {
-        const msg = evt as MessageEvent;
-        const parsed = JSON.parse(msg.data || "{}");
-        const payload = parsed?.payload;
-        if (payload && typeof payload === "object") {
-          setReorgResult(payload as ReorgResult);
-          setReorgLoading(false);
-          setReorgProgressPct(100);
-        }
-      } catch {
-        // ignore
-      }
-    };
-    es.addEventListener("storage.reorg.done", onDone);
-    return () => {
-      es.removeEventListener("storage.reorg.done", onDone);
-      es.close();
-    };
-  }, [isLoggedIn, isAdmin]);
 
   const createUser = async () => {
     if (!canCreate) return;
@@ -495,7 +441,7 @@ export default function UsersPage() {
         <Tabs
           value={tab}
           onValueChange={(v) => {
-            const next = v as "users" | "ip" | "storage";
+            const next = v as "users" | "ip";
             setTab(next);
             if (next === "ip") {
               loadIpAccess();
@@ -510,10 +456,6 @@ export default function UsersPage() {
             <TabsTrigger value="ip" className="gap-2">
               <ShieldCheck className="h-4 w-4" />
               IP Access
-            </TabsTrigger>
-            <TabsTrigger value="storage" className="gap-2">
-              <HardDrive className="h-4 w-4" />
-              Storage
             </TabsTrigger>
           </TabsList>
 
@@ -1000,238 +942,6 @@ export default function UsersPage() {
             </div>
           </TabsContent>
 
-          <TabsContent value="storage" className="mt-4">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <SectionCard
-                title="Organizar storage"
-                description="Move anexos antigos para a nova estrutura por ano/pedido/fatura. Use Dry-run primeiro para ver o que vai acontecer."
-                actions={
-                  <div className="inline-flex items-center gap-2 text-xs text-muted-foreground">
-                    <Database className="h-4 w-4" />
-                    Ferramenta administrativa
-                  </div>
-                }
-              >
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <Select value={reorgScope} onValueChange={(v) => setReorgScope(v as any)}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Scope" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="ALL">Todos</SelectItem>
-                      <SelectItem value="REQUEST">Pedidos</SelectItem>
-                      <SelectItem value="INVOICE">Faturas</SelectItem>
-                      <SelectItem value="DOCUMENT">Documentos</SelectItem>
-                      <SelectItem value="OTHER">Outros</SelectItem>
-                    </SelectContent>
-                  </Select>
-
-                  <Input
-                    type="number"
-                    min={1}
-                    max={5000}
-                    placeholder="Limit (ex: 1000)"
-                    value={String(reorgLimit)}
-                    onChange={(e) => {
-                      const n = Number(e.target.value);
-                      if (Number.isFinite(n)) setReorgLimit(n);
-                    }}
-                  />
-                </div>
-
-                <div className="flex flex-col gap-2">
-                  <label className="flex items-center gap-2 text-sm">
-                    <Checkbox
-                      checked={reorgIncludeUnlinked}
-                      onCheckedChange={(v) => setReorgIncludeUnlinked(Boolean(v))}
-                    />
-                    Incluir ficheiros sem ligação (DOCUMENT/OTHER e anexos sem requestId/invoiceId)
-                  </label>
-
-                  <label className="flex items-center gap-2 text-sm">
-                    <Checkbox checked={reorgRenameFiles} onCheckedChange={(v) => setReorgRenameFiles(Boolean(v))} />
-                    Renomear ficheiros no disco (mais legível) durante a reorganização
-                  </label>
-                </div>
-
-                <div className="flex flex-wrap justify-end gap-2">
-                  <Button
-                    variant="outline"
-                    disabled={reorgLoading}
-                    onClick={async () => {
-                      setReorgLoading(true);
-                      setReorgProgressPct(15);
-                      try {
-                        const payload: any = {
-                          dryRun: true,
-                          limit: Math.min(Math.max(1, reorgLimit || 1000), 5000),
-                          includeUnlinked: reorgIncludeUnlinked,
-                          renameFiles: reorgRenameFiles,
-                        };
-                        if (reorgScope !== "ALL") payload.kinds = [reorgScope];
-
-                        const res = await axiosInstance.post("/admin/storage/reorganize", payload);
-                        setReorgResult(res.data || null);
-                        setReorgProgressPct(100);
-                        toast({ title: "Dry-run concluído" });
-                      } catch (error: any) {
-                        const msg = error?.response?.data?.error || "Não foi possível executar.";
-                        toast({ title: "Erro", description: msg, variant: "destructive" });
-                      } finally {
-                        setReorgLoading(false);
-                        setTimeout(() => setReorgProgressPct(null), 1200);
-                      }
-                    }}
-                  >
-                    {reorgLoading ? "A executar..." : "Dry-run"}
-                  </Button>
-
-                  <Button
-                    disabled={reorgLoading}
-                    onClick={async () => {
-                      const ok = window.confirm(
-                        "Isto vai mover ficheiros no servidor e atualizar a BD. Recomendado: correr Dry-run primeiro. Continuar?"
-                      );
-                      if (!ok) return;
-
-                      setReorgLoading(true);
-                      setReorgProgressPct(20);
-                      try {
-                        const payload: any = {
-                          dryRun: false,
-                          limit: Math.min(Math.max(1, reorgLimit || 1000), 5000),
-                          includeUnlinked: reorgIncludeUnlinked,
-                          renameFiles: reorgRenameFiles,
-                        };
-                        if (reorgScope !== "ALL") payload.kinds = [reorgScope];
-
-                        const res = await axiosInstance.post("/admin/storage/reorganize", payload);
-                        setReorgResult(res.data || null);
-                        setReorgProgressPct(100);
-                        toast({ title: "Reorganização aplicada" });
-                      } catch (error: any) {
-                        const msg = error?.response?.data?.error || "Não foi possível executar.";
-                        toast({ title: "Erro", description: msg, variant: "destructive" });
-                      } finally {
-                        setReorgLoading(false);
-                        setTimeout(() => setReorgProgressPct(null), 1200);
-                      }
-                    }}
-                  >
-                    Aplicar
-                  </Button>
-                </div>
-              </SectionCard>
-
-              <SectionCard title="Resultado" description="Resumo e preview (até 200 linhas).">
-                {reorgProgressPct !== null ? (
-                  <div className="mb-3">
-                    <div className="mb-1 flex items-center justify-between text-xs text-muted-foreground">
-                      <span>Progresso</span>
-                      <span>{Math.round(reorgProgressPct)}%</span>
-                    </div>
-                    <div className="h-2 rounded-full bg-muted">
-                      <div className="h-2 rounded-full bg-primary transition-all" style={{ width: `${Math.max(0, Math.min(100, reorgProgressPct))}%` }} />
-                    </div>
-                  </div>
-                ) : null}
-                {!reorgResult ? (
-                  <p className="text-sm text-muted-foreground">Sem dados. Execute um Dry-run.</p>
-                ) : (
-                  <div className="space-y-3">
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                      <div className="rounded-md border border-border/60 p-2">
-                        <div className="text-[11px] text-muted-foreground">Processados</div>
-                        <div className="font-semibold">{reorgResult.processed}</div>
-                      </div>
-                      <div className="rounded-md border border-border/60 p-2">
-                        <div className="text-[11px] text-muted-foreground">Movidos</div>
-                        <div className="font-semibold text-emerald-700">{reorgResult.moved}</div>
-                      </div>
-                      <div className="rounded-md border border-border/60 p-2">
-                        <div className="text-[11px] text-muted-foreground">Ignorados</div>
-                        <div className="font-semibold">{reorgResult.skipped}</div>
-                      </div>
-                      <div className="rounded-md border border-border/60 p-2">
-                        <div className="text-[11px] text-muted-foreground">Erros</div>
-                        <div className="font-semibold text-rose-700">{reorgResult.errored}</div>
-                      </div>
-                    </div>
-                    <div className="text-sm">
-                      <div>
-                        <span className="font-medium">Modo:</span> {reorgResult.dryRun ? "Dry-run" : "Aplicado"}
-                      </div>
-                      <div>
-                        <span className="font-medium">Processados:</span> {reorgResult.processed} ·{" "}
-                        <span className="font-medium">Movidos:</span> {reorgResult.moved} ·{" "}
-                        <span className="font-medium">Ignorados:</span> {reorgResult.skipped} ·{" "}
-                        <span className="font-medium">Em falta:</span> {reorgResult.missing} ·{" "}
-                        <span className="font-medium">Erros:</span> {reorgResult.errored}
-                      </div>
-                      {reorgResult.note ? (
-                        <div className="text-xs text-muted-foreground mt-1">{reorgResult.note}</div>
-                      ) : null}
-                    </div>
-
-                    <div className="flex justify-end">
-                      <div className="flex items-center gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={async () => {
-                            try {
-                              await navigator.clipboard.writeText(JSON.stringify(reorgResult, null, 2));
-                              toast({ title: "Copiado" });
-                            } catch {
-                              toast({
-                                title: "Erro",
-                                description: "Não foi possível copiar.",
-                                variant: "destructive",
-                              });
-                            }
-                          }}
-                        >
-                          Copiar JSON
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            const blob = new Blob([JSON.stringify(reorgResult, null, 2)], { type: "application/json" });
-                            const a = document.createElement("a");
-                            a.href = URL.createObjectURL(blob);
-                            a.download = `storage-reorg-${new Date().toISOString().slice(0, 10)}.json`;
-                            document.body.appendChild(a);
-                            a.click();
-                            document.body.removeChild(a);
-                          }}
-                        >
-                          Exportar JSON
-                        </Button>
-                      </div>
-                    </div>
-
-                    <div className="border rounded-md p-2 max-h-[420px] overflow-auto text-xs">
-                      {reorgResult.preview?.length ? (
-                        <div className="space-y-1">
-                          {reorgResult.preview.map((row) => (
-                            <div key={row.id} className="break-all">
-                              <span className="font-medium">[{row.action}]</span> {row.kind} · {row.from} → {row.to}
-                              {row.reason ? (
-                                <span className="text-muted-foreground"> ({row.reason})</span>
-                              ) : null}
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="text-muted-foreground">Sem preview.</p>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </SectionCard>
-            </div>
-          </TabsContent>
         </Tabs>
 
         <Dialog open={auditOpen} onOpenChange={setAuditOpen}>

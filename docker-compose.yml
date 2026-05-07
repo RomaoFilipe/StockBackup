@@ -1,4 +1,35 @@
 services:
+  app:
+    build:
+      context: .
+    container_name: stock-app
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://stockly:stockly_password@postgres:5432/stockly?schema=public
+      JWT_SECRET: ${JWT_SECRET}
+      DEFAULT_TENANT_SLUG: ${DEFAULT_TENANT_SLUG:-default}
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-/api}
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+      TRUST_PROXY: ${TRUST_PROXY:-false}
+      ALLOWLIST_BOOTSTRAP_ADMIN: ${ALLOWLIST_BOOTSTRAP_ADMIN:-false}
+      RATE_LIMIT_STORE: ${RATE_LIMIT_STORE:-db}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./storage:/app/storage
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:3000/api/health >/dev/null"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
   postgres:
     image: postgres:16
     container_name: stock-postgres
@@ -8,7 +39,7 @@ services:
       POSTGRES_PASSWORD: stockly_password
       POSTGRES_DB: stockly
     ports:
-      - "5432:5432"
+      - "55432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:

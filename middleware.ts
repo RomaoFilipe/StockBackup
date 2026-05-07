@@ -30,12 +30,54 @@ function hasValidCsrfToken(request: NextRequest) {
   return cookieToken === headerToken;
 }
 
+const ONLYLOCAL_DISABLED_PAGE_PREFIXES = [
+  "/admin",
+  "/api-docs",
+  "/api-status",
+  "/business-insights",
+  "/DB",
+  "/equipamentos",
+  "/governanca",
+  "/mydesktop",
+  "/portal",
+  "/reports",
+  "/requests/aprovacoes",
+  "/requests/aprovacoes-finais",
+  "/scan",
+  "/storage",
+  "/tickets",
+];
+
+const ONLYLOCAL_DISABLED_API_PREFIXES = [
+  "/api/admin/public-requests",
+  "/api/admin/storage",
+  "/api/equipment",
+  "/api/governanca",
+  "/api/insights",
+  "/api/mydesktop",
+  "/api/portal",
+  "/api/presence",
+  "/api/reports",
+  "/api/tickets",
+];
+
+function matchesPrefix(path: string, prefix: string) {
+  return path === prefix || path.startsWith(`${prefix}/`);
+}
+
 export function middleware(request: NextRequest) {
   // Get the pathname of the request
   const path = request.nextUrl.pathname;
   const requestId = ensureRequestId(request);
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set("x-request-id", requestId);
+
+  if (ONLYLOCAL_DISABLED_API_PREFIXES.some((prefix) => matchesPrefix(path, prefix))) {
+    return withRequestId(
+      NextResponse.json({ error: "Este modulo esta desativado na versao ONLYLOCAL." }, { status: 410 }),
+      requestId,
+    );
+  }
 
   // API CSRF protection:
   // For authenticated cookie-based unsafe requests, require same-origin Origin.
@@ -57,11 +99,10 @@ export function middleware(request: NextRequest) {
     return withRequestId(NextResponse.next({ request: { headers: requestHeaders } }), requestId);
   }
 
-  // Legacy route: /admin is now /DB
-  if (path === "/admin" || path.startsWith("/admin/")) {
+  if (ONLYLOCAL_DISABLED_PAGE_PREFIXES.some((prefix) => matchesPrefix(path, prefix))) {
     const url = request.nextUrl.clone();
-    url.pathname = "/DB";
-    url.search = request.nextUrl.search;
+    url.pathname = request.cookies.get("user_role")?.value === "USER" ? "/requests/estado" : "/";
+    url.search = "";
     return withRequestId(NextResponse.redirect(url), requestId);
   }
 

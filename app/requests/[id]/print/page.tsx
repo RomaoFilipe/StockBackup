@@ -153,7 +153,7 @@ export default function PrintRequestPage() {
     let cancelled = false;
 
     const run = async () => {
-      if (!origin || !request?.items?.length) {
+      if (!request?.items?.length) {
         if (!cancelled) setItemQrByCode({});
         return;
       }
@@ -174,8 +174,7 @@ export default function PrintRequestPage() {
       const entries = await Promise.all(
         codes.map(async (code) => {
           try {
-            const url = `${origin}/scan/${encodeURIComponent(code)}`;
-            const dataUrl = await QRCode.toDataURL(url, {
+            const dataUrl = await QRCode.toDataURL(code, {
               width: 80,
               margin: 1,
               color: { dark: "#000000", light: "#FFFFFF" },
@@ -199,7 +198,7 @@ export default function PrintRequestPage() {
     return () => {
       cancelled = true;
     };
-  }, [origin, request?.items]);
+  }, [request?.items]);
 
   useEffect(() => {
     let cancelled = false;

@@ -4,7 +4,7 @@ import { prisma } from "@/prisma/client";
 import { getSessionServer } from "@/utils/auth";
 import { createRequestStatusAudit, notifyAdmin, notifyUser } from "@/utils/notifications";
 import { publishRealtimeEvent } from "@/utils/realtime";
-import { createTicketAudit } from "@/pages/api/tickets/_utils";
+import { createTicketAudit } from "@/utils/ticketAudit";
 import { getUserPermissionGrants, hasPermission } from "@/utils/rbac";
 import { ensureRequestWorkflowDefinition, ensureRequestWorkflowInstance, transitionRequestWorkflowByActionTx } from "@/utils/workflow";
 

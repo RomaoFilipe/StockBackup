@@ -45,12 +45,6 @@ function resolveRequestId(it: NotificationItem): string | null {
   return null;
 }
 
-function resolveTicketId(it: NotificationItem): string | null {
-  const fromData = it.data && typeof it.data === "object" ? (it.data as Record<string, unknown>).ticketId : null;
-  if (typeof fromData === "string" && fromData.trim()) return fromData;
-  return null;
-}
-
 function kindLabel(kind: NotificationItem["kind"]) {
   switch (kind) {
     case "REQUEST_CREATED":
@@ -172,8 +166,7 @@ export function RequestsNotificationsBell() {
         ) : (
           items.map((it) => {
             const requestId = resolveRequestId(it);
-            const ticketId = resolveTicketId(it);
-            const canOpen = Boolean(requestId || ticketId);
+            const canOpen = Boolean(requestId);
 
             return (
               <DropdownMenuItem
@@ -184,10 +177,6 @@ export function RequestsNotificationsBell() {
                   void markRead(it.id);
                   if (!canOpen) return;
                   setOpen(false);
-                  if (ticketId) {
-                    router.push(`/tickets/${ticketId}`);
-                    return;
-                  }
                   if (requestId) {
                     router.push(`/requests/${requestId}`);
                   }
@@ -199,7 +188,7 @@ export function RequestsNotificationsBell() {
                 </div>
                 <div className="text-sm font-medium line-clamp-1">{it.title}</div>
                 <div className="text-xs text-muted-foreground line-clamp-2">{it.message}</div>
-                {canOpen ? <div className="text-[11px] font-medium text-blue-700">{ticketId ? "Abrir ticket" : "Abrir pedido"}</div> : null}
+                {canOpen ? <div className="text-[11px] font-medium text-blue-700">Abrir pedido</div> : null}
                 <div className="text-[11px] text-muted-foreground">
                   {new Date(it.createdAt).toLocaleString("pt-PT")}
                 </div>

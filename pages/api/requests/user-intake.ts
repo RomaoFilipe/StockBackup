@@ -8,7 +8,7 @@ import { applyRateLimit } from "@/utils/rateLimit";
 import { createRequestStatusAudit, notifyAdmin, notifyUser } from "@/utils/notifications";
 import { publishRealtimeEvent } from "@/utils/realtime";
 import { ensureRequestWorkflowDefinition, ensureRequestWorkflowInstance, transitionRequestWorkflowByActionTx } from "@/utils/workflow";
-import { createTicketAudit } from "@/pages/api/tickets/_utils";
+import { createTicketAudit } from "@/utils/ticketAudit";
 
 const submitSchema = z.object({
   title: z.string().max(120).optional(),
@@ -279,4 +279,3 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   return res.status(201).json({ ok: true, id: createdRequestId });
 }
-

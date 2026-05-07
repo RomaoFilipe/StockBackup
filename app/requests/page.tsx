@@ -2215,13 +2215,13 @@ export default function RequestsPage() {
                                     <Input value={it.reference || ""} onChange={(e) => setItems((prev) => prev.map((p, pIdx) => (pIdx === idx ? { ...p, reference: e.target.value } : p)))} className="h-10 rounded-xl" placeholder="Ref / Nº série" />
                                   </div>
                                   <div className="space-y-1">
-                                    <div className="text-xs text-muted-foreground">QR / Código unidade</div>
+                                    <div className="text-xs text-muted-foreground">Código unidade</div>
                                     <div className="flex items-center gap-2">
-                                      <Input value={it.destination || ""} onChange={(e) => setItems((prev) => prev.map((p, pIdx) => (pIdx === idx ? { ...p, destination: e.target.value } : p)))} className="h-10 rounded-xl" placeholder="Código QR" />
+                                      <Input value={it.destination || ""} onChange={(e) => setItems((prev) => prev.map((p, pIdx) => (pIdx === idx ? { ...p, destination: e.target.value } : p)))} className="h-10 rounded-xl" placeholder="Código da unidade" />
                                       <Button type="button" variant="outline" size="icon" className="h-10 w-10 rounded-xl" disabled={!it.productId || Boolean(unitLoadingByRow[idx])} onClick={() => void autoPickUnitForRow(idx, { force: true, productId: it.productId, excludeCode: (it.destination || "").trim() })}>
                                         <RefreshCcw className="h-4 w-4" />
                                       </Button>
-                                      <Button type="button" variant="outline" size="icon" className="h-10 w-10 rounded-xl" disabled={!origin || !it.destination?.trim()} onClick={() => {
+                                      <Button type="button" variant="outline" size="icon" className="h-10 w-10 rounded-xl" disabled={!it.destination?.trim()} onClick={() => {
                                         const code = (it.destination || "").trim();
                                         if (!code) return;
                                         setItemQrCode(code);
@@ -2433,13 +2433,13 @@ export default function RequestsPage() {
         >
           <DialogContent className="sm:max-w-[520px]">
             <DialogHeader>
-              <DialogTitle>QR • Item</DialogTitle>
+              <DialogTitle>QR • Código de unidade</DialogTitle>
               <DialogDescription>{itemQrCode || ""}</DialogDescription>
             </DialogHeader>
-            {origin && itemQrCode ? (
+            {itemQrCode ? (
               <div className="flex justify-center">
                 <QRCodeComponent
-                  data={`${origin}/scan/${encodeURIComponent(itemQrCode)}`}
+                  data={itemQrCode}
                   title={`QR • ${itemQrCode}`}
                   size={260}
                   showDownload

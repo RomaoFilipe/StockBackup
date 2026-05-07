@@ -102,11 +102,9 @@ export default function MovementsPage() {
 
   // Filters
   const [q, setQ] = useState<string>(() => searchParams?.get("q") ?? "");
-  const [type, setType] = useState<
-    "" | "IN" | "OUT" | "RETURN" | "REPAIR_OUT" | "REPAIR_IN" | "SCRAP" | "LOST"
-  >(() => {
+  const [type, setType] = useState<"" | "IN" | "OUT" | "RETURN">(() => {
     const t = searchParams?.get("type") ?? "";
-    return t === "IN" || t === "OUT" || t === "RETURN" || t === "REPAIR_OUT" || t === "REPAIR_IN" || t === "SCRAP" || t === "LOST" ? t : "";
+    return t === "IN" || t === "OUT" || t === "RETURN" ? t : "";
   });
   const [productId, setProductId] = useState<string>("");
   const [performedByUserId, setPerformedByUserId] = useState<string>(() => searchParams?.get("performedByUserId") ?? "");
@@ -404,10 +402,6 @@ export default function MovementsPage() {
                 <option value="IN">IN • Entrada</option>
                 <option value="OUT">OUT • Saída</option>
                 <option value="RETURN">RETURN • Devolução</option>
-                <option value="REPAIR_OUT">REPAIR_OUT • Reparação (envio)</option>
-                <option value="REPAIR_IN">REPAIR_IN • Reparação (receção)</option>
-                <option value="SCRAP">SCRAP • Abate</option>
-                <option value="LOST">LOST • Perdido</option>
               </select>
             </div>
 
@@ -546,17 +540,6 @@ export default function MovementsPage() {
                       <TableCell>{m.quantity}</TableCell>
                       <TableCell>
                         <div className="text-sm">{docParts.length ? docParts.join(" • ") : "—"}</div>
-                        {m.unit?.code ? (
-                          <div className="mt-1">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => router.push(`/scan/${m.unit!.code}`)}
-                            >
-                              Abrir scan
-                            </Button>
-                          </div>
-                        ) : null}
                       </TableCell>
                       <TableCell>
                         <div className="text-xs text-muted-foreground">

@@ -112,7 +112,7 @@ type SessionUser = {
   role: "USER" | "ADMIN";
 };
 
-type UnitActionType = "RETURN" | "REPAIR_OUT" | "REPAIR_IN" | "SCRAP" | "LOST";
+type UnitActionType = "RETURN";
 
 function formatEur(value: number) {
   return value.toLocaleString("pt-PT", {
@@ -195,14 +195,6 @@ function unitActionLabel(action: UnitActionType) {
   switch (action) {
     case "RETURN":
       return "Devolver ao stock";
-    case "REPAIR_OUT":
-      return "Enviar para reparação";
-    case "REPAIR_IN":
-      return "Registar regresso da reparação";
-    case "SCRAP":
-      return "Abater unidade";
-    case "LOST":
-      return "Marcar como extraviada";
     default:
       return action;
   }
@@ -212,14 +204,6 @@ function unitActionEndpoint(action: UnitActionType) {
   switch (action) {
     case "RETURN":
       return "/api/units/return";
-    case "REPAIR_OUT":
-      return "/api/units/repair-out";
-    case "REPAIR_IN":
-      return "/api/units/repair-in";
-    case "SCRAP":
-      return "/api/units/scrap";
-    case "LOST":
-      return "/api/units/lost";
     default:
       return "/api/units/return";
   }
@@ -316,9 +300,7 @@ export default function ProductDetailsPage() {
   const [movementsLoading, setMovementsLoading] = useState(false);
   const [movementsNextCursor, setMovementsNextCursor] = useState<string | null>(null);
   const [movementsQuery, setMovementsQuery] = useState("");
-  const [movementsType, setMovementsType] = useState<
-    "" | "IN" | "OUT" | "RETURN" | "REPAIR_OUT" | "REPAIR_IN" | "SCRAP" | "LOST"
-  >("");
+  const [movementsType, setMovementsType] = useState<"" | "IN" | "OUT" | "RETURN">("");
   const [movementsFrom, setMovementsFrom] = useState("");
   const [movementsTo, setMovementsTo] = useState("");
   const [unitHistories, setUnitHistories] = useState<
@@ -955,7 +937,7 @@ export default function ProductDetailsPage() {
 
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <Button size="sm" variant="outline" onClick={() => setTab("details")}>Ver detalhes</Button>
-                <Button size="sm" variant="outline" onClick={() => setTab("units")}>Ver unidades QR</Button>
+                <Button size="sm" variant="outline" onClick={() => setTab("units")}>Ver unidades</Button>
                 <Button size="sm" variant="outline" onClick={() => setTab("movements")}>Ver movimentos</Button>
                 <Button size="sm" variant="outline" onClick={() => setTab("invoices")}>Ver faturas</Button>
               </div>
@@ -965,7 +947,7 @@ export default function ProductDetailsPage() {
             <TabsList>
               <TabsTrigger value="details">Detalhes</TabsTrigger>
               <TabsTrigger value="invoices">Faturas</TabsTrigger>
-              <TabsTrigger value="units">QR</TabsTrigger>
+              <TabsTrigger value="units">Unidades</TabsTrigger>
               <TabsTrigger value="movements">Movimentos</TabsTrigger>
             </TabsList>
 
@@ -1086,13 +1068,13 @@ export default function ProductDetailsPage() {
 
             <TabsContent value="units" className="space-y-4">
               <SectionCard
-                title="QR por unidade"
-                description="Cada unidade tem um QR único. Aqui pode editar S/N, P/N e Asset Tag."
+                title="Unidades de stock"
+                description="Cada unidade tem um código único. Aqui pode editar S/N, P/N e Asset Tag."
               >
                 <div className="flex flex-col gap-2">
                   <div className="flex flex-col md:flex-row gap-2 md:items-center md:justify-between">
                   <Input
-                    placeholder="Pesquisar por QR, S/N, P/N, Asset Tag…"
+                    placeholder="Pesquisar por código, S/N, P/N, Asset Tag..."
                     value={unitsQuery}
                     onChange={(e) => setUnitsQuery(e.target.value)}
                   />
@@ -1107,7 +1089,7 @@ export default function ProductDetailsPage() {
                       }}
                       disabled={!productId}
                     >
-                      Imprimir QRs
+                      Imprimir códigos
                     </Button>
                     <Button variant="outline" onClick={() => loadUnits({ reset: true })} disabled={unitsLoading}>
                       {unitsLoading ? "A carregar..." : "Atualizar"}
@@ -1171,7 +1153,7 @@ export default function ProductDetailsPage() {
                   <div className="mt-4">
                     <EmptyState
                       title="Sem unidades"
-                      description="Este produto ainda não tem QRs por unidade. Crie stock através do fluxo de entrada (intake)."
+                      description="Este produto ainda não tem unidades registadas. Crie stock através do fluxo de entrada."
                     />
                   </div>
                 ) : (
@@ -1191,7 +1173,7 @@ export default function ProductDetailsPage() {
                               <div className="flex items-start gap-3">
                                 {origin ? (
                                   <QRCodeComponent
-                                    data={`${origin}/scan/${u.code}`}
+                                    data={u.code}
                                     title="QR"
                                     size={110}
                                     showDownload={false}
@@ -1206,9 +1188,6 @@ export default function ProductDetailsPage() {
                                     {u.acquiredAt ? ` • ${new Date(u.acquiredAt).toLocaleDateString("pt-PT")}` : ""}
                                   </div>
                                   <div className="flex items-center gap-2">
-                                    <Button variant="outline" size="sm" onClick={() => router.push(`/scan/${u.code}`)}>
-                                      Abrir scan
-                                    </Button>
                                     <Button
                                       variant="outline"
                                       size="sm"
@@ -1237,28 +1216,8 @@ export default function ProductDetailsPage() {
                                   </div>
                                   <div className="flex flex-wrap items-center gap-2 pt-1">
                                     {u.status === "ACQUIRED" ? (
-                                      <>
-                                        <Button variant="outline" size="sm" onClick={() => openUnitAction(u, "RETURN")}>
-                                          Devolver
-                                        </Button>
-                                        <Button variant="outline" size="sm" onClick={() => openUnitAction(u, "REPAIR_OUT")}>
-                                          Reparação
-                                        </Button>
-                                      </>
-                                    ) : null}
-                                    {u.status === "IN_REPAIR" ? (
-                                      <Button variant="outline" size="sm" onClick={() => openUnitAction(u, "REPAIR_IN")}>
-                                        Regressou reparação
-                                      </Button>
-                                    ) : null}
-                                    {isAdmin && u.status !== "SCRAPPED" ? (
-                                      <Button variant="outline" size="sm" onClick={() => openUnitAction(u, "SCRAP")}>
-                                        Abater
-                                      </Button>
-                                    ) : null}
-                                    {isAdmin && u.status !== "LOST" ? (
-                                      <Button variant="outline" size="sm" onClick={() => openUnitAction(u, "LOST")}>
-                                        Extravio
+                                      <Button variant="outline" size="sm" onClick={() => openUnitAction(u, "RETURN")}>
+                                        Devolver
                                       </Button>
                                     ) : null}
                                   </div>
@@ -1637,10 +1596,6 @@ export default function ProductDetailsPage() {
                         <option value="IN">Entrada</option>
                         <option value="OUT">Saída</option>
                         <option value="RETURN">Devolução</option>
-                        <option value="REPAIR_OUT">Reparação (saída)</option>
-                        <option value="REPAIR_IN">Reparação (entrada)</option>
-                        <option value="SCRAP">Abate</option>
-                        <option value="LOST">Extravio</option>
                       </select>
                     </div>
 
@@ -1727,13 +1682,6 @@ export default function ProductDetailsPage() {
                                 {m.unit?.code ? (
                                   <div className="mt-1 flex items-center gap-2">
                                     <span className="text-xs text-muted-foreground break-all">Unidade: {m.unit.code}</span>
-                                    <Button
-                                      size="sm"
-                                      variant="outline"
-                                      onClick={() => router.push(`/scan/${m.unit!.code}`)}
-                                    >
-                                      Scan
-                                    </Button>
                                   </div>
                                 ) : null}
                               </TableCell>
@@ -1786,9 +1734,6 @@ export default function ProductDetailsPage() {
                   <div className="text-xs text-muted-foreground">
                     Estado atual:{" "}
                     {unitActionDialog.unit ? unitStatusMeta(unitActionDialog.unit.status).label : "—"}
-                    {!isAdmin && (unitActionDialog.action === "SCRAP" || unitActionDialog.action === "LOST")
-                      ? " • Ação permitida apenas para ADMIN."
-                      : ""}
                   </div>
                   <Input
                     placeholder="Motivo (opcional)"
@@ -1824,12 +1769,7 @@ export default function ProductDetailsPage() {
                   </Button>
                   <Button
                     onClick={executeUnitAction}
-                    disabled={
-                      unitActionDialog.saving ||
-                      !unitActionDialog.unit ||
-                      (!isAdmin &&
-                        (unitActionDialog.action === "SCRAP" || unitActionDialog.action === "LOST"))
-                    }
+                    disabled={unitActionDialog.saving || !unitActionDialog.unit}
                   >
                     {unitActionDialog.saving ? "A executar..." : "Confirmar"}
                   </Button>

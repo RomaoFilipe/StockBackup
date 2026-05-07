@@ -113,9 +113,8 @@ export default function PrintProductUnitsQrPage() {
 
       const next: Record<string, string> = {};
       for (const u of units) {
-        const url = `${origin}/scan/${u.code}`;
         // Moderate size: good for printing, still crisp.
-        const dataUrl = await QRCode.toDataURL(url, {
+        const dataUrl = await QRCode.toDataURL(u.code, {
           margin: 1,
           width: 220,
           errorCorrectionLevel: "M",

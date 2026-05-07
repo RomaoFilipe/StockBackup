@@ -20,9 +20,9 @@ const geistMono = localFont({
 });
 
 export const metadata = {
-  title: "CMCHUB - Inventory Management System",
+  title: "Stock Local - Inventário",
   description:
-    "CMCHUB is a modern Next.js web application for efficient product inventory management. Features include product listing, filtering, sorting, secure authentication, and responsive design.",
+    "Gestão local de inventário, entradas, saídas e pedidos de material.",
   authors: [
     {
       name: "Arnob Mahmud",
@@ -32,6 +32,7 @@ export const metadata = {
   ],
   keywords: [
     "CMCHUB",
+    "Stock Local",
     "Inventory Management",
     "Next.js",
     "React",
@@ -52,9 +53,9 @@ export const metadata = {
     ],
   },
   openGraph: {
-    title: "CMCHUB - Inventory Management System",
+    title: "Stock Local - Inventário",
     description:
-      "Efficiently manage your product inventory with CMCHUB, a secure and responsive Next.js web application.",
+      "Gestão local de inventário, entradas, saídas e pedidos de material.",
     url: "https://stockly-inventory.vercel.app/",
     images: [
       {
@@ -67,9 +68,9 @@ export const metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "CMCHUB - Inventory Management System",
+    title: "Stock Local - Inventário",
     description:
-      "Efficiently manage your product inventory with CMCHUB, a secure and responsive Next.js web application.",
+      "Gestão local de inventário, entradas, saídas e pedidos de material.",
     images: [
       "https://github.com/user-attachments/assets/7495dcfb-c7cb-44e6-a1ef-d82930a8ada7",
     ],

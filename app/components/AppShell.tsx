@@ -4,54 +4,35 @@ import React, { useMemo, useState } from "react";
 import Image from "next/image";
 import { usePathname, useRouter, useSearchParams, type ReadonlyURLSearchParams } from "next/navigation";
 import {
-  Activity,
-  Archive,
-  BarChart3,
-  BookOpen,
-  Building2,
   Boxes,
-  BriefcaseBusiness,
   ChevronDown,
   ClipboardList,
-  Database,
   ListTodo,
   LogOut,
   Menu,
   Package,
   PlusCircle,
-  ShieldCheck,
   Shield,
-  KeyRound,
-  Ticket,
   Users,
   UserCircle2,
-  UserRoundCheck,
   Rows3,
   StretchHorizontal,
-  MessageCircle,
-  HandCoins,
-  FileCheck,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import axiosInstance from "@/utils/axiosInstance";
 import { useAuth } from "@/app/authContext";
 import { ModeToggle } from "@/app/AppHeader/ModeToggle";
 import { RequestsNotificationsBell } from "@/app/AppHeader/RequestsNotificationsBell";
-import PresenceWidget from "@/app/components/PresenceWidget";
-import TicketMessageNotifier from "@/app/components/TicketMessageNotifier";
 import { Separator } from "@/components/ui/separator";
 
 interface AppShellProps {
@@ -88,93 +69,61 @@ type RouteAccessRule = {
 
 const ROUTE_ACCESS_RULES: RouteAccessRule[] = [
   { prefix: "/requests/novo", requiredAnyPermissions: ["requests.create"] },
-  // USER intake form: this route is intended for base role USER and does not need the broader requests.view permission.
   { prefix: "/requests/estado/novo", roles: ["USER"] },
-  // USER self-service area (request intake/status).
   { prefix: "/requests/estado", roles: ["USER"] },
-  { prefix: "/requests/aprovacoes", requiredAnyPermissions: ["requests.approve"] },
-  { prefix: "/requests/aprovacoes-finais", requiredAnyPermissions: ["requests.final_approve", "requests.final_reject"] },
+  { prefix: "/requests/aprovacoes", requiredAnyPermissions: ["__onlylocal.disabled__"] },
+  { prefix: "/requests/aprovacoes-finais", requiredAnyPermissions: ["__onlylocal.disabled__"] },
   { prefix: "/requests", requiredAnyPermissions: ["requests.view"] },
-  { prefix: "/governanca/permissoes", requiredAnyPermissions: ["users.manage"] },
-  { prefix: "/governanca/financiamento", requiredAnyPermissions: ["finance.manage", "finance.view"] },
-  { prefix: "/governanca/patrimonio", requiredAnyPermissions: ["assets.manage", "assets.view"] },
-  { prefix: "/governanca/requerimentos", requiredAnyPermissions: ["public_requests.handle", "public_requests.view"] },
-  { prefix: "/governanca/recebidos", requiredAnyPermissions: ["public_requests.handle", "public_requests.view"] },
-  {
-    prefix: "/governanca",
-    requiredAnyPermissions: ["finance.manage", "finance.view", "assets.manage", "assets.view", "public_requests.handle", "public_requests.view", "reports.view"],
-  },
+  { prefix: "/products", requiredAnyPermissions: ["assets.manage", "assets.view"] },
+  { prefix: "/movements", requiredAnyPermissions: ["assets.manage", "assets.view"] },
   { prefix: "/users", requiredAnyPermissions: ["users.manage"] },
-  { prefix: "/business-insights", requiredAnyPermissions: ["reports.view"] },
-  { prefix: "/reports", requiredAnyPermissions: ["reports.view"] },
-  { prefix: "/DB", requiredAnyPermissions: ["users.manage"] },
-  { prefix: "/api-docs", requiredAnyPermissions: ["users.manage"] },
-  { prefix: "/api-status", requiredAnyPermissions: ["users.manage"] },
-  { prefix: "/storage", requiredAnyPermissions: ["assets.manage", "assets.view"] },
-  { prefix: "/equipamentos", requiredAnyPermissions: ["assets.manage", "assets.view"] },
+  { prefix: "/admin", requiredAnyPermissions: ["__onlylocal.disabled__"] },
+  { prefix: "/governanca", requiredAnyPermissions: ["__onlylocal.disabled__"] },
+  { prefix: "/business-insights", requiredAnyPermissions: ["__onlylocal.disabled__"] },
+  { prefix: "/reports", requiredAnyPermissions: ["__onlylocal.disabled__"] },
+  { prefix: "/DB", requiredAnyPermissions: ["__onlylocal.disabled__"] },
+  { prefix: "/api-docs", requiredAnyPermissions: ["__onlylocal.disabled__"] },
+  { prefix: "/api-status", requiredAnyPermissions: ["__onlylocal.disabled__"] },
+  { prefix: "/storage", requiredAnyPermissions: ["__onlylocal.disabled__"] },
+  { prefix: "/equipamentos", requiredAnyPermissions: ["__onlylocal.disabled__"] },
+  { prefix: "/tickets", requiredAnyPermissions: ["__onlylocal.disabled__"] },
+  { prefix: "/portal", requiredAnyPermissions: ["__onlylocal.disabled__"] },
+  { prefix: "/scan", requiredAnyPermissions: ["__onlylocal.disabled__"] },
+  { prefix: "/mydesktop", requiredAnyPermissions: ["__onlylocal.disabled__"] },
   { prefix: "/", requiredAnyPermissions: ["assets.manage", "assets.view"] },
 ];
 
 const navSections: NavSection[] = [
   {
-    id: "mydesktop",
-    label: "MyDesktop",
-    icon: StretchHorizontal,
-    defaultOpen: true,
-    items: [
-      {
-        id: "mydesktop",
-        label: "MyDesktop",
-        href: "/mydesktop",
-        icon: StretchHorizontal,
-        roles: ["USER"],
-      },
-    ],
-  },
-  {
     id: "requests",
-    label: "Pedidos",
+    label: "Pedidos de material",
     icon: ClipboardList,
     defaultOpen: true,
     items: [
       {
         id: "my-requests",
-        label: "Meus Pedidos",
+        label: "Meus pedidos",
         href: "/requests/estado",
         icon: ListTodo,
         roles: ["USER"],
       },
       {
         id: "new-request",
-        label: "Novo Pedido",
+        label: "Novo pedido",
         href: "/requests/estado/novo",
         icon: PlusCircle,
         roles: ["USER"],
       },
       {
-        id: "pending-approvals",
-        label: "Pendentes para mim",
-        href: "/requests/aprovacoes",
-        icon: ShieldCheck,
-        requiredAnyPermissions: ["requests.approve"],
-      },
-      {
-        id: "final-approvals",
-        label: "Aprovação final",
-        href: "/requests/aprovacoes-finais",
-        icon: ShieldCheck,
-        requiredAnyPermissions: ["requests.final_approve", "requests.final_reject"],
-      },
-      {
         id: "requests-backoffice",
-        label: "Backoffice",
+        label: "Pedidos",
         href: "/requests",
         icon: ClipboardList,
         requiredAnyPermissions: ["requests.view"],
       },
       {
         id: "create-backoffice",
-        label: "Criar (Backoffice)",
+        label: "Criar pedido",
         href: "/requests/novo",
         icon: PlusCircle,
         requiredAnyPermissions: ["requests.create"],
@@ -182,37 +131,8 @@ const navSections: NavSection[] = [
     ],
   },
   {
-    id: "tickets",
-    label: "Tickets",
-    icon: Ticket,
-    defaultOpen: true,
-    items: [
-      {
-        id: "tickets",
-        label: "Meus Tickets",
-        href: "/tickets",
-        icon: Ticket,
-      },
-    ],
-  },
-  {
-    id: "recebidos",
-    label: "Recebidos",
-    icon: FileCheck,
-    requiredAnyPermissions: ["public_requests.handle", "public_requests.view"],
-    items: [
-      {
-        id: "external-received",
-        label: "Recebidos (portal)",
-        href: "/governanca/recebidos",
-        icon: FileCheck,
-        requiredAnyPermissions: ["public_requests.handle", "public_requests.view"],
-      },
-    ],
-  },
-  {
     id: "inventory",
-    label: "Inventário",
+    label: "Inventário de stock",
     icon: Boxes,
     requiredAnyPermissions: ["assets.manage", "assets.view"],
     items: [
@@ -224,105 +144,25 @@ const navSections: NavSection[] = [
         requiredAnyPermissions: ["assets.manage", "assets.view"],
       },
       {
-        id: "equipment",
-        label: "Equipamentos",
-        href: "/equipamentos",
+        id: "movements",
+        label: "Entradas e saídas",
+        href: "/movements",
         icon: Boxes,
         requiredAnyPermissions: ["assets.manage", "assets.view"],
-      },
-      {
-        id: "storage",
-        label: "Armazém",
-        href: "/storage",
-        icon: Archive,
-        requiredAnyPermissions: ["assets.manage", "assets.view"],
-        active: (pathname, currentSearchParams) =>
-          pathname === "/storage" && currentSearchParams?.get("tab") !== "documents",
-      },
-      {
-        id: "assets-governance",
-        label: "Património (governança)",
-        href: "/governanca/patrimonio",
-        icon: Archive,
-        requiredAnyPermissions: ["assets.manage", "assets.view"],
-      },
-    ],
-  },
-  {
-    id: "reports",
-    label: "Relatórios",
-    icon: BarChart3,
-    requiredAnyPermissions: ["reports.view"],
-    items: [
-      {
-        id: "approvals-report",
-        label: "Aprovações",
-        href: "/reports/aprovacoes",
-        icon: Rows3,
-        requiredAnyPermissions: ["reports.view"],
-      },
-      {
-        id: "insights",
-        label: "Insights",
-        href: "/business-insights",
-        icon: BarChart3,
-        requiredAnyPermissions: ["reports.view"],
-      },
-      {
-        id: "reports-ticket-ops",
-        label: "Operações (Tickets)",
-        href: "/reports/ticket-operations",
-        icon: Rows3,
-        requiredAnyPermissions: ["reports.view"],
       },
     ],
   },
   {
     id: "admin",
-    label: "Admin",
+    label: "Admin local",
     icon: Shield,
-    requiredAnyPermissions: ["users.manage", "finance.manage", "finance.view"],
+    requiredAnyPermissions: ["users.manage"],
     items: [
       {
-        id: "finance",
-        label: "Financiamento",
-        href: "/governanca/financiamento",
-        icon: HandCoins,
-        requiredAnyPermissions: ["finance.manage", "finance.view"],
-      },
-      {
-        id: "rbac",
-        label: "Permissões",
-        href: "/governanca/permissoes",
-        icon: KeyRound,
-        requiredAnyPermissions: ["users.manage"],
-      },
-      {
         id: "people",
-        label: "Pessoas",
+        label: "Utilizadores e acessos",
         href: "/users",
         icon: Users,
-        requiredAnyPermissions: ["users.manage"],
-      },
-      {
-        id: "database",
-        label: "Base de Dados",
-        href: "/DB",
-        icon: Database,
-        requiredAnyPermissions: ["users.manage"],
-      },
-      {
-        id: "api-docs",
-        label: "Documentação da API",
-        href: "/api-docs",
-        icon: BookOpen,
-        requiredAnyPermissions: ["users.manage"],
-      },
-      {
-        id: "api-status",
-        label: "Estado da API",
-        href: "/api-status",
-        icon: Activity,
         requiredAnyPermissions: ["users.manage"],
       },
     ],
@@ -338,16 +178,10 @@ const getPersonalItems = (openProfile: () => void): NavItem[] => [
   },
   {
     id: "my-items",
-    label: "Meus Itens",
+    label: "Meus pedidos",
     href: "/requests/estado",
-    icon: UserRoundCheck,
-    requiredAnyPermissions: ["requests.view"],
-  },
-  {
-    id: "presence",
-    label: "Estado Pessoal (em breve)",
-    icon: Activity,
-    disabled: true,
+    icon: ListTodo,
+    roles: ["USER"],
   },
 ];
 
@@ -363,12 +197,6 @@ export default function AppShell({ children }: AppShellProps) {
   const [changing, setChanging] = React.useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [density, setDensity] = useState<"comfortable" | "compact">("comfortable");
-  const [userTicketCreateOpen, setUserTicketCreateOpen] = useState(false);
-  const [creatingUserTicket, setCreatingUserTicket] = useState(false);
-  const [userTicketTitle, setUserTicketTitle] = useState("");
-  const [userTicketDescription, setUserTicketDescription] = useState("");
-  const [userTicketPriority, setUserTicketPriority] = useState<"LOW" | "NORMAL" | "HIGH" | "CRITICAL">("NORMAL");
-  const [userTicketType, setUserTicketType] = useState<"INCIDENT" | "REQUEST" | "QUESTION" | "CHANGE">("QUESTION");
   const [sectionOpen, setSectionOpen] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(navSections.map((section) => [section.id, section.defaultOpen ?? false])),
   );
@@ -399,6 +227,7 @@ export default function AppShell({ children }: AppShellProps) {
       if (!role) return false;
       if (rules?.roles?.length && !rules.roles.includes(role)) return false;
       if (!rules?.requiredAnyPermissions?.length) return true;
+      if (rules.requiredAnyPermissions.includes("__onlylocal.disabled__")) return false;
       if (permissionSet.has("*")) return true;
       return rules.requiredAnyPermissions.some((permissionKey) => permissionSet.has(permissionKey));
     },
@@ -426,17 +255,13 @@ export default function AppShell({ children }: AppShellProps) {
   const mobilePrimaryNav = useMemo<NavItem[]>(() => {
     const options: NavItem[] = user?.role === "USER"
       ? [
-          { id: "mydesktop", label: "MyDesktop", href: "/mydesktop", icon: StretchHorizontal, roles: ["USER"] },
           { id: "my-requests", label: "Pedidos", href: "/requests/estado", icon: ListTodo, roles: ["USER"] },
-          { id: "tickets", label: "Tickets", href: "/tickets", icon: MessageCircle },
-          { id: "approvals", label: "Aprovações", href: "/requests/aprovacoes", icon: ShieldCheck, requiredAnyPermissions: ["requests.approve"] },
           { id: "new", label: "Criar", href: "/requests/estado/novo", icon: PlusCircle, roles: ["USER"] },
         ]
       : [
           { id: "requests", label: "Pedidos", href: "/requests", icon: ListTodo, requiredAnyPermissions: ["requests.view"] },
-          { id: "tickets", label: "Tickets", href: "/tickets", icon: MessageCircle },
           { id: "products", label: "Produtos", href: "/", icon: Package, requiredAnyPermissions: ["assets.manage", "assets.view"] },
-          { id: "approvals", label: "Aprovações", href: "/requests/aprovacoes", icon: ShieldCheck, requiredAnyPermissions: ["requests.approve"] },
+          { id: "movements", label: "Movimentos", href: "/movements", icon: Boxes, requiredAnyPermissions: ["assets.manage", "assets.view"] },
           { id: "new", label: "Criar", href: "/requests/novo", icon: PlusCircle, requiredAnyPermissions: ["requests.create"] },
         ];
     return options.filter((item) => canAccess(item));
@@ -529,46 +354,6 @@ export default function AppShell({ children }: AppShellProps) {
     }
   };
 
-  const handleCreateUserTicket = async () => {
-    if (!userTicketTitle.trim()) {
-      toast({
-        title: "Título obrigatório",
-        description: "Preenche o título do ticket.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    setCreatingUserTicket(true);
-    try {
-      const res = await axiosInstance.post("/tickets", {
-        title: userTicketTitle.trim(),
-        description: userTicketDescription.trim() || undefined,
-        priority: userTicketPriority,
-        type: userTicketType,
-      });
-
-      const ticketId = res?.data?.id as string | undefined;
-      setUserTicketCreateOpen(false);
-      setUserTicketTitle("");
-      setUserTicketDescription("");
-      setUserTicketPriority("NORMAL");
-      setUserTicketType("QUESTION");
-
-      if (ticketId) {
-        router.push(`/tickets/${ticketId}`);
-        return;
-      }
-
-      toast({ title: "Ticket criado" });
-    } catch (error: any) {
-      const msg = error?.response?.data?.error || "Não foi possível criar ticket.";
-      toast({ title: "Erro", description: msg, variant: "destructive" });
-    } finally {
-      setCreatingUserTicket(false);
-    }
-  };
-
   React.useEffect(() => {
     if (user?.mustChangePassword) {
       setPwOpen(true);
@@ -618,8 +403,8 @@ export default function AppShell({ children }: AppShellProps) {
               />
             </div>
             <div>
-              <div className="text-lg font-semibold tracking-tight">CMCHUB</div>
-              <div className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Inventory Suite</div>
+              <div className="text-lg font-semibold tracking-tight">Stock Local</div>
+              <div className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Inventário</div>
             </div>
           </div>
 
@@ -944,72 +729,6 @@ export default function AppShell({ children }: AppShellProps) {
         </div>
       </nav>
 
-      {user?.role === "USER" ? (
-        <button
-          type="button"
-          onClick={() => setUserTicketCreateOpen(true)}
-          className="fixed bottom-24 right-4 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-xl ring-1 ring-primary/35 transition hover:scale-[1.03] hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-70 lg:bottom-24 lg:right-6"
-          aria-label="Criar ticket"
-          title="Criar ticket"
-        >
-          <MessageCircle className="h-6 w-6" />
-        </button>
-      ) : null}
-
-      <PresenceWidget />
-      <TicketMessageNotifier />
-
-      <Dialog open={userTicketCreateOpen} onOpenChange={setUserTicketCreateOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Criar Ticket</DialogTitle>
-            <DialogDescription>Abre um ticket para suporte técnico.</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3">
-            <Input
-              value={userTicketTitle}
-              onChange={(e) => setUserTicketTitle(e.target.value)}
-              placeholder="Título do problema"
-            />
-            <Textarea
-              value={userTicketDescription}
-              onChange={(e) => setUserTicketDescription(e.target.value)}
-              placeholder="Descreve o problema"
-              rows={4}
-            />
-            <div className="grid grid-cols-2 gap-2">
-              <select
-                className="h-10 rounded-md border bg-background px-2 text-sm"
-                value={userTicketPriority}
-                onChange={(e) => setUserTicketPriority(e.target.value as typeof userTicketPriority)}
-              >
-                <option value="LOW">Baixa</option>
-                <option value="NORMAL">Normal</option>
-                <option value="HIGH">Alta</option>
-                <option value="CRITICAL">Crítica</option>
-              </select>
-              <select
-                className="h-10 rounded-md border bg-background px-2 text-sm"
-                value={userTicketType}
-                onChange={(e) => setUserTicketType(e.target.value as typeof userTicketType)}
-              >
-                <option value="QUESTION">Dúvida</option>
-                <option value="INCIDENT">Incidente</option>
-                <option value="REQUEST">Pedido</option>
-                <option value="CHANGE">Mudança</option>
-              </select>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setUserTicketCreateOpen(false)} disabled={creatingUserTicket}>
-              Cancelar
-            </Button>
-            <Button onClick={() => void handleCreateUserTicket()} disabled={creatingUserTicket || !userTicketTitle.trim()}>
-              {creatingUserTicket ? "A criar..." : "Criar ticket"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

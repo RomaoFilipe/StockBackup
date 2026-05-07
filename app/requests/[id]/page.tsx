@@ -20,7 +20,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { SignaturePad, type SignaturePadHandle } from "@/components/ui/signature-pad";
-import { QRCodeHover } from "@/components/ui/qr-code-hover";
 import { useToast } from "@/hooks/use-toast";
 import axiosInstance from "@/utils/axiosInstance";
 import Image from "next/image";
@@ -775,32 +774,6 @@ export default function RequestDetailsPage() {
                 </CardContent>
               </Card>
 
-              <Card>
-                <CardHeader className="py-3">
-                  <CardTitle className="text-base">Tickets associados</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-2">
-                  {request.tickets?.length ? (
-                    <div className="space-y-2">
-                      {request.tickets.map((t) => (
-                        <div key={t.id} className="flex items-center justify-between gap-3 rounded-lg border border-border/60 bg-background p-2">
-                          <div className="min-w-0">
-                            <div className="text-sm font-medium truncate">{t.code}</div>
-                            <div className="text-xs text-muted-foreground">
-                              Estado: {t.status} • ligado em {new Date(t.linkedAt).toLocaleString("pt-PT")}
-                            </div>
-                          </div>
-                          <Button size="sm" variant="outline" onClick={() => router.push(`/tickets/${t.id}`)}>
-                            Abrir
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-sm text-muted-foreground">Sem tickets associados.</div>
-                  )}
-                </CardContent>
-              </Card>
             </div>
 
             <Card>
@@ -849,7 +822,7 @@ export default function RequestDetailsPage() {
                           <TableHead className="w-[110px]">Qtd</TableHead>
                           <TableHead className="w-[140px]">Unid.</TableHead>
                           <TableHead className="w-[160px]">Referência</TableHead>
-                          <TableHead className="w-[180px]">QR</TableHead>
+                          <TableHead className="w-[180px]">Código</TableHead>
                           <TableHead>Notas</TableHead>
                         </TableRow>
                       </TableHeader>
@@ -881,7 +854,7 @@ export default function RequestDetailsPage() {
                           <TableHead className="w-[110px]">Qtd</TableHead>
                           <TableHead className="w-[140px]">Unid.</TableHead>
                           <TableHead className="w-[160px]">Referência</TableHead>
-                          <TableHead className="w-[180px]">QR</TableHead>
+                          <TableHead className="w-[180px]">Código</TableHead>
                           <TableHead>Notas</TableHead>
                         </TableRow>
                       </TableHeader>
@@ -913,7 +886,7 @@ export default function RequestDetailsPage() {
                     <TableHead className="w-[110px]">Qtd</TableHead>
                     <TableHead className="w-[140px]">Unid.</TableHead>
                     <TableHead className="w-[160px]">Referência</TableHead>
-                    <TableHead className="w-[180px]">QR</TableHead>
+                    <TableHead className="w-[180px]">Código</TableHead>
                     <TableHead>Notas</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -932,24 +905,7 @@ export default function RequestDetailsPage() {
                       <TableCell>{it.reference || ""}</TableCell>
                       <TableCell>
                         {it.destination?.trim() ? (
-                          <div className="flex items-center gap-1">
-                            <Button
-                              type="button"
-                              variant="link"
-                              className="h-auto p-0 font-mono text-xs"
-                              onClick={() => router.push(`/scan/${encodeURIComponent(it.destination!.trim())}`)}
-                              title="Abrir detalhe do QR"
-                            >
-                              {it.destination.trim()}
-                            </Button>
-                            {origin ? (
-                              <QRCodeHover
-                                data={`${origin}/scan/${encodeURIComponent(it.destination.trim())}`}
-                                title={`QR: ${it.destination.trim()}`}
-                                size={220}
-                              />
-                            ) : null}
-                          </div>
+                          <span className="font-mono text-xs break-all">{it.destination.trim()}</span>
                         ) : (
                           ""
                         )}

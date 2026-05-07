@@ -577,7 +577,7 @@ export default function AddProductDialog({
                           {createdUnitPreviewCodes.map((code) => (
                             <QRCodeComponent
                               key={code}
-                              data={`${typeof window !== "undefined" ? window.location.origin : ""}/scan/${code}`}
+                              data={code}
                               title="QR • Unidade"
                               size={180}
                               showDownload
