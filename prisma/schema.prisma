@@ -55,6 +55,7 @@ model Tenant {
   createdAt DateTime @default(now())
 
   users            User[]
+  employees        Employee[]
   allowedIps       AllowedIp[]
   ipAccessRequests IpAccessRequest[]
   userAdminAudits  UserAdminAudit[]
@@ -476,6 +477,7 @@ model RequestingService {
 
   // Users optionally belong to a requesting service
   users User[]
+  employees Employee[]
 
   requests Request[]
   invoices ProductInvoice[]
@@ -491,6 +493,28 @@ model RequestingService {
   @@unique([codigo])
   @@index([ativo])
   @@map("servicos_requisitantes")
+}
+
+model Employee {
+  id        String   @id @default(uuid()) @db.Uuid
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  name             String  @db.VarChar(160)
+  email            String? @db.VarChar(255)
+  phoneOrExtension String? @db.VarChar(60)
+  isActive         Boolean @default(true)
+
+  requestingServiceId Int
+  requestingService   RequestingService @relation(fields: [requestingServiceId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, requestingServiceId, name])
+  @@index([tenantId])
+  @@index([requestingServiceId])
+  @@index([isActive])
 }
 
 model PublicRequest {

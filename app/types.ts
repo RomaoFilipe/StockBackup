@@ -73,7 +73,28 @@ export interface Supplier {
 export interface Category {
   id: string;
   name: string;
-  userId: string;
+  // Multi-tenant: DB column is userId but Prisma field is tenantId.
+  // Keep both optional to be compatible with existing code paths.
+  tenantId?: string;
+  userId?: string;
+}
+
+export interface Employee {
+  id: string;
+  name: string;
+  email?: string | null;
+  phoneOrExtension?: string | null;
+  requestingServiceId: number;
+  requestingService?: {
+    id: number;
+    codigo: string;
+    designacao: string;
+    ativo: boolean;
+  } | null;
+  isActive?: boolean;
+  tenantId?: string;
+  createdAt?: Date | string;
+  updatedAt?: Date | string;
 }
 
 export type RequestStatus =

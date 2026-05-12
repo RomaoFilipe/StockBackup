@@ -13,6 +13,7 @@ import {
   Package,
   PlusCircle,
   Shield,
+  Truck,
   Users,
   UserCircle2,
   Rows3,
@@ -75,7 +76,9 @@ const ROUTE_ACCESS_RULES: RouteAccessRule[] = [
   { prefix: "/requests/aprovacoes-finais", requiredAnyPermissions: ["__onlylocal.disabled__"] },
   { prefix: "/requests", requiredAnyPermissions: ["requests.view"] },
   { prefix: "/products", requiredAnyPermissions: ["assets.manage", "assets.view"] },
+  { prefix: "/suppliers", requiredAnyPermissions: ["assets.manage", "assets.view"] },
   { prefix: "/movements", requiredAnyPermissions: ["assets.manage", "assets.view"] },
+  { prefix: "/employees", requiredAnyPermissions: ["users.manage"] },
   { prefix: "/users", requiredAnyPermissions: ["users.manage"] },
   { prefix: "/admin", requiredAnyPermissions: ["__onlylocal.disabled__"] },
   { prefix: "/governanca", requiredAnyPermissions: ["__onlylocal.disabled__"] },
@@ -150,6 +153,13 @@ const navSections: NavSection[] = [
         icon: Boxes,
         requiredAnyPermissions: ["assets.manage", "assets.view"],
       },
+      {
+        id: "suppliers",
+        label: "Fornecedores",
+        href: "/suppliers",
+        icon: Truck,
+        requiredAnyPermissions: ["assets.manage", "assets.view"],
+      },
     ],
   },
   {
@@ -162,6 +172,13 @@ const navSections: NavSection[] = [
         id: "people",
         label: "Utilizadores e acessos",
         href: "/users",
+        icon: Users,
+        requiredAnyPermissions: ["users.manage"],
+      },
+      {
+        id: "employees",
+        label: "Funcionários",
+        href: "/employees",
         icon: Users,
         requiredAnyPermissions: ["users.manage"],
       },
@@ -262,6 +279,7 @@ export default function AppShell({ children }: AppShellProps) {
           { id: "requests", label: "Pedidos", href: "/requests", icon: ListTodo, requiredAnyPermissions: ["requests.view"] },
           { id: "products", label: "Produtos", href: "/", icon: Package, requiredAnyPermissions: ["assets.manage", "assets.view"] },
           { id: "movements", label: "Movimentos", href: "/movements", icon: Boxes, requiredAnyPermissions: ["assets.manage", "assets.view"] },
+          { id: "suppliers", label: "Fornec.", href: "/suppliers", icon: Truck, requiredAnyPermissions: ["assets.manage", "assets.view"] },
           { id: "new", label: "Criar", href: "/requests/novo", icon: PlusCircle, requiredAnyPermissions: ["requests.create"] },
         ];
     return options.filter((item) => canAccess(item));

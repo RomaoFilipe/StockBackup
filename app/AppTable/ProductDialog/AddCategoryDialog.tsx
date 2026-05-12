@@ -35,6 +35,7 @@ export default function AddCategoryDialog({ trigger }: { trigger?: React.ReactNo
   } = useProductStore();
   const { toast } = useToast();
   const { user, isLoggedIn } = useAuth();
+  const isAdmin = user?.role === "ADMIN";
 
   useEffect(() => {
     if (isLoggedIn) {
@@ -55,8 +56,7 @@ export default function AddCategoryDialog({ trigger }: { trigger?: React.ReactNo
     setIsSubmitting(true); // Start loading
     try {
       const response = await axiosInstance.post("/categories", {
-        name: categoryName,
-        userId: user?.id,
+        name: categoryName.trim(),
       });
 
       if (response.status !== 201) {
@@ -71,11 +71,12 @@ export default function AddCategoryDialog({ trigger }: { trigger?: React.ReactNo
         description: `"${categoryName}" foi adicionada.`,
       });
       loadCategories();
-    } catch (error) {
+    } catch (error: any) {
+      const msg = error?.response?.data?.error || "Não foi possível criar a categoria. Tenta novamente.";
       console.error("Error adding category:", error);
       toast({
         title: "Falha ao criar",
-        description: "Não foi possível criar a categoria. Tenta novamente.",
+        description: msg,
         variant: "destructive",
       });
     } finally {
@@ -113,11 +114,12 @@ export default function AddCategoryDialog({ trigger }: { trigger?: React.ReactNo
         description: `"${updatedCategory.name}" foi atualizada.`,
       });
       loadCategories();
-    } catch (error) {
+    } catch (error: any) {
+      const msg = error?.response?.data?.error || "Não foi possível atualizar a categoria. Tenta novamente.";
       console.error("Error editing category:", error);
       toast({
         title: "Falha ao atualizar",
-        description: "Não foi possível atualizar a categoria. Tenta novamente.",
+        description: msg,
         variant: "destructive",
       });
     } finally {
@@ -147,11 +149,12 @@ export default function AddCategoryDialog({ trigger }: { trigger?: React.ReactNo
         description: `"${categoryName}" foi removida.`,
       });
       loadCategories();
-    } catch (error) {
+    } catch (error: any) {
+      const msg = error?.response?.data?.error || "Não foi possível remover a categoria. Tenta novamente.";
       console.error("Error deleting category:", error);
       toast({
         title: "Falha ao remover",
-        description: "Não foi possível remover a categoria. Tenta novamente.",
+        description: msg,
         variant: "destructive",
       });
     } finally {
@@ -160,6 +163,10 @@ export default function AddCategoryDialog({ trigger }: { trigger?: React.ReactNo
   };
 
   if (!isLoggedIn) {
+    return null;
+  }
+
+  if (!isAdmin) {
     return null;
   }
 
@@ -197,6 +204,7 @@ export default function AddCategoryDialog({ trigger }: { trigger?: React.ReactNo
             onClick={handleAddCategory}
             className="h-11 w-full sm:w-auto px-11"
             isLoading={isSubmitting}
+            disabled={categoryName.trim() === "" || isSubmitting}
           >
             Adicionar categoria
           </Button>
@@ -204,9 +212,7 @@ export default function AddCategoryDialog({ trigger }: { trigger?: React.ReactNo
         <div className="mt-4">
           <h3 className="text-lg font-semibold">Categorias</h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mt-4">
-            {categories
-              .filter((category) => category.userId === user?.id)
-              .map((category) => (
+            {categories.map((category) => (
               <div
                 key={category.id}
                 className="p-4 border rounded-lg shadow-sm flex flex-col justify-between"
@@ -224,6 +230,7 @@ export default function AddCategoryDialog({ trigger }: { trigger?: React.ReactNo
                         onClick={() => handleEditCategory(category.id)}
                         className="h-8 w-full"
                         isLoading={isEditing}
+                        disabled={newCategoryName.trim() === "" || isEditing}
                       >
                         Guardar
                       </Button>

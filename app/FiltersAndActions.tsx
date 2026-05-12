@@ -24,6 +24,7 @@ import {
   UserRound,
 } from "lucide-react";
 import AddProductDialog from "./AppTable/ProductDialog/AddProductDialog";
+import AddCategoryDialog from "./AppTable/ProductDialog/AddCategoryDialog";
 import PaginationSelection, {
   PaginationType,
 } from "./Products/PaginationSelection";
@@ -361,6 +362,14 @@ export default function FiltersAndActions({
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <AddCategoryDialog
+            trigger={
+              <Button variant="outline" className="h-11 rounded-2xl border-border/70 px-4">
+                <Plus className="h-4 w-4" />
+                Categoria
+              </Button>
+            }
+          />
           <AddProductDialog
             allProducts={allProducts}
             userId={userId}

@@ -98,7 +98,8 @@ type RequestingServiceDto = {
 type RequestingServiceUserDto = {
   id: string;
   name: string;
-  email: string;
+  email?: string | null;
+  phoneOrExtension?: string | null;
   requestingServiceId: number | null;
 };
 
@@ -838,7 +839,7 @@ export default function RequestsPage() {
     const email = requesterEmployeeNo.trim().toLowerCase();
     const name = requesterName.trim().toLowerCase();
     const matched = requestingServiceUsers.find((u) => {
-      if (email) return u.email.toLowerCase() === email;
+      if (email) return (u.email || "").toLowerCase() === email;
       return name ? u.name.toLowerCase() === name : false;
     });
 
@@ -854,7 +855,8 @@ export default function RequestsPage() {
 
   const selectedRequesterLabel = useMemo(() => {
     if (selectedRequesterUser) {
-      return `${selectedRequesterUser.name} (${selectedRequesterUser.email})`;
+      const contact = selectedRequesterUser.email || selectedRequesterUser.phoneOrExtension;
+      return contact ? `${selectedRequesterUser.name} (${contact})` : selectedRequesterUser.name;
     }
     if (requesterName.trim()) {
       return requesterEmployeeNo.trim()
@@ -2092,17 +2094,19 @@ export default function RequestsPage() {
                                     {requestingServiceUsers.map((employee) => (
                                       <CommandItem
                                         key={employee.id}
-                                        value={`${employee.name} ${employee.email}`}
+                                        value={`${employee.name} ${employee.email || ""} ${employee.phoneOrExtension || ""}`}
                                         onSelect={() => {
                                           setSelectedRequesterUserId(employee.id);
                                           setRequesterName(employee.name);
-                                          setRequesterEmployeeNo(employee.email);
+                                          setRequesterEmployeeNo(employee.email || "");
                                           setRequesterPickerOpen(false);
                                         }}
                                       >
                                         <div className="flex w-full items-center justify-between gap-2">
                                           <span className="truncate">{employee.name}</span>
-                                          <span className="truncate text-xs text-muted-foreground">{employee.email}</span>
+                                          <span className="truncate text-xs text-muted-foreground">
+                                            {[employee.email, employee.phoneOrExtension].filter(Boolean).join(" · ") || "Sem contacto"}
+                                          </span>
                                         </div>
                                         {selectedRequesterUserId === employee.id ? <Check className="h-4 w-4" /> : null}
                                       </CommandItem>
@@ -2116,6 +2120,10 @@ export default function RequestsPage() {
                         <div className="space-y-1">
                           <div className="text-sm font-medium">Email</div>
                           <Input value={requesterEmployeeNo} readOnly placeholder="Email do funcionário selecionado" className="h-11 rounded-xl" />
+                        </div>
+                        <div className="space-y-1">
+                          <div className="text-sm font-medium">Telefone / extensão</div>
+                          <Input value={selectedRequesterUser?.phoneOrExtension || ""} readOnly placeholder="Telefone ou extensão" className="h-11 rounded-xl" />
                         </div>
                         <div className="space-y-1 md:col-span-2">
                           <div className="text-sm font-medium">Local de entrega</div>

@@ -81,6 +81,7 @@ const downloadTextFile = (fileName: string, contents: string, mimeType: string) 
 };
 
 const isUuid = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+const ALL_FILTER_VALUE = "__all__";
 
 export default function MovementsPage() {
   const router = useRouter();
@@ -407,12 +408,12 @@ export default function MovementsPage() {
 
             <div className="space-y-1 lg:col-span-2">
               <div className="text-xs text-muted-foreground">Produto</div>
-              <Select value={productId} onValueChange={setProductId}>
+              <Select value={productId || ALL_FILTER_VALUE} onValueChange={(value) => setProductId(value === ALL_FILTER_VALUE ? "" : value)}>
                 <SelectTrigger>
                   <SelectValue placeholder="(Todos)" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">(Todos)</SelectItem>
+                  <SelectItem value={ALL_FILTER_VALUE}>(Todos)</SelectItem>
                   {products.map((p) => (
                     <SelectItem key={p.id} value={p.id}>
                       {p.name} ({p.sku})
@@ -426,12 +427,12 @@ export default function MovementsPage() {
               <>
                 <div className="space-y-1">
                   <div className="text-xs text-muted-foreground">Por (quem executou)</div>
-                  <Select value={performedByUserId} onValueChange={setPerformedByUserId}>
+                  <Select value={performedByUserId || ALL_FILTER_VALUE} onValueChange={(value) => setPerformedByUserId(value === ALL_FILTER_VALUE ? "" : value)}>
                     <SelectTrigger>
                       <SelectValue placeholder="(Todos)" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">(Todos)</SelectItem>
+                      <SelectItem value={ALL_FILTER_VALUE}>(Todos)</SelectItem>
                       {users.map((u) => (
                         <SelectItem key={u.id} value={u.id}>
                           {u.name} ({u.email})
@@ -443,12 +444,12 @@ export default function MovementsPage() {
 
                 <div className="space-y-1">
                   <div className="text-xs text-muted-foreground">Atribuído a</div>
-                  <Select value={assignedToUserId} onValueChange={setAssignedToUserId}>
+                  <Select value={assignedToUserId || ALL_FILTER_VALUE} onValueChange={(value) => setAssignedToUserId(value === ALL_FILTER_VALUE ? "" : value)}>
                     <SelectTrigger>
                       <SelectValue placeholder="(Todos)" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">(Todos)</SelectItem>
+                      <SelectItem value={ALL_FILTER_VALUE}>(Todos)</SelectItem>
                       {users.map((u) => (
                         <SelectItem key={u.id} value={u.id}>
                           {u.name} ({u.email})

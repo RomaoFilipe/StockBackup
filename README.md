@@ -60,6 +60,7 @@ Rotas da aplicacao:
 - `/products/[id]` - detalhe do produto
 - `/products/[id]/print-qr` - impressao de codigos das unidades
 - `/movements` - movimentos de stock
+- `/suppliers` - fornecedores do inventario
 - `/requests` - pedidos de material
 - `/requests/novo` - criar pedido no backoffice
 - `/requests/[id]` - detalhe do pedido

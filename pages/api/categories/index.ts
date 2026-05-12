@@ -35,6 +35,9 @@ export default async function handler(
         });
         res.status(201).json(category);
       } catch (error) {
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+          return res.status(409).json({ error: "Categoria já existe" });
+        }
         console.error("Error creating category:", error);
         res.status(500).json({ error: "Failed to create category" });
       }
@@ -79,6 +82,9 @@ export default async function handler(
 
         res.status(200).json(updatedCategory);
       } catch (error) {
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+          return res.status(409).json({ error: "Categoria já existe" });
+        }
         console.error("Error updating category:", error);
         res.status(500).json({ error: "Failed to update category" });
       }

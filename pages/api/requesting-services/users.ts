@@ -31,33 +31,63 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const { requestingServiceId, q } = parsed.data;
 
   try {
-    const users = await prisma.user.findMany({
-      where: {
-        tenantId: session.tenantId,
-        isActive: true,
-        requestingServiceId,
-        ...(q
-          ? {
-              OR: [
-                { name: { contains: q, mode: "insensitive" as const } },
-                { email: { contains: q, mode: "insensitive" as const } },
-              ],
-            }
-          : {}),
-      },
-      orderBy: [{ name: "asc" }],
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        requestingServiceId: true,
-      },
-    });
+    const [employees, users] = await Promise.all([
+      prisma.employee.findMany({
+        where: {
+          tenantId: session.tenantId,
+          isActive: true,
+          requestingServiceId,
+          ...(q
+            ? {
+                OR: [
+                  { name: { contains: q, mode: "insensitive" as const } },
+                  { email: { contains: q, mode: "insensitive" as const } },
+                  { phoneOrExtension: { contains: q, mode: "insensitive" as const } },
+                ],
+              }
+            : {}),
+        },
+        orderBy: [{ name: "asc" }],
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          phoneOrExtension: true,
+          requestingServiceId: true,
+        },
+      }),
+      prisma.user.findMany({
+        where: {
+          tenantId: session.tenantId,
+          isActive: true,
+          requestingServiceId,
+          ...(q
+            ? {
+                OR: [
+                  { name: { contains: q, mode: "insensitive" as const } },
+                  { email: { contains: q, mode: "insensitive" as const } },
+                ],
+              }
+            : {}),
+        },
+        orderBy: [{ name: "asc" }],
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          requestingServiceId: true,
+        },
+      }),
+    ]);
 
-    return res.status(200).json(users);
+    const employeeEmails = new Set(employees.map((employee) => employee.email?.toLowerCase()).filter(Boolean));
+    const legacyUsers = users
+      .filter((user) => !employeeEmails.has(user.email.toLowerCase()))
+      .map((user) => ({ ...user, phoneOrExtension: null }));
+
+    return res.status(200).json([...employees, ...legacyUsers]);
   } catch (error) {
     console.error("GET /api/requesting-services/users error:", error);
     return res.status(500).json({ error: "Failed to fetch requesting-service users" });
   }
 }
-
