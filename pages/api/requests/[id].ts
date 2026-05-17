@@ -6,7 +6,7 @@ import { createRequestStatusAudit, notifyAdmin, notifyUser } from "@/utils/notif
 import { publishRealtimeEvent } from "@/utils/realtime";
 import { createTicketAudit } from "@/utils/ticketAudit";
 import { getUserPermissionGrants, hasPermission } from "@/utils/rbac";
-import { ensureRequestWorkflowDefinition, transitionRequestWorkflowByAction } from "@/utils/workflow";
+import { ensureRequestWorkflowDefinition, syncRequestWorkflowStateToStatusTx, transitionRequestWorkflowByAction } from "@/utils/workflow";
 import { syncFinalSignedRequestPdf } from "@/utils/requestSignedPdfStorage";
 import { getReservedUnitCodes, mergeExcludedUnitCodes, normalizeRequestItemsForUnitReservations } from "@/utils/unitReservations";
 import { fulfillStandardRequestStock } from "@/services/requests/fulfillRequest";
@@ -390,6 +390,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (voidPickupSign && !can("requests.void_pickup_sign")) {
         return res.status(403).json({ error: "Sem permissão para anular assinatura de levantamento." });
       }
+      if (voidPickupSign && existingBefore.status === "FULFILLED") {
+        const outMovements = await prisma.stockMovement.count({
+          where: { tenantId, requestId: id, type: "OUT" },
+        });
+        if (outMovements > 0) {
+          return res.status(409).json({
+            error:
+              "Não é possível anular o levantamento de um pedido já cumprido com saída de stock. Registe uma devolução para repor o material.",
+          });
+        }
+      }
 
       if (Object.prototype.hasOwnProperty.call(updateData, "status")) {
         const nextStatus = updateData.status;
@@ -623,6 +634,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             error: "Transição de workflow inválida para o estado pretendido.",
           });
         }
+      }
+
+      if (shouldFulfillByPickupSign) {
+        await ensureRequestWorkflowDefinition(prisma, tenantId);
       }
 
       const updated = await prisma.$transaction(async (tx) => {
@@ -1669,6 +1684,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
               });
             }
           }
+        }
+
+        if (shouldFulfillByPickupSign) {
+          await syncRequestWorkflowStateToStatusTx(tx, {
+            tenantId,
+            requestId: id,
+            status: "FULFILLED",
+            actorUserId: session.id,
+            action: "FULFILL",
+            note: "Levantamento assinado",
+          });
         }
 
         return { updatedCount: updatedRequest.count };

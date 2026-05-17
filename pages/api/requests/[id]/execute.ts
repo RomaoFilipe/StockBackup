@@ -9,6 +9,7 @@ import { getUserPermissionGrants, hasPermission } from "@/utils/rbac";
 import { syncFinalSignedRequestPdf } from "@/utils/requestSignedPdfStorage";
 import { getReservedUnitCodes, mergeExcludedUnitCodes } from "@/utils/unitReservations";
 import { fulfillStandardRequestStock } from "@/services/requests/fulfillRequest";
+import { ensureRequestWorkflowDefinition, syncRequestWorkflowStateToStatusTx } from "@/utils/workflow";
 
 const executeSchema = z.object({
   idempotencyKey: z.string().min(8).max(120),
@@ -177,6 +178,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     if (process.env.STOCK_USE_SHARED_FULFILLMENT !== "0") {
+      await ensureRequestWorkflowDefinition(prisma, tenantId);
       const lineUnitCodes = new Map(
         (payload.lines || [])
           .map((line) => [line.requestItemId, line.unitCode?.trim() || ""] as const)
@@ -212,6 +214,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             documentRef: payload.documentRef,
             executedByUserId: session.id,
           },
+        });
+
+        await syncRequestWorkflowStateToStatusTx(tx, {
+          tenantId,
+          requestId,
+          status: "FULFILLED",
+          actorUserId: session.id,
+          action: "FULFILL",
+          note: payload.note?.trim() || `Execução de armazém (${payload.documentRef})`,
         });
 
         return { executionId: execution.id, idempotent: fulfillment.idempotent };

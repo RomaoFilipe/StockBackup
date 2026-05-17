@@ -279,3 +279,82 @@ export async function transitionRequestWorkflowByAction(prisma: PrismaClient, ar
 }) {
   return prisma.$transaction(async (tx) => transitionRequestWorkflowByActionTx(tx, args));
 }
+
+export async function syncRequestWorkflowStateToStatusTx(tx: any, args: {
+  tenantId: string;
+  requestId: string;
+  status: RequestStatus;
+  actorUserId?: string;
+  action?: string;
+  note?: string | null;
+}) {
+  const txAny = tx as any;
+  const instance = await ensureRequestWorkflowInstance(tx, {
+    tenantId: args.tenantId,
+    requestId: args.requestId,
+  });
+
+  const states = await txAny.workflowStateDefinition.findMany({
+    where: {
+      tenantId: args.tenantId,
+      workflowId: instance.definitionId,
+      requestStatus: args.status,
+    },
+    orderBy: [{ sortOrder: "asc" }],
+    select: { id: true, code: true, isTerminal: true, requestStatus: true },
+  });
+
+  const targetState =
+    states.find((state: any) => state.code === args.status) ??
+    states[0] ??
+    null;
+  if (!targetState) {
+    throw new Error(`Workflow state not found for status ${args.status}`);
+  }
+
+  if (instance.currentStateId === targetState.id) {
+    await txAny.request.update({
+      where: { id: args.requestId },
+      data: { status: args.status },
+    });
+    return { synced: false as const, state: targetState };
+  }
+
+  await txAny.workflowInstance.update({
+    where: { id: instance.id },
+    data: {
+      currentStateId: targetState.id,
+      completedAt: targetState.isTerminal ? new Date() : null,
+    },
+  });
+
+  await txAny.request.update({
+    where: { id: args.requestId },
+    data: { status: args.status },
+  });
+
+  await txAny.workflowEvent.create({
+    data: {
+      tenantId: args.tenantId,
+      instanceId: instance.id,
+      fromStateId: instance.currentStateId,
+      toStateId: targetState.id,
+      action: args.action ?? `SYNC_${args.status}`,
+      note: args.note ?? null,
+      actorUserId: args.actorUserId ?? null,
+    },
+  });
+
+  return { synced: true as const, state: targetState };
+}
+
+export async function syncRequestWorkflowStateToStatus(prisma: PrismaClient, args: {
+  tenantId: string;
+  requestId: string;
+  status: RequestStatus;
+  actorUserId?: string;
+  action?: string;
+  note?: string | null;
+}) {
+  return prisma.$transaction(async (tx) => syncRequestWorkflowStateToStatusTx(tx, args));
+}

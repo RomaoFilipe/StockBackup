@@ -736,12 +736,33 @@ export default function RequestsPage() {
   }, [isLoggedIn, loadProducts, scopeMode, toast]);
 
   const changeRequestStatus = async (
-    requestId: string,
+    request: RequestDto,
     nextStatus: RequestDto["status"]
   ) => {
+    if (nextStatus === request.status) return;
+    if (nextStatus === "DRAFT") {
+      toast({
+        title: "Estado não alterado",
+        description: "Não é possível voltar uma requisição para rascunho a partir da lista.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (nextStatus === "FULFILLED") {
+      toast({
+        title: "Use o fluxo de levantamento",
+        description: "Para marcar como cumprida, abra a requisição e use Assinar levantamento ou Executar armazém.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     try {
-      const res = await axiosInstance.patch(`/requests/${requestId}`, { status: nextStatus });
-      setRequests((prev) => prev.map((r) => (r.id === requestId ? res.data : r)));
+      await axiosInstance.post(`/workflows/requests/${request.id}/action`, {
+        targetStatus: nextStatus,
+        note: "Alteração pela lista de requisições",
+      });
+      await loadAll();
       toast({ title: "Estado atualizado" });
     } catch (error: any) {
       const msg = error?.response?.data?.error || "Não foi possível atualizar o estado.";
@@ -1760,7 +1781,7 @@ export default function RequestsPage() {
                       <TableCell>
                         {isAdmin ? (
                           <div className="space-y-1">
-                            <Select value={r.status} onValueChange={(v) => changeRequestStatus(r.id, v as RequestDto["status"])}>
+                            <Select value={r.status} onValueChange={(v) => changeRequestStatus(r, v as RequestDto["status"])}>
                               <SelectTrigger className="h-8 w-[170px] rounded-lg">
                                 <SelectValue />
                               </SelectTrigger>
