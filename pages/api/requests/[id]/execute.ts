@@ -6,6 +6,9 @@ import { getSessionServer } from "@/utils/auth";
 import { createRequestStatusAudit, notifyAdmin, notifyUser } from "@/utils/notifications";
 import { publishRealtimeEvent } from "@/utils/realtime";
 import { getUserPermissionGrants, hasPermission } from "@/utils/rbac";
+import { syncFinalSignedRequestPdf } from "@/utils/requestSignedPdfStorage";
+import { getReservedUnitCodes, mergeExcludedUnitCodes } from "@/utils/unitReservations";
+import { fulfillStandardRequestStock } from "@/services/requests/fulfillRequest";
 
 const executeSchema = z.object({
   idempotencyKey: z.string().min(8).max(120),
@@ -89,8 +92,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         continue;
       }
 
+      const reservedCodes = await getReservedUnitCodes(prisma as any, {
+        tenantId,
+        productId: item.productId,
+        excludeRequestId: requestId,
+      });
+      const excludedCodes = mergeExcludedUnitCodes(reservedCodes);
       const candidates = await (prisma as any).productUnit.findMany({
-        where: { tenantId, productId: item.productId, status: "IN_STOCK" },
+        where: {
+          tenantId,
+          productId: item.productId,
+          status: "IN_STOCK",
+          ...(excludedCodes.length ? { code: { notIn: excludedCodes } } : {}),
+        },
         orderBy: [{ createdAt: "asc" }],
         take: 50,
         select: { id: true, code: true, status: true, serialNumber: true },
@@ -162,6 +176,133 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(400).json({ error: "Request must be APPROVED before warehouse execution" });
     }
 
+    if (process.env.STOCK_USE_SHARED_FULFILLMENT !== "0") {
+      const lineUnitCodes = new Map(
+        (payload.lines || [])
+          .map((line) => [line.requestItemId, line.unitCode?.trim() || ""] as const)
+          .filter(([, code]) => Boolean(code))
+      );
+
+      const result = await prisma.$transaction(async (tx) => {
+        const fulfillment = await fulfillStandardRequestStock({
+          tx,
+          tenantId,
+          requestId,
+          actorUserId: session.id,
+          lineUnitCodes,
+          reasonPrefix: "Execução armazém",
+          note: payload.note ?? null,
+          documentRef: payload.documentRef,
+          markFulfilled: true,
+          pickup: {
+            name: payload.receivedByName?.trim() || beforeRequest.requesterName || "Receção confirmada",
+            title: payload.receivedByTitle?.trim() || null,
+            signatureDataUrl: null,
+            ip: null,
+            userAgent: null,
+          },
+        });
+
+        const execution = await (tx as any).requestExecution.create({
+          data: {
+            tenantId,
+            requestId,
+            idempotencyKey: payload.idempotencyKey,
+            notes: payload.note?.trim() || null,
+            documentRef: payload.documentRef,
+            executedByUserId: session.id,
+          },
+        });
+
+        return { executionId: execution.id, idempotent: fulfillment.idempotent };
+      });
+
+      let pdfGeneratedFinal: boolean | undefined;
+      let pdfErrorFinal: string | undefined;
+      try {
+        const finalizedRequest = await prisma.request.findFirst({
+          where: { id: requestId, tenantId },
+          include: {
+            user: { select: { id: true, name: true, email: true } },
+            items: {
+              include: { product: { select: { id: true, name: true, sku: true } } },
+              orderBy: { createdAt: "asc" },
+            },
+          },
+        });
+
+        if (finalizedRequest) {
+          pdfGeneratedFinal = await syncFinalSignedRequestPdf({
+            tenantId,
+            request: finalizedRequest,
+            signatureChanged: true,
+          });
+        }
+      } catch (e: any) {
+        console.error("execute final request PDF sync error:", e);
+        pdfGeneratedFinal = false;
+        pdfErrorFinal = typeof e?.message === "string" ? e.message : "Failed to generate final signed PDF";
+      }
+
+      await createRequestStatusAudit({
+        tenantId,
+        requestId,
+        fromStatus: beforeRequest.status,
+        toStatus: "FULFILLED",
+        changedByUserId: session.id,
+        source: "api/requests/[id]/execute:POST",
+        note: payload.note?.trim() || `Execução de armazém (${payload.documentRef})`,
+      });
+
+      await notifyAdmin({
+        tenantId,
+        kind: "REQUEST_STATUS_CHANGED",
+        title: `Requisição executada: ${beforeRequest.gtmiNumber}`,
+        message: `Armazém executou e concluiu a requisição (${payload.documentRef}).`,
+        requestId,
+        data: { requestId, gtmiNumber: beforeRequest.gtmiNumber, documentRef: payload.documentRef },
+      });
+
+      if (beforeRequest.userId) {
+        await notifyUser({
+          tenantId,
+          recipientUserId: beforeRequest.userId,
+          kind: "REQUEST_STATUS_CHANGED",
+          title: `Pedido concluído: ${beforeRequest.gtmiNumber}`,
+          message: `Entrega concluída e registada (${payload.documentRef}).`,
+          requestId,
+          data: { requestId, gtmiNumber: beforeRequest.gtmiNumber, documentRef: payload.documentRef },
+        });
+      }
+
+      publishRealtimeEvent({
+        type: "request.status_changed",
+        tenantId,
+        audience: "ALL",
+        userId: beforeRequest.userId,
+        payload: {
+          requestId,
+          gtmiNumber: beforeRequest.gtmiNumber,
+          fromStatus: beforeRequest.status,
+          toStatus: "FULFILLED",
+          at: new Date().toISOString(),
+        },
+      });
+
+      return res.status(200).json({
+        ok: true,
+        idempotent: result.idempotent,
+        executionId: result.executionId,
+        pdfGeneratedFinal,
+        pdfErrorFinal,
+        request: {
+          id: beforeRequest.id,
+          status: "FULFILLED",
+          gtmiNumber: beforeRequest.gtmiNumber,
+        },
+      });
+    }
+
     const lineMap = new Map((payload.lines || []).map((line) => [line.requestItemId, line]));
 
     const result = await prisma.$transaction(async (tx) => {
@@ -207,6 +348,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           const requestedCode =
             lineMap.get(item.id)?.unitCode?.trim() ||
             (typeof item.destination === "string" ? item.destination.trim() : "");
+          const reservedCodes = await getReservedUnitCodes(txAny, {
+            tenantId,
+            productId: item.productId,
+            excludeRequestId: request.id,
+          });
+          if (requestedCode && reservedCodes.includes(requestedCode)) {
+            throw new Error(`Unidade ${requestedCode} já está reservada noutro pedido aberto`);
+          }
+          const excludedCodes = mergeExcludedUnitCodes(reservedCodes);
 
           const unit = requestedCode
             ? await txAny.productUnit.findFirst({
@@ -223,6 +373,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                   tenantId,
                   productId: item.productId,
                   status: "IN_STOCK",
+                  ...(excludedCodes.length ? { code: { notIn: excludedCodes } } : {}),
                 },
                 orderBy: { createdAt: "asc" },
                 select: { id: true, code: true, status: true, invoiceId: true, serialNumber: true, assetTag: true },
@@ -244,8 +395,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           });
           if (!lockUpdate.count) throw new Error(`Unidade ${unit.code} já não está disponível`);
 
-          if (!item.destination || item.destination !== unit.code) {
-            await tx.requestItem.update({ where: { id: item.id }, data: { destination: unit.code } });
+          if (!item.destination || item.destination !== unit.code || (item as any).reservedUnitId !== unit.id) {
+            await tx.requestItem.update({ where: { id: item.id }, data: { destination: unit.code, reservedUnitId: unit.id } });
           }
 
           await txAny.stockMovement.create({
@@ -455,6 +606,33 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return { request, executionId: execution.id };
     });
 
+    let pdfGeneratedFinal: boolean | undefined;
+    let pdfErrorFinal: string | undefined;
+    try {
+      const finalizedRequest = await prisma.request.findFirst({
+        where: { id: requestId, tenantId },
+        include: {
+          user: { select: { id: true, name: true, email: true } },
+          items: {
+            include: { product: { select: { id: true, name: true, sku: true } } },
+            orderBy: { createdAt: "asc" },
+          },
+        },
+      });
+
+      if (finalizedRequest) {
+        pdfGeneratedFinal = await syncFinalSignedRequestPdf({
+          tenantId,
+          request: finalizedRequest,
+          signatureChanged: true,
+        });
+      }
+    } catch (e: any) {
+      console.error("execute final request PDF sync error:", e);
+      pdfGeneratedFinal = false;
+      pdfErrorFinal = typeof e?.message === "string" ? e.message : "Failed to generate final signed PDF";
+    }
+
     await createRequestStatusAudit({
       tenantId,
       requestId,
@@ -504,6 +682,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       ok: true,
       idempotent: false,
       executionId: result.executionId,
+      pdfGeneratedFinal,
+      pdfErrorFinal,
       request: {
         id: beforeRequest.id,
         status: "FULFILLED",

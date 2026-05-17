@@ -1,8 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { z } from "zod";
-import fs from "fs";
-import path from "path";
-import crypto from "crypto";
 import { prisma } from "@/prisma/client";
 import { getSessionServer } from "@/utils/auth";
 import { createRequestStatusAudit, notifyAdmin, notifyUser } from "@/utils/notifications";
@@ -10,12 +7,9 @@ import { publishRealtimeEvent } from "@/utils/realtime";
 import { createTicketAudit } from "@/utils/ticketAudit";
 import { getUserPermissionGrants, hasPermission } from "@/utils/rbac";
 import { ensureRequestWorkflowDefinition, transitionRequestWorkflowByAction } from "@/utils/workflow";
-import { buildSignedRequestPdfBuffer } from "@/utils/requestPdf";
-import {
-  buildRequestFolderName,
-  buildStoredFileName,
-  getRequestStorageDir,
-} from "@/utils/storageLayout";
+import { syncFinalSignedRequestPdf } from "@/utils/requestSignedPdfStorage";
+import { getReservedUnitCodes, mergeExcludedUnitCodes, normalizeRequestItemsForUnitReservations } from "@/utils/unitReservations";
+import { fulfillStandardRequestStock } from "@/services/requests/fulfillRequest";
 
 function computeProductStatus(quantity: number) {
   return quantity > 20 ? "Available" : quantity > 0 ? "Stock Low" : "Stock Out";
@@ -29,18 +23,6 @@ function getClientIp(req: NextApiRequest) {
   return typeof ra === "string" ? ra : undefined;
 }
 
-const ensureDir = async (dir: string) => {
-  await fs.promises.mkdir(dir, { recursive: true });
-};
-
-function getSystemRequestPdfOriginalName(gtmiNumber: string) {
-  return `[SISTEMA] Requisição ${gtmiNumber} - Assinada.pdf`;
-}
-
-function getSystemRequestApprovalPdfOriginalName(gtmiNumber: string) {
-  return `[SISTEMA] Requisição ${gtmiNumber} - Aprovada.pdf`;
-}
-
 async function generateMunicipalAssetCode(txAny: any, tenantId: string) {
   const year = new Date().getFullYear();
   for (let attempt = 0; attempt < 8; attempt += 1) {
@@ -50,186 +32,6 @@ async function generateMunicipalAssetCode(txAny: any, tenantId: string) {
     if (!exists) return code;
   }
   return `AST-${year}-${Math.random().toString(36).slice(2, 10).toUpperCase()}`;
-}
-
-async function deleteSystemRequestPdfs(args: {
-  tenantId: string;
-  requestId: string;
-  gtmiNumber: string;
-}) {
-  const originalName = getSystemRequestPdfOriginalName(args.gtmiNumber);
-  const rows = await prisma.storedFile.findMany({
-    where: {
-      tenantId: args.tenantId,
-      kind: "REQUEST",
-      requestId: args.requestId,
-      mimeType: "application/pdf",
-      originalName,
-    },
-    select: { id: true, storagePath: true },
-  });
-
-  for (const r of rows) {
-    const absPath = path.join(process.cwd(), r.storagePath);
-    try {
-      await fs.promises.unlink(absPath);
-    } catch {
-      // ignore if missing
-    }
-  }
-
-  if (rows.length) {
-    await prisma.storedFile.deleteMany({
-      where: { id: { in: rows.map((r) => r.id) }, tenantId: args.tenantId },
-    });
-  }
-}
-
-async function deleteSystemRequestApprovalPdfs(args: {
-  tenantId: string;
-  requestId: string;
-  gtmiNumber: string;
-}) {
-  const originalName = getSystemRequestApprovalPdfOriginalName(args.gtmiNumber);
-  const rows = await prisma.storedFile.findMany({
-    where: {
-      tenantId: args.tenantId,
-      kind: "REQUEST",
-      requestId: args.requestId,
-      mimeType: "application/pdf",
-      originalName,
-    },
-    select: { id: true, storagePath: true },
-  });
-
-  for (const r of rows) {
-    const absPath = path.join(process.cwd(), r.storagePath);
-    try {
-      await fs.promises.unlink(absPath);
-    } catch {
-      // ignore
-    }
-  }
-
-  if (rows.length) {
-    await prisma.storedFile.deleteMany({
-      where: { id: { in: rows.map((r) => r.id) }, tenantId: args.tenantId },
-    });
-  }
-}
-
-async function createSystemRequestPdf(args: {
-  tenantId: string;
-  request: any;
-}) {
-  const request = args.request;
-  const folderName = buildRequestFolderName({
-    gtmiNumber: request.gtmiNumber,
-    requesterName: request.requesterName ?? request.user?.name,
-    summary: request.title,
-    requestedAt: request.requestedAt,
-  });
-  const destDir = getRequestStorageDir({
-    tenantId: args.tenantId,
-    gtmiYear: request.gtmiYear,
-    folderName,
-  });
-  await ensureDir(destDir);
-
-  const id = crypto.randomUUID();
-  const originalName = getSystemRequestPdfOriginalName(request.gtmiNumber);
-  const fileName = buildStoredFileName({ originalName, id });
-  const absPath = path.join(destDir, fileName);
-
-  const pdfBuffer = await buildSignedRequestPdfBuffer({
-    gtmiNumber: request.gtmiNumber,
-    requestedAt: request.requestedAt,
-    title: request.title,
-    notes: request.notes,
-    requestingService: request.requestingService,
-    requesterName: request.requesterName,
-    requesterEmployeeNo: request.requesterEmployeeNo,
-    deliveryLocation: request.deliveryLocation,
-    signedAt: request.signedAt,
-    signedByName: request.signedByName,
-    signedByTitle: request.signedByTitle,
-    pickupSignedAt: request.pickupSignedAt,
-    pickupSignedByName: request.pickupSignedByName,
-    pickupSignedByTitle: request.pickupSignedByTitle,
-    pickupSignatureDataUrl: request.pickupSignatureDataUrl,
-    items: request.items,
-  });
-
-  await fs.promises.writeFile(absPath, pdfBuffer);
-
-  await prisma.storedFile.create({
-    data: {
-      id,
-      tenantId: args.tenantId,
-      kind: "REQUEST",
-      requestId: request.id,
-      originalName,
-      fileName,
-      mimeType: "application/pdf",
-      sizeBytes: pdfBuffer.length,
-      storagePath: path.relative(process.cwd(), absPath),
-    },
-  });
-}
-
-async function createSystemRequestApprovalPdf(args: {
-  tenantId: string;
-  request: any;
-}) {
-  const request = args.request;
-  const folderName = buildRequestFolderName({
-    gtmiNumber: request.gtmiNumber,
-    requesterName: request.requesterName ?? request.user?.name,
-    summary: request.title,
-    requestedAt: request.requestedAt,
-  });
-  const destDir = getRequestStorageDir({
-    tenantId: args.tenantId,
-    gtmiYear: request.gtmiYear,
-    folderName,
-  });
-  await ensureDir(destDir);
-
-  const id = crypto.randomUUID();
-  const originalName = getSystemRequestApprovalPdfOriginalName(request.gtmiNumber);
-  const fileName = buildStoredFileName({ originalName, id });
-  const absPath = path.join(destDir, fileName);
-
-  const pdfBuffer = await buildSignedRequestPdfBuffer({
-    gtmiNumber: request.gtmiNumber,
-    requestedAt: request.requestedAt,
-    title: request.title,
-    notes: request.notes,
-    requestingService: request.requestingService,
-    requesterName: request.requesterName,
-    requesterEmployeeNo: request.requesterEmployeeNo,
-    deliveryLocation: request.deliveryLocation,
-    signedAt: request.signedAt,
-    signedByName: request.signedByName,
-    signedByTitle: request.signedByTitle,
-    items: request.items,
-  });
-
-  await fs.promises.writeFile(absPath, pdfBuffer);
-
-  await prisma.storedFile.create({
-    data: {
-      id,
-      tenantId: args.tenantId,
-      kind: "REQUEST",
-      requestId: request.id,
-      originalName,
-      fileName,
-      mimeType: "application/pdf",
-      sizeBytes: pdfBuffer.length,
-      storagePath: path.relative(process.cwd(), absPath),
-    },
-  });
 }
 
 const updateSchema = z.object({
@@ -317,6 +119,13 @@ const updateSchema = z.object({
     .object({
       name: z.string().min(1).max(120),
       title: z.string().max(120).optional(),
+      signatureDataUrl: z
+        .string()
+        .min(50)
+        .max(400_000)
+        .refine((v) => v.startsWith("data:image/png;base64,"), {
+          message: "Signature must be a PNG data URL",
+        }),
     })
     .optional(),
   pickupSign: z
@@ -413,6 +222,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                   id: true,
                   name: true,
                   sku: true,
+                  description: true,
                   supplier: { select: { id: true, name: true } },
                 },
               },
@@ -717,6 +527,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         updateData.signedAt = null;
         updateData.signedByName = null;
         updateData.signedByTitle = null;
+        updateData.signedSignatureDataUrl = null;
         updateData.signedByUserId = null;
         updateData.signedIp = null;
         updateData.signedUserAgent = null;
@@ -746,6 +557,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         updateData.signedAt = new Date();
         updateData.signedByName = sign.name;
         updateData.signedByTitle = sign.title ?? null;
+        updateData.signedSignatureDataUrl = sign.signatureDataUrl;
         updateData.signedByUserId = session.id;
         updateData.signedIp = ip ?? null;
         updateData.signedUserAgent = userAgent ?? null;
@@ -754,15 +566,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         updateData.signedVoidedByUserId = null;
       }
 
+      const shouldFulfillByPickupSign = Boolean(pickupSign);
+
       if (pickupSign) {
         const existing = await prisma.request.findFirst({ where: { id, tenantId }, select: { pickupSignedAt: true, status: true } });
         if (existing?.pickupSignedAt) {
           return res.status(409).json({ error: "Pickup already signed" });
         }
 
-        if (existing?.status === "APPROVED") {
-          updateData.status = "FULFILLED";
-        }
+        updateData.status = "FULFILLED";
         updateData.pickupSignedAt = new Date();
         updateData.pickupSignedByName = pickupSign.name;
         updateData.pickupSignedByTitle = pickupSign.title ?? null;
@@ -778,7 +590,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (
         Object.prototype.hasOwnProperty.call(updateData, "status") &&
         updateData.status &&
-        updateData.status !== existingBefore.status
+        updateData.status !== existingBefore.status &&
+        !(shouldFulfillByPickupSign && updateData.status === "FULFILLED")
       ) {
         await ensureRequestWorkflowDefinition(prisma, tenantId);
         const action =
@@ -824,6 +637,46 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
 
         if (items?.length) {
+          const existingItems = await tx.requestItem.findMany({
+            where: { requestId: id },
+            select: { id: true, productId: true, destination: true, role: true },
+          });
+          const existingItemById = new Map(existingItems.map((item) => [item.id, item] as const));
+          const nextDestinations = new Map(
+            existingItems.map((item) => [item.id, typeof item.destination === "string" ? item.destination.trim() : ""])
+          );
+
+          for (const it of items) {
+            if (!Object.prototype.hasOwnProperty.call(it, "destination")) continue;
+            const existingItem = existingItemById.get(it.id);
+            if (!existingItem) continue;
+            const v = it.destination;
+            const destination = typeof v === "string" ? v.trim() : "";
+            nextDestinations.set(it.id, destination);
+
+            if (!destination || (existingItem.role ?? "NORMAL") === "OLD") continue;
+            const reservedCodes = await getReservedUnitCodes(txAny, {
+              tenantId,
+              productId: existingItem.productId,
+              excludeRequestId: id,
+            });
+            if (reservedCodes.includes(destination)) {
+              throw new Error("Esta unidade QR já está reservada noutro pedido aberto.");
+            }
+          }
+
+          const seenByProduct = new Set<string>();
+          for (const item of existingItems) {
+            if ((item.role ?? "NORMAL") === "OLD") continue;
+            const destination = nextDestinations.get(item.id) ?? "";
+            if (!destination) continue;
+            const key = `${item.productId}:${destination}`;
+            if (seenByProduct.has(key)) {
+              throw new Error("A mesma unidade QR não pode ser usada em duas linhas do pedido.");
+            }
+            seenByProduct.add(key);
+          }
+
           const results = await Promise.all(
             items.map(async (it) => {
               const data: any = {};
@@ -842,7 +695,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
               }
               if (Object.prototype.hasOwnProperty.call(it, "destination")) {
                 const v = it.destination;
-                data.destination = typeof v === "string" ? (v.trim() ? v.trim() : null) : v === null ? null : undefined;
+                const destination = typeof v === "string" ? v.trim() : "";
+                data.destination = destination ? destination : v === null ? null : undefined;
+                const existingItem = existingItemById.get(it.id);
+                if (existingItem && destination && (existingItem.role ?? "NORMAL") !== "OLD") {
+                  const unit = await txAny.productUnit.findFirst({
+                    where: { tenantId, productId: existingItem.productId, code: destination },
+                    select: { id: true },
+                  });
+                  data.reservedUnitId = unit?.id ?? null;
+                } else if (v === null || destination === "") {
+                  data.reservedUnitId = null;
+                }
               }
               if (Object.prototype.hasOwnProperty.call(it, "role")) {
                 const v = it.role;
@@ -892,6 +756,86 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
           const targetRequestType = (updateData.requestType ?? existingRequest.requestType) as "STANDARD" | "RETURN";
 
+          if (existingBefore.status === "FULFILLED") {
+            throw new Error("Pedidos cumpridos não podem alterar itens.");
+          }
+
+          if ((existingBefore.status as string) !== "FULFILLED") {
+            if (targetRequestType === "RETURN") {
+              const hasOld = replaceItems.some((it) => (it.role ?? "NORMAL") === "OLD");
+              const hasNew = replaceItems.some((it) => (it.role ?? "NORMAL") === "NEW");
+              if (!hasOld || !hasNew) {
+                throw new Error("Requisição de devolução exige itens ANTIGOS e NOVOS.");
+              }
+            }
+
+            const nextProductIds = replaceItems.map((it) => it.productId);
+            const products = await tx.product.findMany({
+              where: { tenantId, id: { in: Array.from(new Set(nextProductIds)) } },
+              select: { id: true, quantity: true },
+            });
+            const productById = new Map(products.map((p) => [p.id, p] as const));
+            const productQuantityById = new Map(products.map((p) => [p.id, Number(p.quantity)] as const));
+            for (const item of replaceItems) {
+              if (!productById.has(item.productId)) {
+                throw new Error("One or more products were not found");
+              }
+            }
+
+            const unitCounts = await Promise.all(
+              Array.from(new Set(nextProductIds)).map(async (productId) => {
+                const count = await txAny.productUnit.count({ where: { tenantId, productId } });
+                return [productId, Number(count)] as const;
+              })
+            );
+            const unitCountByProductId = new Map<string, number>(unitCounts);
+            const normalizedReplaceItems = await normalizeRequestItemsForUnitReservations(txAny, {
+              tenantId,
+              items: replaceItems.map((it) => ({ ...it, role: it.role ?? "NORMAL" })),
+              unitCountByProductId,
+              excludeRequestId: existingRequest.id,
+            });
+
+            const requestedNonUnitQtyByProductId = new Map<string, number>();
+            for (const item of normalizedReplaceItems) {
+              const qty = Number(item.quantity);
+              if (!Number.isFinite(qty) || qty <= 0) {
+                throw new Error("Invalid quantity");
+              }
+              const isUnitTracked = (unitCountByProductId.get(item.productId) ?? 0) > 0;
+              if (isUnitTracked) continue;
+              requestedNonUnitQtyByProductId.set(
+                item.productId,
+                (requestedNonUnitQtyByProductId.get(item.productId) ?? 0) + qty
+              );
+            }
+            for (const [productId, requestedQty] of requestedNonUnitQtyByProductId) {
+              const available = productQuantityById.get(productId) ?? 0;
+              if (available < requestedQty) {
+                throw new Error("Stock insuficiente para um dos produtos selecionados.");
+              }
+            }
+
+            await tx.requestItem.deleteMany({ where: { requestId: existingRequest.id } });
+            await tx.requestItem.createMany({
+              data: normalizedReplaceItems.map((it) => ({
+                requestId: existingRequest.id,
+                productId: it.productId,
+                quantity: BigInt(it.quantity) as any,
+                notes: typeof it.notes === "string" ? (it.notes.trim() ? it.notes.trim() : null) : it.notes ?? null,
+                unit: typeof it.unit === "string" ? (it.unit.trim() ? it.unit.trim() : null) : it.unit ?? null,
+                reference:
+                  typeof it.reference === "string" ? (it.reference.trim() ? it.reference.trim() : null) : it.reference ?? null,
+                destination:
+                  typeof it.destination === "string" ? (it.destination.trim() ? it.destination.trim() : null) : it.destination ?? null,
+                reservedUnitId: it.reservedUnitId ?? null,
+                role: it.role ?? "NORMAL",
+              })),
+            });
+
+            return { updatedCount: updatedRequest.count };
+          }
+
           if (targetRequestType === "RETURN") {
             const hasOld = replaceItems.some((it) => (it.role ?? "NORMAL") === "OLD");
             const hasNew = replaceItems.some((it) => (it.role ?? "NORMAL") === "NEW");
@@ -911,6 +855,26 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
               }
             }
 
+            const seenUnitCodes = new Set<string>();
+            for (const item of replaceItems) {
+              if ((item.role ?? "NORMAL") === "OLD") continue;
+              const destination = typeof item.destination === "string" ? item.destination.trim() : "";
+              if (!destination) continue;
+              const key = `${item.productId}:${destination}`;
+              if (seenUnitCodes.has(key)) {
+                throw new Error("A mesma unidade QR não pode ser usada em duas linhas do pedido.");
+              }
+              seenUnitCodes.add(key);
+              const reservedCodes = await getReservedUnitCodes(txAny, {
+                tenantId,
+                productId: item.productId,
+                excludeRequestId: existingRequest.id,
+              });
+              if (reservedCodes.includes(destination)) {
+                throw new Error("Esta unidade QR já está reservada noutro pedido aberto.");
+              }
+            }
+
             await tx.requestItem.deleteMany({ where: { requestId: existingRequest.id } });
             await tx.requestItem.createMany({
               data: replaceItems.map((it) => ({
@@ -923,6 +887,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                   typeof it.reference === "string" ? (it.reference.trim() ? it.reference.trim() : null) : it.reference ?? null,
                 destination:
                   typeof it.destination === "string" ? (it.destination.trim() ? it.destination.trim() : null) : it.destination ?? null,
+                reservedUnitId: null,
                 role: it.role ?? "NORMAL",
               })),
             });
@@ -1047,10 +1012,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             unit?: string | null;
             reference?: string | null;
             destination?: string | null;
+            reservedUnitId?: string | null;
             role?: "NORMAL" | "OLD" | "NEW";
           }> = [];
 
           // === Allocate stock for new items ===
+          const selectedUnitCodes = new Set<string>();
           for (const item of replaceItems) {
             const qty = Number(item.quantity);
             if (!Number.isFinite(qty) || qty <= 0) {
@@ -1063,6 +1030,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
               }
 
               const requestedCode = typeof item.destination === "string" ? item.destination.trim() : "";
+              if (requestedCode && selectedUnitCodes.has(`${item.productId}:${requestedCode}`)) {
+                throw new Error("A mesma unidade QR não pode ser usada em duas linhas do pedido.");
+              }
+              const reservedCodes = await getReservedUnitCodes(txAny, {
+                tenantId,
+                productId: item.productId,
+                excludeRequestId: existingRequest.id,
+              });
+              if (requestedCode && reservedCodes.includes(requestedCode)) {
+                throw new Error("Esta unidade QR já está reservada noutro pedido aberto.");
+              }
+              const excludedCodes = mergeExcludedUnitCodes(reservedCodes, Array.from(selectedUnitCodes).map((key) => key.split(":").slice(1).join(":")));
 
               const unit = requestedCode
                 ? await txAny.productUnit.findFirst({
@@ -1079,6 +1058,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                       tenantId,
                       productId: item.productId,
                       status: "IN_STOCK",
+                      ...(excludedCodes.length ? { code: { notIn: excludedCodes } } : {}),
                     },
                     orderBy: { createdAt: "asc" },
                     select: { id: true, code: true, invoiceId: true },
@@ -1088,7 +1068,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                 throw new Error("Sem unidades em stock para um dos produtos selecionados.");
               }
 
-              await txAny.productUnit.updateMany({
+              const lockUpdate = await txAny.productUnit.updateMany({
                 where: { id: unit.id, status: "IN_STOCK" },
                 data: {
                   status: "ACQUIRED",
@@ -1098,6 +1078,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                   acquiredReason: stockReason,
                 },
               });
+              if (!lockUpdate.count) throw new Error(`Unidade ${unit.code} já não está disponível`);
+              selectedUnitCodes.add(`${item.productId}:${unit.code}`);
 
               await txAny.stockMovement.create({
                 data: {
@@ -1133,6 +1115,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                 reference:
                   typeof item.reference === "string" ? (item.reference.trim() ? item.reference.trim() : null) : item.reference ?? null,
                 destination: unit.code,
+                reservedUnitId: unit.id,
                 role: item.role ?? "NORMAL",
               });
             } else {
@@ -1189,6 +1172,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
               unit: it.unit ?? null,
               reference: it.reference ?? null,
               destination: it.destination ?? null,
+              reservedUnitId: it.reservedUnitId ?? null,
               role: it.role ?? "NORMAL",
             })),
           });
@@ -1326,6 +1310,184 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           }
         }
 
+        let standardFulfillmentHandledByService = false;
+        if (existingBefore.status !== "FULFILLED" && process.env.STOCK_USE_SHARED_FULFILLMENT !== "0") {
+          const finalized = await tx.request.findFirst({
+            where: { id, tenantId },
+            select: { id: true, status: true, requestType: true },
+          });
+          if (finalized?.status === "FULFILLED" && finalized.requestType === "STANDARD") {
+            await fulfillStandardRequestStock({
+              tx,
+              tenantId,
+              requestId: finalized.id,
+              actorUserId: session.id,
+              reasonPrefix: "Entrega",
+              documentRef: `Pedido assinado ${existingBefore.gtmiNumber}`,
+              markFulfilled: false,
+            });
+            standardFulfillmentHandledByService = true;
+          }
+        }
+
+        // For STANDARD requests finalized by pickup signature/status change, perform stock OUT once.
+        // The warehouse execution endpoint has its own explicit flow; this guard avoids duplicate exits.
+        if (existingBefore.status !== "FULFILLED" && !standardFulfillmentHandledByService) {
+          const finalized = await tx.request.findFirst({
+            where: { id, tenantId },
+            select: {
+              id: true,
+              gtmiNumber: true,
+              status: true,
+              requestType: true,
+              userId: true,
+              items: {
+                select: {
+                  id: true,
+                  productId: true,
+                  quantity: true,
+                  destination: true,
+                  role: true,
+                  product: { select: { name: true } },
+                },
+              },
+            },
+          });
+
+          if (finalized && finalized.status === "FULFILLED" && finalized.requestType === "STANDARD") {
+            const existingOutCount = Number(
+              await txAny.stockMovement.count({
+                where: { tenantId, requestId: finalized.id, type: "OUT" },
+              })
+            );
+
+            if (existingOutCount === 0) {
+              for (const it of finalized.items) {
+                const qty = Number(it.quantity);
+                if (!Number.isFinite(qty) || qty <= 0) continue;
+                if ((it.role ?? "NORMAL") === "OLD") continue;
+
+                const unitCount = Number(await txAny.productUnit.count({ where: { tenantId, productId: it.productId } }));
+                const isUnitTracked = unitCount > 0;
+
+                if (isUnitTracked) {
+                  if (qty !== 1) {
+                    throw new Error("Para produtos com QR (unidades), use linhas separadas (Qtd=1 por unidade).");
+                  }
+
+                  const requestedCode = typeof it.destination === "string" ? it.destination.trim() : "";
+                  const reservedCodes = await getReservedUnitCodes(txAny, {
+                    tenantId,
+                    productId: it.productId,
+                    excludeRequestId: finalized.id,
+                  });
+                  if (requestedCode && reservedCodes.includes(requestedCode)) {
+                    throw new Error("Esta unidade QR já está reservada noutro pedido aberto.");
+                  }
+                  const excludedCodes = mergeExcludedUnitCodes(reservedCodes);
+
+                  const unit = requestedCode
+                    ? await txAny.productUnit.findFirst({
+                        where: {
+                          tenantId,
+                          productId: it.productId,
+                          code: requestedCode,
+                          status: "IN_STOCK",
+                        },
+                        select: { id: true, code: true, invoiceId: true },
+                      })
+                    : await txAny.productUnit.findFirst({
+                        where: {
+                          tenantId,
+                          productId: it.productId,
+                          status: "IN_STOCK",
+                          ...(excludedCodes.length ? { code: { notIn: excludedCodes } } : {}),
+                        },
+                        orderBy: { createdAt: "asc" },
+                        select: { id: true, code: true, invoiceId: true },
+                      });
+
+                  if (!unit) {
+                    throw new Error(`Sem unidade em stock para ${it.product?.name || "produto"}`);
+                  }
+
+                  const lockUpdate = await txAny.productUnit.updateMany({
+                    where: { id: unit.id, status: "IN_STOCK" },
+                    data: {
+                      status: "ACQUIRED",
+                      acquiredAt: new Date(),
+                      acquiredByUserId: session.id,
+                      assignedToUserId: finalized.userId,
+                      acquiredReason: `Entrega ${finalized.gtmiNumber}`,
+                    },
+                  });
+                  if (!lockUpdate.count) throw new Error(`Unidade ${unit.code} já não está disponível`);
+
+                  if (!requestedCode || requestedCode !== unit.code) {
+                    await tx.requestItem.update({ where: { id: it.id }, data: { destination: unit.code, reservedUnitId: unit.id } });
+                  }
+
+                  await txAny.stockMovement.create({
+                    data: {
+                      type: "OUT",
+                      quantity: BigInt(1) as any,
+                      tenantId,
+                      productId: it.productId,
+                      unitId: unit.id,
+                      invoiceId: unit.invoiceId ?? null,
+                      requestId: finalized.id,
+                      performedByUserId: session.id,
+                      assignedToUserId: finalized.userId,
+                      reason: `Entrega ${finalized.gtmiNumber}`,
+                    },
+                    select: { id: true },
+                  });
+
+                  const productAfter = await tx.product.update({
+                    where: { id: it.productId },
+                    data: { quantity: { decrement: BigInt(1) as any } },
+                    select: { quantity: true },
+                  });
+                  await tx.product.update({
+                    where: { id: it.productId },
+                    data: { status: computeProductStatus(Number(productAfter.quantity)) },
+                  });
+                } else {
+                  const product = await tx.product.findUnique({ where: { id: it.productId }, select: { quantity: true } });
+                  const currentQty = Number(product?.quantity ?? BigInt(0));
+                  if (currentQty < qty) {
+                    throw new Error("Stock insuficiente para um dos produtos selecionados.");
+                  }
+
+                  await txAny.stockMovement.create({
+                    data: {
+                      type: "OUT",
+                      quantity: BigInt(qty) as any,
+                      tenantId,
+                      productId: it.productId,
+                      requestId: finalized.id,
+                      performedByUserId: session.id,
+                      assignedToUserId: finalized.userId,
+                      reason: `Entrega ${finalized.gtmiNumber}`,
+                    },
+                    select: { id: true },
+                  });
+
+                  const productAfter = await tx.product.update({
+                    where: { id: it.productId },
+                    data: { quantity: { decrement: BigInt(qty) as any } },
+                    select: { quantity: true },
+                  });
+                  await tx.product.update({
+                    where: { id: it.productId },
+                    data: { status: computeProductStatus(Number(productAfter.quantity)) },
+                  });
+                }
+              }
+            }
+          }
+        }
+
         // For STANDARD requests, persist patrimonial custody/location ledger when finalized.
         // Consumables keep stock-only behavior; unit-tracked items synchronize MunicipalAsset.
         if (existingBefore.status !== "FULFILLED") {
@@ -1362,7 +1524,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           });
 
           if (finalized && finalized.status === "FULFILLED" && finalized.requestType === "STANDARD") {
-            const movementDocumentRef = getSystemRequestPdfOriginalName(finalized.gtmiNumber);
+            const movementDocumentRef = `Pedido assinado ${finalized.gtmiNumber}`;
             const movementNoteBase = `Auto de entrega ${finalized.gtmiNumber}`;
 
             for (const it of finalized.items) {
@@ -1536,52 +1698,38 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         return res.status(404).json({ error: "Request not found" });
       }
 
-      // Keep a signed PDF in storage when the pickup signature exists.
-      // If the pickup signature is voided, remove the generated PDF.
+      // Keep one final PDF in storage only after both signatures exist.
       let pdfGeneratedPickup: boolean | undefined;
       let pdfGeneratedApproval: boolean | undefined;
       let pdfErrorPickup: string | undefined;
       let pdfErrorApproval: string | undefined;
+      let pdfGeneratedFinal: boolean | undefined;
+      let pdfErrorFinal: string | undefined;
       try {
-        if (voidPickupSign) {
-          await deleteSystemRequestPdfs({ tenantId, requestId: request.id, gtmiNumber: request.gtmiNumber });
-          pdfGeneratedPickup = false;
-        }
+        const signatureChanged = Boolean(sign || pickupSign || voidSign || voidPickupSign);
+        const finalPdfResult = await syncFinalSignedRequestPdf({
+          tenantId,
+          request,
+          signatureChanged,
+        });
 
-        if (pickupSign) {
-          await deleteSystemRequestPdfs({ tenantId, requestId: request.id, gtmiNumber: request.gtmiNumber });
-          await createSystemRequestPdf({ tenantId, request });
+        if (finalPdfResult === true) {
+          pdfGeneratedFinal = true;
           pdfGeneratedPickup = true;
+          pdfGeneratedApproval = true;
+        } else if (finalPdfResult === false) {
+          pdfGeneratedFinal = false;
+          if (pickupSign || voidPickupSign) pdfGeneratedPickup = false;
+          if (sign || voidSign) pdfGeneratedApproval = false;
         }
       } catch (e: any) {
         console.error("request PDF sync error:", e);
-        pdfGeneratedPickup = false;
-        pdfErrorPickup = typeof e?.message === "string" ? e.message : "Failed to generate pickup PDF";
-      }
-
-      try {
-        if (voidSign) {
-          await deleteSystemRequestApprovalPdfs({
-            tenantId,
-            requestId: request.id,
-            gtmiNumber: request.gtmiNumber,
-          });
-          pdfGeneratedApproval = false;
-        }
-
-        if (sign) {
-          await deleteSystemRequestApprovalPdfs({
-            tenantId,
-            requestId: request.id,
-            gtmiNumber: request.gtmiNumber,
-          });
-          await createSystemRequestApprovalPdf({ tenantId, request });
-          pdfGeneratedApproval = true;
-        }
-      } catch (e: any) {
-        console.error("approval PDF sync error:", e);
-        pdfGeneratedApproval = false;
-        pdfErrorApproval = typeof e?.message === "string" ? e.message : "Failed to generate approval PDF";
+        pdfGeneratedFinal = false;
+        if (pickupSign || voidPickupSign) pdfGeneratedPickup = false;
+        if (sign || voidSign) pdfGeneratedApproval = false;
+        pdfErrorFinal = typeof e?.message === "string" ? e.message : "Failed to generate final signed PDF";
+        pdfErrorPickup = pdfErrorFinal;
+        pdfErrorApproval = pdfErrorFinal;
       }
 
       try {
@@ -1761,8 +1909,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         ...request,
         pdfGeneratedPickup,
         pdfGeneratedApproval,
+        pdfGeneratedFinal,
         pdfErrorPickup,
         pdfErrorApproval,
+        pdfErrorFinal,
         createdAt: request.createdAt.toISOString(),
         updatedAt: request.updatedAt.toISOString(),
         requestedAt: request.requestedAt.toISOString(),
@@ -1795,8 +1945,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
         if (
           error.message === "Stock insuficiente para um dos produtos selecionados." ||
+          error.message === "Sem unidades em stock suficientes para um dos produtos selecionados." ||
           error.message === "Sem unidades em stock para um dos produtos selecionados." ||
+          error.message.startsWith("Sem unidade em stock para ") ||
+          error.message.startsWith("Unidade ") ||
+          error.message === "Para produtos com QR e código já escolhido, use Qtd=1 por linha." ||
           error.message === "Para produtos com QR (unidades), use linhas separadas (Qtd=1 por unidade)." ||
+          error.message === "A mesma unidade QR não pode ser usada em duas linhas do pedido." ||
+          error.message === "Esta unidade QR já está reservada noutro pedido aberto." ||
+          error.message === "Pedidos cumpridos não podem alterar itens." ||
           error.message === "Para devolução de itens com QR, use uma linha por unidade (Qtd=1)." ||
           error.message === "Cannot restore unit-tracked item without destination code" ||
           error.message === "Cannot restore unit (not found or not acquired)" ||

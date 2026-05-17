@@ -60,49 +60,49 @@ model Tenant {
   ipAccessRequests IpAccessRequest[]
   userAdminAudits  UserAdminAudit[]
 
-  categories     Category[]
-  suppliers      Supplier[]
-  supplierProviders SupplierProvider[]
-  products       Product[]
-  productInvoices ProductInvoice[]
-  units          ProductUnit[]
-  requests       Request[]
-  reports        Report[]
-  requestStatusAudits RequestStatusAudit[]
-  notifications Notification[]
-  storedFiles    StoredFile[]
-  stockMovements StockMovement[]
-  tickets        Ticket[]
-  ticketMessages TicketMessage[]
-  ticketRequestLinks TicketRequestLink[]
-  ticketAudits       TicketAudit[]
-  ticketParticipants TicketParticipant[]
-  accessPermissions  AccessPermission[]
-  accessRoles        AccessRole[]
-  accessRolePermissions AccessRolePermission[]
-  userRoleAssignments UserRoleAssignment[]
-  rbacAudits         RbacAudit[]
-  workflowDefinitions WorkflowDefinition[]
-  workflowStates     WorkflowStateDefinition[]
-  workflowTransitions WorkflowTransitionDefinition[]
-  workflowInstances  WorkflowInstance[]
-  workflowEvents     WorkflowEvent[]
-  municipalAssets    MunicipalAsset[]
-  municipalAssetEvents MunicipalAssetEvent[]
-  municipalAssetAssignments MunicipalAssetAssignment[]
-  municipalAssetClasses MunicipalAssetClass[]
-  municipalAssetModels  MunicipalAssetModel[]
-  municipalAssetLocations MunicipalAssetLocation[]
-  municipalAssetMovements MunicipalAssetMovement[]
+  categories                      Category[]
+  suppliers                       Supplier[]
+  supplierProviders               SupplierProvider[]
+  products                        Product[]
+  productInvoices                 ProductInvoice[]
+  units                           ProductUnit[]
+  requests                        Request[]
+  reports                         Report[]
+  requestStatusAudits             RequestStatusAudit[]
+  notifications                   Notification[]
+  storedFiles                     StoredFile[]
+  stockMovements                  StockMovement[]
+  tickets                         Ticket[]
+  ticketMessages                  TicketMessage[]
+  ticketRequestLinks              TicketRequestLink[]
+  ticketAudits                    TicketAudit[]
+  ticketParticipants              TicketParticipant[]
+  accessPermissions               AccessPermission[]
+  accessRoles                     AccessRole[]
+  accessRolePermissions           AccessRolePermission[]
+  userRoleAssignments             UserRoleAssignment[]
+  rbacAudits                      RbacAudit[]
+  workflowDefinitions             WorkflowDefinition[]
+  workflowStates                  WorkflowStateDefinition[]
+  workflowTransitions             WorkflowTransitionDefinition[]
+  workflowInstances               WorkflowInstance[]
+  workflowEvents                  WorkflowEvent[]
+  municipalAssets                 MunicipalAsset[]
+  municipalAssetEvents            MunicipalAssetEvent[]
+  municipalAssetAssignments       MunicipalAssetAssignment[]
+  municipalAssetClasses           MunicipalAssetClass[]
+  municipalAssetModels            MunicipalAssetModel[]
+  municipalAssetLocations         MunicipalAssetLocation[]
+  municipalAssetMovements         MunicipalAssetMovement[]
   municipalAssetDisposalProcesses MunicipalAssetDisposalProcess[]
-  assetCategoryClassMaps AssetCategoryClassMap[]
-  assetPolicies AssetPolicy[]
-  requestExecutions RequestExecution[]
-  financeProcesses   FinanceProcess[]
-  financeProcessEvents FinanceProcessEvent[]
-  presidencyDispatches PresidencyDispatch[]
+  assetCategoryClassMaps          AssetCategoryClassMap[]
+  assetPolicies                   AssetPolicy[]
+  requestExecutions               RequestExecution[]
+  financeProcesses                FinanceProcess[]
+  financeProcessEvents            FinanceProcessEvent[]
+  presidencyDispatches            PresidencyDispatch[]
 
-  publicRequests           PublicRequest[]
+  publicRequests PublicRequest[]
 }
 
 model User {
@@ -115,7 +115,7 @@ model User {
 
   name         String
   email        String
-  passwordHash String @map("password")
+  passwordHash String  @map("password")
   username     String?
 
   isActive Boolean @default(true)
@@ -139,9 +139,9 @@ model User {
 
   requests Request[]
 
-  createdRequests Request[] @relation("RequestCreatedBy")
+  createdRequests            Request[]            @relation("RequestCreatedBy")
   changedRequestStatusAudits RequestStatusAudit[] @relation("RequestStatusAuditChangedBy")
-  notifications Notification[] @relation("NotificationRecipientUser")
+  notifications              Notification[]       @relation("NotificationRecipientUser")
 
   signedRequests Request[] @relation("RequestSignedBy")
 
@@ -154,37 +154,37 @@ model User {
   stockMovementsPerformed  StockMovement[] @relation("StockMovementPerformedBy")
   stockMovementsAssignedTo StockMovement[] @relation("StockMovementAssignedTo")
 
-  createdAllowedIps       AllowedIp[]        @relation("AllowedIpCreatedBy")
-  ipAccessRequests        IpAccessRequest[]  @relation("IpAccessRequestUser")
+  createdAllowedIps        AllowedIp[]       @relation("AllowedIpCreatedBy")
+  ipAccessRequests         IpAccessRequest[] @relation("IpAccessRequestUser")
   reviewedIpAccessRequests IpAccessRequest[] @relation("IpAccessRequestReviewedBy")
-  adminActions       UserAdminAudit[] @relation("UserAdminAuditActor")
-  adminActionTargets UserAdminAudit[] @relation("UserAdminAuditTarget")
+  adminActions             UserAdminAudit[]  @relation("UserAdminAuditActor")
+  adminActionTargets       UserAdminAudit[]  @relation("UserAdminAuditTarget")
 
-  submittedPublicRequests PublicRequest[] @relation("PublicRequestRequesterUser")
-  handledPublicRequests           PublicRequest[]       @relation("PublicRequestHandledBy")
-  generatedReports Report[] @relation("ReportGeneratedBy")
-  createdTickets  Ticket[] @relation("TicketCreatedBy")
-  assignedTickets Ticket[] @relation("TicketAssignedTo")
-  ticketMessages  TicketMessage[]
-  ticketRequestLinks TicketRequestLink[]
-  ticketAudits       TicketAudit[] @relation("TicketAuditActor")
-  ticketParticipants TicketParticipant[] @relation("TicketParticipantUser")
-  ticketParticipantsAdded TicketParticipant[] @relation("TicketParticipantAddedBy")
-  roleAssignments      UserRoleAssignment[] @relation("UserRoleAssignmentUser")
-  roleAssignmentsGiven UserRoleAssignment[] @relation("UserRoleAssignmentAssignedBy")
-  rbacAudits         RbacAudit[] @relation("RbacAuditActor")
-  workflowEvents     WorkflowEvent[] @relation("WorkflowEventActor")
-  assetEvents        MunicipalAssetEvent[] @relation("MunicipalAssetEventActor")
-  assetAssignments   MunicipalAssetAssignment[]
-  assignedMunicipalAssets MunicipalAsset[] @relation("MunicipalAssetAssignedTo")
-  assetMovements     MunicipalAssetMovement[] @relation("MunicipalAssetMovementActor")
-  assetMovementsFromCustody MunicipalAssetMovement[] @relation("MunicipalAssetMovementFromCustodian")
-  assetMovementsToCustody   MunicipalAssetMovement[] @relation("MunicipalAssetMovementToCustodian")
-  assetDisposalProcessesOpened MunicipalAssetDisposalProcess[] @relation("MunicipalAssetDisposalOpenedBy")
+  submittedPublicRequests       PublicRequest[]                 @relation("PublicRequestRequesterUser")
+  handledPublicRequests         PublicRequest[]                 @relation("PublicRequestHandledBy")
+  generatedReports              Report[]                        @relation("ReportGeneratedBy")
+  createdTickets                Ticket[]                        @relation("TicketCreatedBy")
+  assignedTickets               Ticket[]                        @relation("TicketAssignedTo")
+  ticketMessages                TicketMessage[]
+  ticketRequestLinks            TicketRequestLink[]
+  ticketAudits                  TicketAudit[]                   @relation("TicketAuditActor")
+  ticketParticipants            TicketParticipant[]             @relation("TicketParticipantUser")
+  ticketParticipantsAdded       TicketParticipant[]             @relation("TicketParticipantAddedBy")
+  roleAssignments               UserRoleAssignment[]            @relation("UserRoleAssignmentUser")
+  roleAssignmentsGiven          UserRoleAssignment[]            @relation("UserRoleAssignmentAssignedBy")
+  rbacAudits                    RbacAudit[]                     @relation("RbacAuditActor")
+  workflowEvents                WorkflowEvent[]                 @relation("WorkflowEventActor")
+  assetEvents                   MunicipalAssetEvent[]           @relation("MunicipalAssetEventActor")
+  assetAssignments              MunicipalAssetAssignment[]
+  assignedMunicipalAssets       MunicipalAsset[]                @relation("MunicipalAssetAssignedTo")
+  assetMovements                MunicipalAssetMovement[]        @relation("MunicipalAssetMovementActor")
+  assetMovementsFromCustody     MunicipalAssetMovement[]        @relation("MunicipalAssetMovementFromCustodian")
+  assetMovementsToCustody       MunicipalAssetMovement[]        @relation("MunicipalAssetMovementToCustodian")
+  assetDisposalProcessesOpened  MunicipalAssetDisposalProcess[] @relation("MunicipalAssetDisposalOpenedBy")
   assetDisposalProcessesDecided MunicipalAssetDisposalProcess[] @relation("MunicipalAssetDisposalDecidedBy")
-  requestExecutions RequestExecution[] @relation("RequestExecutionExecutedBy")
-  financeEvents      FinanceProcessEvent[] @relation("FinanceProcessEventActor")
-  presidencyDecisions PresidencyDispatch[] @relation("PresidencyDispatchDecidedBy")
+  requestExecutions             RequestExecution[]              @relation("RequestExecutionExecutedBy")
+  financeEvents                 FinanceProcessEvent[]           @relation("FinanceProcessEventActor")
+  presidencyDecisions           PresidencyDispatch[]            @relation("PresidencyDispatchDecidedBy")
 
   @@unique([tenantId, email])
   @@unique([tenantId, username])
@@ -200,10 +200,10 @@ model Category {
   createdAt DateTime @default(now())
   updatedAt DateTime @default(now()) @updatedAt
 
-  tenantId String @db.Uuid @map("userId")
+  tenantId String @map("userId") @db.Uuid
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  products Product[]
+  products           Product[]
   assetClassMappings AssetCategoryClassMap[]
 
   @@unique([tenantId, name])
@@ -226,11 +226,11 @@ model Supplier {
   createdAt DateTime @default(now())
   updatedAt DateTime @default(now()) @updatedAt
 
-  tenantId String @db.Uuid @map("userId")
+  tenantId String @map("userId") @db.Uuid
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   providers SupplierProvider[]
-  products Product[]
+  products  Product[]
 
   @@unique([tenantId, name])
   @@index([tenantId])
@@ -240,7 +240,7 @@ model Supplier {
 model SupplierProvider {
   id String @id @default(uuid()) @db.Uuid
 
-  supplierId String @db.Uuid
+  supplierId String   @db.Uuid
   supplier   Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
 
   name  String
@@ -254,7 +254,7 @@ model SupplierProvider {
   createdAt DateTime @default(now())
   updatedAt DateTime @default(now()) @updatedAt
 
-  tenantId String @db.Uuid @map("userId")
+  tenantId String @map("userId") @db.Uuid
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@unique([tenantId, supplierId, name])
@@ -264,18 +264,18 @@ model SupplierProvider {
 }
 
 model Product {
-  id          String   @id @default(uuid()) @db.Uuid
-  name        String
-  description String?
-  sku         String   @unique
-  price       Float
-  quantity    BigInt
-  status      String
-  isPatrimonializable Boolean @default(false)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @default(now()) @updatedAt
+  id                  String   @id @default(uuid()) @db.Uuid
+  name                String
+  description         String?
+  sku                 String   @unique
+  price               Float
+  quantity            BigInt
+  status              String
+  isPatrimonializable Boolean  @default(false)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @default(now()) @updatedAt
 
-  tenantId   String @db.Uuid @map("userId")
+  tenantId   String @map("userId") @db.Uuid
   categoryId String @db.Uuid
   supplierId String @db.Uuid
 
@@ -291,7 +291,7 @@ model Product {
 
   publicRequestItems PublicRequestItem[]
 
-  stockMovements StockMovement[]
+  stockMovements  StockMovement[]
   municipalAssets MunicipalAsset[]
 
   @@index([tenantId])
@@ -338,16 +338,16 @@ enum PublicRequestStatus {
 }
 
 model Request {
-  id         String        @id @default(uuid()) @db.Uuid
-  status     RequestStatus @default(DRAFT)
-  requestType RequestType  @default(STANDARD)
-  title      String?
-  notes      String?
-  gtmiYear   Int
-  gtmiSeq    Int
-  gtmiNumber String
+  id          String        @id @default(uuid()) @db.Uuid
+  status      RequestStatus @default(DRAFT)
+  requestType RequestType   @default(STANDARD)
+  title       String?
+  notes       String?
+  gtmiYear    Int
+  gtmiSeq     Int
+  gtmiNumber  String
 
-  requestedAt DateTime @default(now())
+  requestedAt DateTime        @default(now())
   priority    RequestPriority @default(NORMAL)
   dueAt       DateTime?
 
@@ -366,24 +366,25 @@ model Request {
   supplierOption2 String?
   supplierOption3 String?
 
-  signedAt       DateTime?
-  signedByName   String?
-  signedByTitle  String?
-  signedByUserId String? @db.Uuid
-  signedBy       User?   @relation("RequestSignedBy", fields: [signedByUserId], references: [id], onDelete: SetNull)
+  signedAt               DateTime?
+  signedByName           String?
+  signedByTitle          String?
+  signedSignatureDataUrl String?   @db.Text
+  signedByUserId         String?   @db.Uuid
+  signedBy               User?     @relation("RequestSignedBy", fields: [signedByUserId], references: [id], onDelete: SetNull)
 
   signedIp        String?
   signedUserAgent String?
 
   signedVoidedAt       DateTime?
   signedVoidedReason   String?
-  signedVoidedByUserId String? @db.Uuid
-  signedVoidedBy       User?   @relation("RequestSignedVoidedBy", fields: [signedVoidedByUserId], references: [id], onDelete: SetNull)
+  signedVoidedByUserId String?   @db.Uuid
+  signedVoidedBy       User?     @relation("RequestSignedVoidedBy", fields: [signedVoidedByUserId], references: [id], onDelete: SetNull)
 
-  pickupSignedAt           DateTime?
-  pickupSignedByName       String?
-  pickupSignedByTitle      String?
-  pickupSignatureDataUrl   String?  @db.Text
+  pickupSignedAt         DateTime?
+  pickupSignedByName     String?
+  pickupSignedByTitle    String?
+  pickupSignatureDataUrl String?   @db.Text
 
   pickupSignedIp        String?
   pickupSignedUserAgent String?
@@ -393,11 +394,11 @@ model Request {
 
   pickupVoidedAt       DateTime?
   pickupVoidedReason   String?
-  pickupVoidedByUserId String? @db.Uuid
-  pickupVoidedBy       User?   @relation("RequestPickupVoidedBy", fields: [pickupVoidedByUserId], references: [id], onDelete: SetNull)
+  pickupVoidedByUserId String?   @db.Uuid
+  pickupVoidedBy       User?     @relation("RequestPickupVoidedBy", fields: [pickupVoidedByUserId], references: [id], onDelete: SetNull)
 
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @default(now()) @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
 
   tenantId String @db.Uuid
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -418,15 +419,15 @@ model Request {
 
   stockMovements StockMovement[]
 
-  acceptedFromPublicRequests PublicRequest[] @relation("PublicRequestAcceptedRequest")
-  statusAudits RequestStatusAudit[]
-  notifications Notification[]
-  ticketLinks TicketRequestLink[]
-  workflowInstances WorkflowInstance[]
-  financeProcesses FinanceProcess[]
-  presidencyDispatch PresidencyDispatch?
-  linkedAssets MunicipalAsset[]
-  executions RequestExecution[]
+  acceptedFromPublicRequests PublicRequest[]      @relation("PublicRequestAcceptedRequest")
+  statusAudits               RequestStatusAudit[]
+  notifications              Notification[]
+  ticketLinks                TicketRequestLink[]
+  workflowInstances          WorkflowInstance[]
+  financeProcesses           FinanceProcess[]
+  presidencyDispatch         PresidencyDispatch?
+  linkedAssets               MunicipalAsset[]
+  executions                 RequestExecution[]
 
   @@unique([tenantId, gtmiNumber])
   @@unique([tenantId, gtmiYear, gtmiSeq])
@@ -449,15 +450,16 @@ model Request {
 }
 
 model RequestItem {
-  id          String   @id @default(uuid()) @db.Uuid
-  role        RequestItemRole @default(NORMAL)
-  quantity    BigInt
-  notes       String?
-  unit        String?
-  reference   String?
-  destination String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @default(now()) @updatedAt
+  id             String          @id @default(uuid()) @db.Uuid
+  role           RequestItemRole @default(NORMAL)
+  quantity       BigInt
+  notes          String?
+  unit           String?
+  reference      String?
+  destination    String?
+  reservedUnitId String?         @db.Uuid
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @default(now()) @updatedAt
 
   requestId String  @db.Uuid
   request   Request @relation(fields: [requestId], references: [id], onDelete: Cascade)
@@ -465,8 +467,11 @@ model RequestItem {
   productId String  @db.Uuid
   product   Product @relation(fields: [productId], references: [id], onDelete: Restrict)
 
+  reservedUnit ProductUnit? @relation("RequestItemReservedUnit", fields: [reservedUnitId], references: [id], onDelete: SetNull)
+
   @@index([requestId])
   @@index([productId])
+  @@index([reservedUnitId])
 }
 
 model RequestingService {
@@ -476,19 +481,19 @@ model RequestingService {
   ativo      Boolean @default(true)
 
   // Users optionally belong to a requesting service
-  users User[]
+  users     User[]
   employees Employee[]
 
   requests Request[]
   invoices ProductInvoice[]
 
-  publicRequests           PublicRequest[]
-  roleAssignments          UserRoleAssignment[]
-  municipalAssets          MunicipalAsset[]
-  financeProcesses         FinanceProcess[]
+  publicRequests            PublicRequest[]
+  roleAssignments           UserRoleAssignment[]
+  municipalAssets           MunicipalAsset[]
+  financeProcesses          FinanceProcess[]
   municipalAssetAssignments MunicipalAssetAssignment[]
-  outgoingAssetMovements MunicipalAssetMovement[] @relation("MunicipalAssetMovementFromService")
-  incomingAssetMovements MunicipalAssetMovement[] @relation("MunicipalAssetMovementToService")
+  outgoingAssetMovements    MunicipalAssetMovement[]   @relation("MunicipalAssetMovementFromService")
+  incomingAssetMovements    MunicipalAssetMovement[]   @relation("MunicipalAssetMovementToService")
 
   @@unique([codigo])
   @@index([ativo])
@@ -518,9 +523,9 @@ model Employee {
 }
 
 model PublicRequest {
-  id        String             @id @default(uuid()) @db.Uuid
-  createdAt DateTime           @default(now())
-  updatedAt DateTime           @default(now()) @updatedAt
+  id        String   @id @default(uuid()) @db.Uuid
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
 
   status PublicRequestStatus @default(RECEIVED)
 
@@ -534,10 +539,10 @@ model PublicRequest {
   requestingServiceId Int
   requestingService   RequestingService @relation(fields: [requestingServiceId], references: [id], onDelete: Restrict)
 
-  requesterName String
+  requesterName   String
   requesterUserId String? @db.Uuid
-  requesterUser   User? @relation("PublicRequestRequesterUser", fields: [requesterUserId], references: [id], onDelete: SetNull)
-  requesterIp   String?
+  requesterUser   User?   @relation("PublicRequestRequesterUser", fields: [requesterUserId], references: [id], onDelete: SetNull)
+  requesterIp     String?
 
   deliveryLocation String?
 
@@ -546,13 +551,13 @@ model PublicRequest {
 
   handledAt       DateTime?
   handledNote     String?
-  handledByUserId String? @db.Uuid
-  handledBy       User?   @relation("PublicRequestHandledBy", fields: [handledByUserId], references: [id], onDelete: SetNull)
+  handledByUserId String?   @db.Uuid
+  handledBy       User?     @relation("PublicRequestHandledBy", fields: [handledByUserId], references: [id], onDelete: SetNull)
 
-  acceptedRequestId String? @db.Uuid
+  acceptedRequestId String?  @db.Uuid
   acceptedRequest   Request? @relation("PublicRequestAcceptedRequest", fields: [acceptedRequestId], references: [id], onDelete: SetNull)
 
-  items PublicRequestItem[]
+  items             PublicRequestItem[]
   workflowInstances WorkflowInstance[]
 
   @@index([tenantId])
@@ -567,7 +572,7 @@ model PublicRequestItem {
   id        String   @id @default(uuid()) @db.Uuid
   createdAt DateTime @default(now())
 
-  publicRequestId String @db.Uuid
+  publicRequestId String        @db.Uuid
   publicRequest   PublicRequest @relation(fields: [publicRequestId], references: [id], onDelete: Cascade)
 
   productId String  @db.Uuid
@@ -582,11 +587,11 @@ model PublicRequestItem {
 }
 
 model ProductInvoice {
-  id            String   @id @default(uuid()) @db.Uuid
+  id            String    @id @default(uuid()) @db.Uuid
   invoiceNumber String
   reqNumber     String?
   reqDate       DateTime?
-  issuedAt      DateTime @default(now())
+  issuedAt      DateTime  @default(now())
   quantity      BigInt
   unitPrice     Float
   notes         String?
@@ -596,7 +601,7 @@ model ProductInvoice {
   createdAt DateTime @default(now())
   updatedAt DateTime @default(now()) @updatedAt
 
-  tenantId  String @db.Uuid @map("userId")
+  tenantId  String @map("userId") @db.Uuid
   productId String @db.Uuid
 
   requestId String? @db.Uuid
@@ -643,7 +648,7 @@ model ProductUnit {
   createdAt  DateTime  @default(now())
   acquiredAt DateTime?
 
-  tenantId String @db.Uuid @map("userId")
+  tenantId String @map("userId") @db.Uuid
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   productId String  @db.Uuid
@@ -663,8 +668,9 @@ model ProductUnit {
   costCenter     String?
   acquiredNotes  String?
 
-  stockMovements StockMovement[]
-  municipalAssets MunicipalAsset[]
+  stockMovements       StockMovement[]
+  municipalAssets      MunicipalAsset[]
+  reservedRequestItems RequestItem[]    @relation("RequestItemReservedUnit")
 
   @@unique([tenantId, serialNumber])
   @@unique([tenantId, partNumber])
@@ -698,7 +704,7 @@ model StockMovement {
   createdAt DateTime @default(now())
 
   // Tenant/owner inventory
-  tenantId String @db.Uuid @map("userId")
+  tenantId String @map("userId") @db.Uuid
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   productId String  @db.Uuid
@@ -744,11 +750,12 @@ model StoredFile {
   mimeType     String
   sizeBytes    Int
   storagePath  String
+  sha256       String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @default(now()) @updatedAt
 
-  tenantId String @db.Uuid @map("userId")
+  tenantId String @map("userId") @db.Uuid
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   // optional links
@@ -762,16 +769,17 @@ model StoredFile {
   @@index([kind])
   @@index([invoiceId])
   @@index([requestId])
+  @@index([sha256])
 }
 
 model AllowedIp {
-  id       String  @id @default(uuid()) @db.Uuid
-  tenantId String  @db.Uuid
-  tenant   Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  ipOrCidr String
-  isActive Boolean @default(true)
-  note     String?
+  ipOrCidr  String
+  isActive  Boolean   @default(true)
+  note      String?
   expiresAt DateTime?
 
   createdAt       DateTime @default(now())
@@ -784,9 +792,9 @@ model AllowedIp {
 }
 
 model IpAccessRequest {
-  id       String                @id @default(uuid()) @db.Uuid
-  tenantId String                @db.Uuid
-  tenant   Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @db.Uuid
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   userId String? @db.Uuid
   user   User?   @relation("IpAccessRequestUser", fields: [userId], references: [id], onDelete: SetNull)
@@ -812,12 +820,12 @@ model IpAccessRequest {
 }
 
 model UserAdminAudit {
-  id        String   @id @default(uuid()) @db.Uuid
-  action    String   @db.VarChar(80)
-  targetType String  @db.VarChar(40) @default("USER")
-  note      String?
-  payload   Json?
-  createdAt DateTime @default(now())
+  id         String   @id @default(uuid()) @db.Uuid
+  action     String   @db.VarChar(80)
+  targetType String   @default("USER") @db.VarChar(40)
+  note       String?
+  payload    Json?
+  createdAt  DateTime @default(now())
 
   tenantId String @db.Uuid
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -847,22 +855,22 @@ enum NotificationKind {
 }
 
 model Notification {
-  id        String   @id @default(uuid()) @db.Uuid
+  id        String           @id @default(uuid()) @db.Uuid
   kind      NotificationKind
   title     String
   message   String
   data      Json?
-  createdAt DateTime @default(now())
+  createdAt DateTime         @default(now())
   readAt    DateTime?
 
   tenantId String @db.Uuid
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   recipientRole   UserRole?
-  recipientUserId String? @db.Uuid
-  recipientUser   User?   @relation("NotificationRecipientUser", fields: [recipientUserId], references: [id], onDelete: Cascade)
+  recipientUserId String?   @db.Uuid
+  recipientUser   User?     @relation("NotificationRecipientUser", fields: [recipientUserId], references: [id], onDelete: Cascade)
 
-  requestId String? @db.Uuid
+  requestId String?  @db.Uuid
   request   Request? @relation(fields: [requestId], references: [id], onDelete: Cascade)
 
   @@index([tenantId])
@@ -874,12 +882,12 @@ model Notification {
 }
 
 model RequestStatusAudit {
-  id             String        @id @default(uuid()) @db.Uuid
-  fromStatus     RequestStatus?
-  toStatus       RequestStatus
-  note           String?
-  source         String?
-  createdAt      DateTime      @default(now())
+  id         String         @id @default(uuid()) @db.Uuid
+  fromStatus RequestStatus?
+  toStatus   RequestStatus
+  note       String?
+  source     String?
+  createdAt  DateTime       @default(now())
 
   tenantId String @db.Uuid
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -909,16 +917,16 @@ model Ticket {
   type     TicketType     @default(QUESTION)
   level    TicketLevel    @default(L1)
 
-  escalationReason String?
-  dueAt            DateTime?
+  escalationReason   String?
+  dueAt              DateTime?
   firstResponseDueAt DateTime?
   resolutionDueAt    DateTime?
-  firstResponseAt  DateTime?
-  resolvedAt       DateTime?
-  closedAt         DateTime?
-  slaBreachedAt    DateTime?
-  lastEscalatedAt  DateTime?
-  slaEscalationCount Int @default(0)
+  firstResponseAt    DateTime?
+  resolvedAt         DateTime?
+  closedAt           DateTime?
+  slaBreachedAt      DateTime?
+  lastEscalatedAt    DateTime?
+  slaEscalationCount Int       @default(0)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @default(now()) @updatedAt
@@ -932,11 +940,11 @@ model Ticket {
   assignedToUserId String? @db.Uuid
   assignedTo       User?   @relation("TicketAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
 
-  messages TicketMessage[]
-  participants TicketParticipant[]
-  requestLinks TicketRequestLink[]
-  audits       TicketAudit[]
-  publicRequests PublicRequest[] @relation("PublicRequestTicket")
+  messages       TicketMessage[]
+  participants   TicketParticipant[]
+  requestLinks   TicketRequestLink[]
+  audits         TicketAudit[]
+  publicRequests PublicRequest[]     @relation("PublicRequestTicket")
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -950,7 +958,7 @@ model Ticket {
 }
 
 model TicketParticipant {
-  id String @id @default(uuid()) @db.Uuid
+  id        String   @id @default(uuid()) @db.Uuid
   createdAt DateTime @default(now())
 
   tenantId String @db.Uuid
@@ -996,7 +1004,7 @@ model TicketMessage {
 }
 
 model TicketRequestLink {
-  id String @id @default(uuid()) @db.Uuid
+  id        String   @id @default(uuid()) @db.Uuid
   createdAt DateTime @default(now())
 
   tenantId String @db.Uuid
@@ -1005,7 +1013,7 @@ model TicketRequestLink {
   ticketId String @db.Uuid
   ticket   Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
 
-  requestId String @db.Uuid
+  requestId String  @db.Uuid
   request   Request @relation(fields: [requestId], references: [id], onDelete: Cascade)
 
   linkedByUserId String? @db.Uuid
@@ -1019,10 +1027,10 @@ model TicketRequestLink {
 }
 
 model TicketAudit {
-  id String @id @default(uuid()) @db.Uuid
+  id        String   @id @default(uuid()) @db.Uuid
   createdAt DateTime @default(now())
 
-  action String @db.VarChar(80)
+  action String  @db.VarChar(80)
   note   String?
   data   Json?
 
@@ -1052,9 +1060,9 @@ model Report {
   generatedById String @db.Uuid
   generatedBy   User   @relation("ReportGeneratedBy", fields: [generatedById], references: [id], onDelete: Restrict)
 
-  period       String @db.VarChar(20)
+  period       String  @db.VarChar(20)
   filters      Json?
-  documentHash String @db.VarChar(64)
+  documentHash String  @db.VarChar(64)
   filePath     String?
 
   @@index([tenantId])
@@ -1071,12 +1079,12 @@ model RateLimitBucket {
 }
 
 model AuthLockout {
-  key          String   @id
-  tenantId     String   @db.Uuid
+  key          String    @id
+  tenantId     String    @db.Uuid
   email        String
   ip           String
   failureCount Int
-  lastFailedAt DateTime @default(now())
+  lastFailedAt DateTime  @default(now())
   lockedUntil  DateTime?
 
   @@index([tenantId])
@@ -1128,10 +1136,10 @@ model AccessRolePermission {
   tenantId String @db.Uuid
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  roleId String @db.Uuid
+  roleId String     @db.Uuid
   role   AccessRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
 
-  permissionId String @db.Uuid
+  permissionId String           @db.Uuid
   permission   AccessPermission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
 
   @@unique([roleId, permissionId])
@@ -1141,13 +1149,13 @@ model AccessRolePermission {
 }
 
 model UserRoleAssignment {
-  id       String   @id @default(uuid()) @db.Uuid
-  isActive Boolean  @default(true)
-  note     String?
-  startsAt DateTime?
-  endsAt   DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @default(now()) @updatedAt
+  id        String    @id @default(uuid()) @db.Uuid
+  isActive  Boolean   @default(true)
+  note      String?
+  startsAt  DateTime?
+  endsAt    DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @default(now()) @updatedAt
 
   tenantId String @db.Uuid
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -1155,11 +1163,11 @@ model UserRoleAssignment {
   userId String @db.Uuid
   user   User   @relation("UserRoleAssignmentUser", fields: [userId], references: [id], onDelete: Cascade)
 
-  roleId String @db.Uuid
+  roleId String     @db.Uuid
   role   AccessRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
 
   requestingServiceId Int?
-  requestingService RequestingService? @relation(fields: [requestingServiceId], references: [id], onDelete: SetNull)
+  requestingService   RequestingService? @relation(fields: [requestingServiceId], references: [id], onDelete: SetNull)
 
   assignedByUserId String? @db.Uuid
   assignedBy       User?   @relation("UserRoleAssignmentAssignedBy", fields: [assignedByUserId], references: [id], onDelete: SetNull)
@@ -1223,27 +1231,27 @@ model WorkflowDefinition {
 }
 
 model WorkflowStateDefinition {
-  id           String   @id @default(uuid()) @db.Uuid
-  code         String   @db.VarChar(120)
-  name         String   @db.VarChar(120)
-  sortOrder    Int
-  isInitial    Boolean  @default(false)
-  isTerminal   Boolean  @default(false)
+  id            String         @id @default(uuid()) @db.Uuid
+  code          String         @db.VarChar(120)
+  name          String         @db.VarChar(120)
+  sortOrder     Int
+  isInitial     Boolean        @default(false)
+  isTerminal    Boolean        @default(false)
   requestStatus RequestStatus?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @default(now()) @updatedAt
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @default(now()) @updatedAt
 
   tenantId String @db.Uuid
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  workflowId String @db.Uuid
+  workflowId String             @db.Uuid
   workflow   WorkflowDefinition @relation(fields: [workflowId], references: [id], onDelete: Cascade)
 
-  instancesCurrent WorkflowInstance[] @relation("WorkflowInstanceCurrentState")
+  instancesCurrent WorkflowInstance[]             @relation("WorkflowInstanceCurrentState")
   fromTransitions  WorkflowTransitionDefinition[] @relation("WorkflowTransitionFromState")
   toTransitions    WorkflowTransitionDefinition[] @relation("WorkflowTransitionToState")
-  fromEvents       WorkflowEvent[] @relation("WorkflowEventFromState")
-  toEvents         WorkflowEvent[] @relation("WorkflowEventToState")
+  fromEvents       WorkflowEvent[]                @relation("WorkflowEventFromState")
+  toEvents         WorkflowEvent[]                @relation("WorkflowEventToState")
 
   @@unique([workflowId, code])
   @@index([tenantId])
@@ -1252,22 +1260,22 @@ model WorkflowStateDefinition {
 }
 
 model WorkflowTransitionDefinition {
-  id            String   @id @default(uuid()) @db.Uuid
-  action        String   @db.VarChar(80)
-  requiredPermission String? @db.VarChar(120)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @default(now()) @updatedAt
+  id                 String   @id @default(uuid()) @db.Uuid
+  action             String   @db.VarChar(80)
+  requiredPermission String?  @db.VarChar(120)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @default(now()) @updatedAt
 
   tenantId String @db.Uuid
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  workflowId String @db.Uuid
+  workflowId String             @db.Uuid
   workflow   WorkflowDefinition @relation(fields: [workflowId], references: [id], onDelete: Cascade)
 
-  fromStateId String @db.Uuid
+  fromStateId String                  @db.Uuid
   fromState   WorkflowStateDefinition @relation("WorkflowTransitionFromState", fields: [fromStateId], references: [id], onDelete: Cascade)
 
-  toStateId String @db.Uuid
+  toStateId String                  @db.Uuid
   toState   WorkflowStateDefinition @relation("WorkflowTransitionToState", fields: [toStateId], references: [id], onDelete: Cascade)
 
   @@unique([workflowId, fromStateId, action])
@@ -1278,30 +1286,30 @@ model WorkflowTransitionDefinition {
 }
 
 model WorkflowInstance {
-  id        String   @id @default(uuid()) @db.Uuid
-  createdAt DateTime @default(now())
-  updatedAt DateTime @default(now()) @updatedAt
+  id          String    @id @default(uuid()) @db.Uuid
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @default(now()) @updatedAt
   completedAt DateTime?
 
   tenantId String @db.Uuid
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  definitionId String @db.Uuid
+  definitionId String             @db.Uuid
   definition   WorkflowDefinition @relation(fields: [definitionId], references: [id], onDelete: Cascade)
 
-  currentStateId String @db.Uuid
+  currentStateId String                  @db.Uuid
   currentState   WorkflowStateDefinition @relation("WorkflowInstanceCurrentState", fields: [currentStateId], references: [id], onDelete: Restrict)
 
-  requestId String? @db.Uuid
+  requestId String?  @db.Uuid
   request   Request? @relation(fields: [requestId], references: [id], onDelete: Cascade)
 
-  publicRequestId String? @db.Uuid
+  publicRequestId String?        @db.Uuid
   publicRequest   PublicRequest? @relation(fields: [publicRequestId], references: [id], onDelete: Cascade)
 
-  municipalAssetId String? @db.Uuid
+  municipalAssetId String?         @db.Uuid
   municipalAsset   MunicipalAsset? @relation(fields: [municipalAssetId], references: [id], onDelete: Cascade)
 
-  financeProcessId String? @db.Uuid
+  financeProcessId String?         @db.Uuid
   financeProcess   FinanceProcess? @relation(fields: [financeProcessId], references: [id], onDelete: Cascade)
 
   events WorkflowEvent[]
@@ -1324,13 +1332,13 @@ model WorkflowEvent {
   tenantId String @db.Uuid
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  instanceId String @db.Uuid
+  instanceId String           @db.Uuid
   instance   WorkflowInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
 
-  fromStateId String? @db.Uuid
+  fromStateId String?                  @db.Uuid
   fromState   WorkflowStateDefinition? @relation("WorkflowEventFromState", fields: [fromStateId], references: [id], onDelete: SetNull)
 
-  toStateId String @db.Uuid
+  toStateId String                  @db.Uuid
   toState   WorkflowStateDefinition @relation("WorkflowEventToState", fields: [toStateId], references: [id], onDelete: Restrict)
 
   actorUserId String? @db.Uuid
@@ -1396,14 +1404,14 @@ enum MunicipalAssetDisposalStatus {
 }
 
 model MunicipalAssetClass {
-  id          String   @id @default(uuid()) @db.Uuid
-  key         String   @db.VarChar(80)
-  name        String   @db.VarChar(120)
+  id          String  @id @default(uuid()) @db.Uuid
+  key         String  @db.VarChar(80)
+  name        String  @db.VarChar(120)
   description String?
-  isActive    Boolean  @default(true)
+  isActive    Boolean @default(true)
 
-  requiresSerialNumber Boolean @default(false)
-  defaultUsefulLifeMonths Int?
+  requiresSerialNumber      Boolean                           @default(false)
+  defaultUsefulLifeMonths   Int?
   defaultDepreciationMethod MunicipalAssetDepreciationMethod?
 
   createdAt DateTime @default(now())
@@ -1412,8 +1420,8 @@ model MunicipalAssetClass {
   tenantId String @db.Uuid
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  models MunicipalAssetModel[]
-  assets MunicipalAsset[]
+  models           MunicipalAssetModel[]
+  assets           MunicipalAsset[]
   categoryMappings AssetCategoryClassMap[]
 
   @@unique([tenantId, key])
@@ -1423,11 +1431,11 @@ model MunicipalAssetClass {
 }
 
 model MunicipalAssetModel {
-  id          String   @id @default(uuid()) @db.Uuid
-  brand       String   @db.VarChar(120)
-  model       String   @db.VarChar(120)
+  id          String  @id @default(uuid()) @db.Uuid
+  brand       String  @db.VarChar(120)
+  model       String  @db.VarChar(120)
   description String?
-  isActive    Boolean  @default(true)
+  isActive    Boolean @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @default(now()) @updatedAt
@@ -1435,7 +1443,7 @@ model MunicipalAssetModel {
   tenantId String @db.Uuid
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  classId String? @db.Uuid
+  classId String?              @db.Uuid
   class   MunicipalAssetClass? @relation(fields: [classId], references: [id], onDelete: SetNull)
 
   assets MunicipalAsset[]
@@ -1447,10 +1455,10 @@ model MunicipalAssetModel {
 }
 
 model MunicipalAssetLocation {
-  id    String @id @default(uuid()) @db.Uuid
+  id    String  @id @default(uuid()) @db.Uuid
   code  String? @db.VarChar(80)
   name  String
-  level Int @default(0)
+  level Int     @default(0)
   note  String?
 
   createdAt DateTime @default(now())
@@ -1459,11 +1467,11 @@ model MunicipalAssetLocation {
   tenantId String @db.Uuid
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  parentId String? @db.Uuid
-  parent   MunicipalAssetLocation? @relation("MunicipalAssetLocationTree", fields: [parentId], references: [id], onDelete: SetNull)
+  parentId String?                  @db.Uuid
+  parent   MunicipalAssetLocation?  @relation("MunicipalAssetLocationTree", fields: [parentId], references: [id], onDelete: SetNull)
   children MunicipalAssetLocation[] @relation("MunicipalAssetLocationTree")
 
-  assets MunicipalAsset[]
+  assets        MunicipalAsset[]
   fromMovements MunicipalAssetMovement[] @relation("MunicipalAssetMovementFromLocation")
   toMovements   MunicipalAssetMovement[] @relation("MunicipalAssetMovementToLocation")
 
@@ -1474,56 +1482,56 @@ model MunicipalAssetLocation {
 }
 
 model MunicipalAsset {
-  id          String   @id @default(uuid()) @db.Uuid
-  code        String
-  name        String
-  description String?
-  category    String?
-  status      MunicipalAssetStatus @default(REGISTERED)
-  location    String?
-  serialNumber String? @db.VarChar(160)
-  assetTag     String? @db.VarChar(160)
-  criticality  MunicipalAssetCriticality @default(OPERATIONAL)
-  usefulLifeMonths Int?
+  id                 String                           @id @default(uuid()) @db.Uuid
+  code               String
+  name               String
+  description        String?
+  category           String?
+  status             MunicipalAssetStatus             @default(REGISTERED)
+  location           String?
+  serialNumber       String?                          @db.VarChar(160)
+  assetTag           String?                          @db.VarChar(160)
+  criticality        MunicipalAssetCriticality        @default(OPERATIONAL)
+  usefulLifeMonths   Int?
   depreciationMethod MunicipalAssetDepreciationMethod @default(NONE)
-  notes       String?
-  acquisitionDate DateTime?
-  acquisitionValue Float?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @default(now()) @updatedAt
+  notes              String?
+  acquisitionDate    DateTime?
+  acquisitionValue   Float?
+  createdAt          DateTime                         @default(now())
+  updatedAt          DateTime                         @default(now()) @updatedAt
 
   tenantId String @db.Uuid
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   requestingServiceId Int?
-  requestingService RequestingService? @relation(fields: [requestingServiceId], references: [id], onDelete: SetNull)
+  requestingService   RequestingService? @relation(fields: [requestingServiceId], references: [id], onDelete: SetNull)
 
-  requestId String? @db.Uuid
+  requestId String?  @db.Uuid
   request   Request? @relation(fields: [requestId], references: [id], onDelete: SetNull)
 
   assignedToUserId String? @db.Uuid
   assignedTo       User?   @relation("MunicipalAssetAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
 
-  productId String? @db.Uuid
+  productId String?  @db.Uuid
   product   Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
 
-  productUnitId String? @db.Uuid
+  productUnitId String?      @db.Uuid
   productUnit   ProductUnit? @relation(fields: [productUnitId], references: [id], onDelete: SetNull)
 
-  classId String? @db.Uuid
+  classId String?              @db.Uuid
   class   MunicipalAssetClass? @relation(fields: [classId], references: [id], onDelete: SetNull)
 
-  modelId String? @db.Uuid
+  modelId String?              @db.Uuid
   model   MunicipalAssetModel? @relation(fields: [modelId], references: [id], onDelete: SetNull)
 
-  locationId String? @db.Uuid
+  locationId  String?                 @db.Uuid
   locationRef MunicipalAssetLocation? @relation(fields: [locationId], references: [id], onDelete: SetNull)
 
-  events      MunicipalAssetEvent[]
-  assignments MunicipalAssetAssignment[]
-  movements   MunicipalAssetMovement[]
+  events            MunicipalAssetEvent[]
+  assignments       MunicipalAssetAssignment[]
+  movements         MunicipalAssetMovement[]
   disposalProcesses MunicipalAssetDisposalProcess[]
-  workflows   WorkflowInstance[]
+  workflows         WorkflowInstance[]
 
   @@unique([tenantId, code])
   @@unique([tenantId, serialNumber])
@@ -1542,16 +1550,16 @@ model MunicipalAsset {
 }
 
 model MunicipalAssetEvent {
-  id         String   @id @default(uuid()) @db.Uuid
+  id         String                @id @default(uuid()) @db.Uuid
   fromStatus MunicipalAssetStatus?
   toStatus   MunicipalAssetStatus
   note       String?
-  createdAt  DateTime @default(now())
+  createdAt  DateTime              @default(now())
 
   tenantId String @db.Uuid
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  assetId String @db.Uuid
+  assetId String         @db.Uuid
   asset   MunicipalAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
 
   actorUserId String? @db.Uuid
@@ -1564,24 +1572,24 @@ model MunicipalAssetEvent {
 }
 
 model MunicipalAssetAssignment {
-  id        String   @id @default(uuid()) @db.Uuid
+  id        String    @id @default(uuid()) @db.Uuid
   note      String?
-  startAt   DateTime @default(now())
+  startAt   DateTime  @default(now())
   endAt     DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @default(now()) @updatedAt
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @default(now()) @updatedAt
 
   tenantId String @db.Uuid
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  assetId String @db.Uuid
+  assetId String         @db.Uuid
   asset   MunicipalAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
 
   userId String? @db.Uuid
   user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   requestingServiceId Int?
-  requestingService RequestingService? @relation(fields: [requestingServiceId], references: [id], onDelete: SetNull)
+  requestingService   RequestingService? @relation(fields: [requestingServiceId], references: [id], onDelete: SetNull)
 
   @@index([tenantId])
   @@index([assetId])
@@ -1592,18 +1600,18 @@ model MunicipalAssetAssignment {
 }
 
 model MunicipalAssetMovement {
-  id         String   @id @default(uuid()) @db.Uuid
-  type       MunicipalAssetMovementType
-  statusFrom MunicipalAssetStatus?
-  statusTo   MunicipalAssetStatus?
-  movementAt DateTime @default(now())
+  id               String                     @id @default(uuid()) @db.Uuid
+  type             MunicipalAssetMovementType
+  statusFrom       MunicipalAssetStatus?
+  statusTo         MunicipalAssetStatus?
+  movementAt       DateTime                   @default(now())
   expectedReturnAt DateTime?
-  returnedAt DateTime?
+  returnedAt       DateTime?
 
-  note       String?
-  reason     String?
-  vendorName String?
-  cost       Float?
+  note        String?
+  reason      String?
+  vendorName  String?
+  cost        Float?
   documentRef String?
   attachments Json?
 
@@ -1613,26 +1621,26 @@ model MunicipalAssetMovement {
   tenantId String @db.Uuid
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  assetId String @db.Uuid
+  assetId String         @db.Uuid
   asset   MunicipalAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
 
   actorUserId String? @db.Uuid
   actor       User?   @relation("MunicipalAssetMovementActor", fields: [actorUserId], references: [id], onDelete: SetNull)
 
   fromRequestingServiceId Int?
-  fromRequestingService RequestingService? @relation("MunicipalAssetMovementFromService", fields: [fromRequestingServiceId], references: [id], onDelete: SetNull)
-  toRequestingServiceId Int?
-  toRequestingService RequestingService? @relation("MunicipalAssetMovementToService", fields: [toRequestingServiceId], references: [id], onDelete: SetNull)
+  fromRequestingService   RequestingService? @relation("MunicipalAssetMovementFromService", fields: [fromRequestingServiceId], references: [id], onDelete: SetNull)
+  toRequestingServiceId   Int?
+  toRequestingService     RequestingService? @relation("MunicipalAssetMovementToService", fields: [toRequestingServiceId], references: [id], onDelete: SetNull)
 
-  fromLocationId String? @db.Uuid
+  fromLocationId String?                 @db.Uuid
   fromLocation   MunicipalAssetLocation? @relation("MunicipalAssetMovementFromLocation", fields: [fromLocationId], references: [id], onDelete: SetNull)
-  toLocationId String? @db.Uuid
-  toLocation   MunicipalAssetLocation? @relation("MunicipalAssetMovementToLocation", fields: [toLocationId], references: [id], onDelete: SetNull)
+  toLocationId   String?                 @db.Uuid
+  toLocation     MunicipalAssetLocation? @relation("MunicipalAssetMovementToLocation", fields: [toLocationId], references: [id], onDelete: SetNull)
 
   fromCustodianUserId String? @db.Uuid
   fromCustodian       User?   @relation("MunicipalAssetMovementFromCustodian", fields: [fromCustodianUserId], references: [id], onDelete: SetNull)
-  toCustodianUserId String? @db.Uuid
-  toCustodian       User?   @relation("MunicipalAssetMovementToCustodian", fields: [toCustodianUserId], references: [id], onDelete: SetNull)
+  toCustodianUserId   String? @db.Uuid
+  toCustodian         User?   @relation("MunicipalAssetMovementToCustodian", fields: [toCustodianUserId], references: [id], onDelete: SetNull)
 
   @@index([tenantId])
   @@index([assetId])
@@ -1648,28 +1656,28 @@ model MunicipalAssetMovement {
 }
 
 model MunicipalAssetDisposalProcess {
-  id      String @id @default(uuid()) @db.Uuid
-  code    String @db.VarChar(60)
-  status  MunicipalAssetDisposalStatus @default(DRAFT)
+  id     String                       @id @default(uuid()) @db.Uuid
+  code   String                       @db.VarChar(60)
+  status MunicipalAssetDisposalStatus @default(DRAFT)
 
-  reasonCode String @db.VarChar(80)
-  reasonDetail String?
+  reasonCode          String  @db.VarChar(80)
+  reasonDetail        String?
   technicalEvaluation String?
-  estimatedValue Float?
-  decisionNote String?
-  destination String?
-  documentRef String?
-  attachments Json?
+  estimatedValue      Float?
+  decisionNote        String?
+  destination         String?
+  documentRef         String?
+  attachments         Json?
 
-  openedAt DateTime @default(now())
-  closedAt DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @default(now()) @updatedAt
+  openedAt  DateTime  @default(now())
+  closedAt  DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @default(now()) @updatedAt
 
   tenantId String @db.Uuid
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  assetId String @db.Uuid
+  assetId String         @db.Uuid
   asset   MunicipalAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
 
   openedByUserId String? @db.Uuid
@@ -1695,10 +1703,10 @@ model AssetCategoryClassMap {
   tenantId String @db.Uuid
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  categoryId String @db.Uuid
+  categoryId String   @db.Uuid
   category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
 
-  classId String @db.Uuid
+  classId String              @db.Uuid
   class   MunicipalAssetClass @relation(fields: [classId], references: [id], onDelete: Restrict)
 
   @@unique([tenantId, categoryId])
@@ -1734,7 +1742,7 @@ model RequestExecution {
   tenantId String @db.Uuid
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  requestId String @db.Uuid
+  requestId String  @db.Uuid
   request   Request @relation(fields: [requestId], references: [id], onDelete: Cascade)
 
   executedByUserId String? @db.Uuid
@@ -1758,24 +1766,24 @@ enum FinanceProcessStatus {
 }
 
 model FinanceProcess {
-  id         String   @id @default(uuid()) @db.Uuid
+  id         String               @id @default(uuid()) @db.Uuid
   code       String
   amount     Float
-  currency   String   @default("EUR") @db.VarChar(10)
+  currency   String               @default("EUR") @db.VarChar(10)
   budgetLine String?
   note       String?
   status     FinanceProcessStatus @default(DRAFT)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @default(now()) @updatedAt
+  createdAt  DateTime             @default(now())
+  updatedAt  DateTime             @default(now()) @updatedAt
 
   tenantId String @db.Uuid
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  requestId String? @db.Uuid
+  requestId String?  @db.Uuid
   request   Request? @relation(fields: [requestId], references: [id], onDelete: SetNull)
 
   requestingServiceId Int?
-  requestingService RequestingService? @relation(fields: [requestingServiceId], references: [id], onDelete: SetNull)
+  requestingService   RequestingService? @relation(fields: [requestingServiceId], references: [id], onDelete: SetNull)
 
   events    FinanceProcessEvent[]
   workflows WorkflowInstance[]
@@ -1788,16 +1796,16 @@ model FinanceProcess {
 }
 
 model FinanceProcessEvent {
-  id         String   @id @default(uuid()) @db.Uuid
+  id         String                @id @default(uuid()) @db.Uuid
   fromStatus FinanceProcessStatus?
   toStatus   FinanceProcessStatus
   note       String?
-  createdAt  DateTime @default(now())
+  createdAt  DateTime              @default(now())
 
   tenantId String @db.Uuid
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  financeProcessId String @db.Uuid
+  financeProcessId String         @db.Uuid
   financeProcess   FinanceProcess @relation(fields: [financeProcessId], references: [id], onDelete: Cascade)
 
   actorUserId String? @db.Uuid
@@ -1816,18 +1824,18 @@ enum PresidencyDispatchStatus {
 }
 
 model PresidencyDispatch {
-  id        String   @id @default(uuid()) @db.Uuid
-  status    PresidencyDispatchStatus @default(PENDING)
-  note      String?
-  dispatchedAt DateTime @default(now())
-  decidedAt DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @default(now()) @updatedAt
+  id           String                   @id @default(uuid()) @db.Uuid
+  status       PresidencyDispatchStatus @default(PENDING)
+  note         String?
+  dispatchedAt DateTime                 @default(now())
+  decidedAt    DateTime?
+  createdAt    DateTime                 @default(now())
+  updatedAt    DateTime                 @default(now()) @updatedAt
 
   tenantId String @db.Uuid
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  requestId String @db.Uuid
+  requestId String  @db.Uuid
   request   Request @relation(fields: [requestId], references: [id], onDelete: Cascade)
 
   decidedByUserId String? @db.Uuid

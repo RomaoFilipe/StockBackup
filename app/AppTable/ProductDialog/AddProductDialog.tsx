@@ -248,6 +248,7 @@ export default function AddProductDialog({
         if (attachment) {
           const form = new FormData();
           form.append("kind", "INVOICE");
+          form.append("documentRole", "FATURA");
           form.append("invoiceId", created.invoice.id);
           form.append("file", attachment);
           await fetch("/api/storage", {
@@ -260,6 +261,7 @@ export default function AddProductDialog({
         if (requestAttachment) {
           const form = new FormData();
           form.append("kind", "INVOICE");
+          form.append("documentRole", "REQ");
           form.append("invoiceId", created.invoice.id);
           form.append("file", requestAttachment);
           await fetch("/api/storage", {

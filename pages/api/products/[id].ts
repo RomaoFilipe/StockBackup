@@ -33,9 +33,40 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(404).json({ error: "Product not found" });
     }
 
+    const prismaAny = prisma as any;
+    const [unitStatusRows, reservedUnitsCount] = await Promise.all([
+      prismaAny.productUnit.groupBy({
+        by: ["status"],
+        where: { tenantId, productId: product.id },
+        _count: { _all: true },
+      }),
+      prismaAny.requestItem.count({
+        where: {
+          productId: product.id,
+          role: { not: "OLD" },
+          OR: [{ reservedUnitId: { not: null } }, { destination: { not: null } }],
+          request: {
+            tenantId,
+            status: { in: ["DRAFT", "SUBMITTED", "APPROVED"] },
+          },
+        },
+      }),
+    ]);
+
+    const unitStats = unitStatusRows.reduce(
+      (acc: Record<string, number>, row: any) => {
+        acc[row.status] = Number(row._count?._all ?? 0);
+        return acc;
+      },
+      { IN_STOCK: 0, ACQUIRED: 0, IN_REPAIR: 0, SCRAPPED: 0, LOST: 0 }
+    );
+
     return res.status(200).json({
       ...product,
       quantity: Number(product.quantity),
+      effectiveQuantity: unitStatusRows.length ? Number(unitStats.IN_STOCK ?? 0) : Number(product.quantity),
+      reservedUnitsCount,
+      unitStats,
       createdAt: product.createdAt.toISOString(),
       updatedAt: product.updatedAt.toISOString(),
       category: product.category?.name || "Unknown",

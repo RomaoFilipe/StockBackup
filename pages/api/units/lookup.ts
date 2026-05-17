@@ -59,6 +59,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             name: true,
             sku: true,
             description: true,
+            supplier: { select: { id: true, name: true } },
           },
         },
         invoice: {
@@ -66,6 +67,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             id: true,
             invoiceNumber: true,
             reqNumber: true,
+            reqDate: true,
             issuedAt: true,
           },
         },
@@ -84,6 +86,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         ? {
             ...unit.invoice,
             issuedAt: unit.invoice.issuedAt.toISOString(),
+            reqDate: unit.invoice.reqDate ? unit.invoice.reqDate.toISOString() : null,
           }
         : null,
     });

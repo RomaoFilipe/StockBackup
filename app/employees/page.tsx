@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Edit, Mail, Phone, Plus, RefreshCcw, Search, Trash2, Users } from "lucide-react";
+import { Building2, Edit, Mail, Phone, Plus, RefreshCcw, Search, Trash2, Users } from "lucide-react";
 
 import { useAuth } from "@/app/authContext";
 import AuthenticatedLayout from "@/app/components/AuthenticatedLayout";
@@ -39,12 +39,24 @@ type EmployeeDraft = {
   isActive: boolean;
 };
 
+type DepartmentDraft = {
+  codigo: string;
+  designacao: string;
+  ativo: boolean;
+};
+
 const emptyDraft = (): EmployeeDraft => ({
   name: "",
   email: "",
   phoneOrExtension: "",
   requestingServiceId: "",
   isActive: true,
+});
+
+const emptyDepartmentDraft = (): DepartmentDraft => ({
+  codigo: "",
+  designacao: "",
+  ativo: true,
 });
 
 const toOptionalTrimmed = (value: string) => {
@@ -64,6 +76,9 @@ export default function EmployeesPage() {
   const [draft, setDraft] = useState<EmployeeDraft>(emptyDraft());
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [departmentDialogOpen, setDepartmentDialogOpen] = useState(false);
+  const [departmentDraft, setDepartmentDraft] = useState<DepartmentDraft>(emptyDepartmentDraft());
+  const [departmentSaving, setDepartmentSaving] = useState(false);
 
   const isAdmin = user?.role === "ADMIN";
 
@@ -115,7 +130,7 @@ export default function EmployeesPage() {
   }, [employees, query]);
 
   const stats = useMemo(() => {
-    return employees.reduce(
+    const employeeStats = employees.reduce(
       (acc, employee) => {
         acc.total += 1;
         if (employee.isActive !== false) acc.active += 1;
@@ -125,7 +140,46 @@ export default function EmployeesPage() {
       },
       { total: 0, active: 0, inactive: 0, departments: new Set<number>() }
     );
-  }, [employees]);
+    return {
+      ...employeeStats,
+      totalDepartments: services.length,
+      activeDepartments: services.filter((service) => service.ativo !== false).length,
+    };
+  }, [employees, services]);
+
+  const openCreateDepartment = () => {
+    setDepartmentDraft(emptyDepartmentDraft());
+    setDepartmentDialogOpen(true);
+  };
+
+  const saveDepartment = async () => {
+    if (!departmentDraft.codigo.trim() || !departmentDraft.designacao.trim()) {
+      toast({
+        title: "Campos em falta",
+        description: "Indica o código e a designação do departamento.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setDepartmentSaving(true);
+    try {
+      await axiosInstance.post("/requesting-services", {
+        codigo: departmentDraft.codigo.trim(),
+        designacao: departmentDraft.designacao.trim(),
+        ativo: departmentDraft.ativo,
+      });
+      toast({ title: "Departamento criado", description: departmentDraft.designacao.trim() });
+      setDepartmentDialogOpen(false);
+      setDepartmentDraft(emptyDepartmentDraft());
+      await loadData();
+    } catch (error: any) {
+      const message = error?.response?.data?.error || "Não foi possível criar o departamento.";
+      toast({ title: "Falha ao criar", description: message, variant: "destructive" });
+    } finally {
+      setDepartmentSaving(false);
+    }
+  };
 
   const openCreate = () => {
     setEditingEmployee(null);
@@ -214,10 +268,16 @@ export default function EmployeesPage() {
                 Atualizar
               </Button>
               {isAdmin ? (
-                <Button className="h-10 rounded-xl" onClick={openCreate}>
-                  <Plus className="h-4 w-4" />
-                  Novo funcionário
-                </Button>
+                <>
+                  <Button variant="outline" className="h-10 rounded-xl" onClick={openCreateDepartment}>
+                    <Building2 className="h-4 w-4" />
+                    Novo departamento
+                  </Button>
+                  <Button className="h-10 rounded-xl" onClick={openCreate}>
+                    <Plus className="h-4 w-4" />
+                    Novo funcionário
+                  </Button>
+                </>
               ) : null}
             </>
           }
@@ -234,9 +294,48 @@ export default function EmployeesPage() {
           </div>
           <div className="rounded-2xl border border-border/60 bg-card/80 p-4">
             <div className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Departamentos</div>
-            <div className="mt-1 text-3xl font-semibold">{stats.departments.size}</div>
+            <div className="mt-1 text-3xl font-semibold">{stats.activeDepartments}</div>
           </div>
         </div>
+
+        <SectionCard
+          title="Departamentos"
+          description="Departamentos disponíveis para associar aos funcionários e pedidos."
+          actions={
+            isAdmin ? (
+              <Button variant="outline" className="h-10 rounded-xl" onClick={openCreateDepartment}>
+                <Plus className="h-4 w-4" />
+                Criar departamento
+              </Button>
+            ) : null
+          }
+        >
+          {loading ? (
+            <div className="text-sm text-muted-foreground">A carregar departamentos...</div>
+          ) : services.length === 0 ? (
+            <EmptyState
+              title="Sem departamentos"
+              description="Ainda não existem departamentos disponíveis."
+              action={isAdmin ? <Button onClick={openCreateDepartment}>Criar departamento</Button> : null}
+            />
+          ) : (
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {services.map((service) => (
+                <article key={service.id} className="rounded-lg border border-border/70 bg-card p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-xs uppercase tracking-[0.14em] text-muted-foreground">{service.codigo}</div>
+                      <h3 className="mt-1 truncate text-base font-semibold">{service.designacao}</h3>
+                    </div>
+                    <Badge variant="outline" className={service.ativo === false ? "text-slate-500" : "text-emerald-700"}>
+                      {service.ativo === false ? "Inativo" : "Ativo"}
+                    </Badge>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </SectionCard>
 
         <SectionCard
           title="Lista de funcionários"
@@ -383,6 +482,56 @@ export default function EmployeesPage() {
               disabled={!draft.name.trim() || !draft.requestingServiceId || saving}
             >
               Guardar funcionário
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={departmentDialogOpen} onOpenChange={setDepartmentDialogOpen}>
+        <DialogContent className="max-w-xl rounded-2xl">
+          <DialogHeader>
+            <DialogTitle>Novo departamento</DialogTitle>
+            <DialogDescription>
+              Cria um departamento para associar funcionários e usar nos pedidos.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-3 sm:grid-cols-[160px_1fr]">
+            <div className="space-y-1">
+              <div className="text-sm font-medium">Código *</div>
+              <Input
+                value={departmentDraft.codigo}
+                onChange={(event) => setDepartmentDraft((current) => ({ ...current, codigo: event.target.value }))}
+                placeholder="Ex: 160"
+              />
+            </div>
+            <div className="space-y-1">
+              <div className="text-sm font-medium">Designação *</div>
+              <Input
+                value={departmentDraft.designacao}
+                onChange={(event) => setDepartmentDraft((current) => ({ ...current, designacao: event.target.value }))}
+                placeholder="Ex: Novo Departamento"
+              />
+            </div>
+            <div className="flex items-center gap-2 sm:col-span-2">
+              <Checkbox
+                checked={departmentDraft.ativo}
+                onCheckedChange={(value) => setDepartmentDraft((current) => ({ ...current, ativo: Boolean(value) }))}
+              />
+              <div className="text-sm">Ativo</div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDepartmentDialogOpen(false)}>
+              Cancelar
+            </Button>
+            <Button
+              onClick={() => void saveDepartment()}
+              isLoading={departmentSaving}
+              disabled={!departmentDraft.codigo.trim() || !departmentDraft.designacao.trim() || departmentSaving}
+            >
+              Guardar departamento
             </Button>
           </DialogFooter>
         </DialogContent>

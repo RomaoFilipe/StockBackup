@@ -59,8 +59,12 @@ export const SignaturePad = forwardRef<SignaturePadHandle, SignaturePadProps>(
 
       ctx.save();
       ctx.globalCompositeOperation = "source-over";
-      ctx.fillStyle = backgroundColor;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      if (backgroundColor === "transparent") {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+      } else {
+        ctx.fillStyle = backgroundColor;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+      }
       ctx.restore();
     }, [backgroundColor]);
 

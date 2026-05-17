@@ -48,38 +48,45 @@ export function getRequestStorageDir(args: {
     process.cwd(),
     "storage",
     args.tenantId,
+    "Pedidos",
     String(args.gtmiYear),
-    "REQUISICOES",
+    "Requisicoes",
     args.folderName
   );
 }
 
-export function buildProductFolderName(args: { sku: string; name?: string | null }): string {
-  const sku = (args.sku ?? "").trim() || "SKU";
-  const name = (args.name ?? "Produto").trim() || "Produto";
-  return toSafePathSegment(`${sku} - ${name}`, "Produto");
+export function buildProductFolderName(args: {
+  sku?: string | null;
+  name?: string | null;
+  categoryName?: string | null;
+  supplierName?: string | null;
+  createdAt?: Date | null;
+}): string {
+  const name = (args.name ?? args.sku ?? "Produto").trim() || "Produto";
+  const category = (args.categoryName ?? "Sem categoria").trim() || "Sem categoria";
+  const supplier = (args.supplierName ?? "Sem fornecedor").trim() || "Sem fornecedor";
+  const date = formatDateYmd(args.createdAt ?? new Date());
+  return toSafePathSegment(`${name} - ${category} - ${supplier} - ${date}`, "Produto");
 }
 
 export function getProductStorageDir(args: {
   tenantId: string;
-  year: number;
+  year?: number;
   folderName: string;
 }): string {
-  return path.join(process.cwd(), "storage", args.tenantId, String(args.year), "PRODUTOS", args.folderName);
+  return path.join(process.cwd(), "storage", args.tenantId, "Stock", "Produtos", args.folderName);
 }
 
 export function getProductInvoiceStorageDir(args: {
   tenantId: string;
-  year: number;
   productFolderName: string;
-  invoiceFolderName: string;
+  documentRole?: "FATURA" | "REQ";
 }): string {
   const productDir = getProductStorageDir({
     tenantId: args.tenantId,
-    year: args.year,
     folderName: args.productFolderName,
   });
-  return path.join(productDir, "FATURAS", args.invoiceFolderName);
+  return path.join(productDir, args.documentRole === "REQ" ? "Req" : "Faturas");
 }
 
 export function buildInvoiceFolderName(args: {
@@ -93,20 +100,42 @@ export function buildInvoiceFolderName(args: {
 
 export function getInvoiceStorageDir(args: {
   tenantId: string;
-  year: number;
+  year?: number;
   folderName: string;
+  documentRole?: "FATURA" | "REQ";
 }): string {
   // Fallback location when we can't compute a per-product destination.
   return path.join(
     process.cwd(),
     "storage",
     args.tenantId,
-    String(args.year),
-    "PRODUTOS",
+    "Stock",
+    "Produtos",
     "SEM-PRODUTO",
-    "FATURAS",
-    args.folderName
+    args.documentRole === "REQ" ? "Req" : "Faturas"
   );
+}
+
+export function buildStockDocumentBaseName(args: {
+  documentRole: "FATURA" | "REQ";
+  invoiceNumber: string;
+  issuedAt: Date;
+  reqNumber?: string | null;
+  reqDate?: Date | null;
+  importedAt: Date;
+}): string {
+  const invoiceNumber = (args.invoiceNumber ?? "").trim() || "Fatura";
+  const invoiceDate = formatDateYmd(args.issuedAt);
+  const reqNumber = (args.reqNumber ?? "").trim() || "Sem requisicao";
+  const reqDate = args.reqDate ? formatDateYmd(args.reqDate) : "Sem data";
+  const importedDate = formatDateYmd(args.importedAt);
+
+  const base =
+    args.documentRole === "REQ"
+      ? `Requisicao ${reqNumber} - ${reqDate} - Fatura ${invoiceNumber} - ${invoiceDate} - Importada ${importedDate}`
+      : `${invoiceNumber} - ${invoiceDate} - Requisicao ${reqNumber} - ${reqDate} - Importada ${importedDate}`;
+
+  return toSafePathSegment(base, args.documentRole === "REQ" ? "Requisicao" : "Fatura");
 }
 
 export function buildStoredFileName(args: {

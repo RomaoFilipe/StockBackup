@@ -7,11 +7,10 @@ import { IncomingForm } from "formidable";
 import { prisma } from "@/prisma/client";
 import { getSessionServer } from "@/utils/auth";
 import {
-  buildInvoiceFolderName,
   buildProductFolderName,
   buildRequestFolderName,
+  buildStockDocumentBaseName,
   buildStoredFileName,
-  getInvoiceStorageDir,
   getProductInvoiceStorageDir,
   getRequestStorageDir,
 } from "@/utils/storageLayout";
@@ -23,6 +22,21 @@ export const config = {
 };
 
 const kindSchema = z.enum(["INVOICE", "REQUEST", "DOCUMENT", "OTHER"]);
+const documentRoleSchema = z.enum(["FATURA", "REQ"]);
+const allowedExtensions = new Set([".pdf", ".png", ".jpg", ".jpeg", ".webp", ".txt", ".csv", ".xls", ".xlsx", ".doc", ".docx"]);
+const allowedMimeTypes = new Set([
+  "application/pdf",
+  "application/octet-stream",
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "text/plain",
+  "text/csv",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+]);
 
 const ensureDir = async (dir: string) => {
   await fs.promises.mkdir(dir, { recursive: true });
@@ -39,9 +53,15 @@ const moveFile = async (from: string, to: string) => {
   }
 };
 
-const toSafeFileName = (name: string) => {
-  const base = name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 120);
-  return base || "file";
+const hashFileSha256 = async (filePath: string) => {
+  const hash = crypto.createHash("sha256");
+  await new Promise<void>((resolve, reject) => {
+    const stream = fs.createReadStream(filePath);
+    stream.on("data", (chunk) => hash.update(chunk));
+    stream.on("error", reject);
+    stream.on("end", resolve);
+  });
+  return hash.digest("hex");
 };
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -90,6 +110,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   if (req.method === "POST") {
+    let movedPath: string | null = null;
     const form = new IncomingForm({
       multiples: false,
       maxFileSize: 25 * 1024 * 1024, // 25MB
@@ -111,6 +132,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       const invoiceId = Array.isArray(fields.invoiceId) ? fields.invoiceId[0] : fields.invoiceId;
       const requestId = Array.isArray(fields.requestId) ? fields.requestId[0] : fields.requestId;
+      const documentRoleValue = Array.isArray(fields.documentRole) ? fields.documentRole[0] : fields.documentRole;
+      const parsedDocumentRole = documentRoleValue
+        ? documentRoleSchema.safeParse(String(documentRoleValue).toUpperCase())
+        : null;
+      if (parsedDocumentRole && !parsedDocumentRole.success) {
+        return res.status(400).json({ error: "Invalid documentRole" });
+      }
+      const documentRole = parsedDocumentRole?.success ? parsedDocumentRole.data : "FATURA";
 
       // Only allow linking IDs when kind matches
       if (invoiceId && parsedKind.data !== "INVOICE") {
@@ -118,6 +147,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
       if (requestId && parsedKind.data !== "REQUEST") {
         return res.status(400).json({ error: "requestId only allowed for REQUEST kind" });
+      }
+      if (documentRoleValue && parsedKind.data !== "INVOICE") {
+        return res.status(400).json({ error: "documentRole only allowed for INVOICE kind" });
       }
 
       const upload = (files.file ?? files.upload ?? files.document) as any;
@@ -135,14 +167,34 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         return res.status(400).json({ error: "Invalid upload" });
       }
 
+      const originalExt = path.extname(originalName || "").toLowerCase();
+      if (!allowedExtensions.has(originalExt)) {
+        return res.status(400).json({ error: "Tipo de ficheiro não permitido" });
+      }
+      if (!allowedMimeTypes.has(mimeType)) {
+        return res.status(400).json({ error: "MIME type não permitido" });
+      }
+      const sha256 = await hashFileSha256(tempPath);
+
       // Validate ownership of linked entities
       let invoiceMeta:
         | {
             id: string;
             invoiceNumber: string;
             issuedAt: Date;
+            reqNumber: string | null;
+            reqDate: Date | null;
+            createdAt: Date;
             requestId: string | null;
-            product: { id: string; sku: string; name: string };
+            request: { gtmiNumber: string; requestedAt: Date } | null;
+            product: {
+              id: string;
+              sku: string;
+              name: string;
+              createdAt: Date;
+              category: { name: string } | null;
+              supplier: { name: string } | null;
+            };
           }
         | null = null;
       if (invoiceId) {
@@ -152,8 +204,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             id: true,
             invoiceNumber: true,
             issuedAt: true,
+            reqNumber: true,
+            reqDate: true,
+            createdAt: true,
             requestId: true,
-            product: { select: { id: true, sku: true, name: true } },
+            request: { select: { gtmiNumber: true, requestedAt: true } },
+            product: {
+              select: {
+                id: true,
+                sku: true,
+                name: true,
+                createdAt: true,
+                category: { select: { name: true } },
+                supplier: { select: { name: true } },
+              },
+            },
           },
         });
         if (!inv) return res.status(404).json({ error: "Invoice not found" });
@@ -161,7 +226,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           id: inv.id,
           invoiceNumber: inv.invoiceNumber,
           issuedAt: inv.issuedAt,
+          reqNumber: inv.reqNumber ?? inv.request?.gtmiNumber ?? null,
+          reqDate: inv.reqDate ?? inv.request?.requestedAt ?? null,
+          createdAt: inv.createdAt,
           requestId: inv.requestId ?? null,
+          request: inv.request ?? null,
           product: inv.product,
         };
       }
@@ -214,7 +283,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       const id = crypto.randomUUID();
 
-      let destDir = path.join(process.cwd(), "storage", tenantId);
+      let destDir: string | null = null;
       if (parsedKind.data === "DOCUMENT") {
         const year = new Date().getFullYear();
         destDir = path.join(process.cwd(), "storage", tenantId, String(year), "DOCUMENTOS");
@@ -240,74 +309,54 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
 
       if (parsedKind.data === "INVOICE" && invoiceMeta) {
-        const invoiceFolderName = buildInvoiceFolderName({
-          invoiceNumber: invoiceMeta.invoiceNumber,
-          issuedAt: invoiceMeta.issuedAt,
+        const productFolderName = buildProductFolderName({
+          sku: invoiceMeta.product.sku,
+          name: invoiceMeta.product.name,
+          categoryName: invoiceMeta.product.category?.name,
+          supplierName: invoiceMeta.product.supplier?.name,
+          createdAt: invoiceMeta.product.createdAt,
         });
+        destDir = getProductInvoiceStorageDir({
+          tenantId,
+          productFolderName,
+          documentRole,
+        });
+      }
 
-        // If the invoice is linked to a request, store it inside the request folder.
-        if (invoiceMeta.requestId) {
-          const reqRow = await prisma.request.findFirst({
-            where: { id: invoiceMeta.requestId, tenantId },
-            select: {
-              id: true,
-              gtmiNumber: true,
-              gtmiYear: true,
-              requestedAt: true,
-              requesterName: true,
-              title: true,
-              user: { select: { name: true } },
-            },
-          });
-
-          if (reqRow) {
-            const folderName = buildRequestFolderName({
-              gtmiNumber: reqRow.gtmiNumber,
-              requesterName: reqRow.requesterName ?? reqRow.user?.name,
-              summary: reqRow.title,
-              requestedAt: reqRow.requestedAt,
-            });
-            const requestDir = getRequestStorageDir({
-              tenantId,
-              gtmiYear: reqRow.gtmiYear,
-              folderName,
-            });
-
-            destDir = path.join(requestDir, "FATURAS", invoiceFolderName);
-          }
-        }
-
-        // Default: organize invoices under the product folder-by-year.
-        if (!destDir) {
-          const productFolderName = buildProductFolderName({
-            sku: invoiceMeta.product.sku,
-            name: invoiceMeta.product.name,
-          });
-          destDir = getProductInvoiceStorageDir({
-            tenantId,
-            year: invoiceMeta.issuedAt.getFullYear(),
-            productFolderName,
-            invoiceFolderName,
-          });
-        }
+      if (!destDir) {
+        destDir = path.join(process.cwd(), "storage", tenantId);
       }
 
       await ensureDir(destDir);
 
-      const fileName = buildStoredFileName({ originalName: originalForDb, id });
+      const uploadExt = path.extname(originalForDb).slice(0, 16);
+      const storageOriginalName =
+        parsedKind.data === "INVOICE" && invoiceMeta
+          ? `${buildStockDocumentBaseName({
+              documentRole,
+              invoiceNumber: invoiceMeta.invoiceNumber,
+              issuedAt: invoiceMeta.issuedAt,
+              reqNumber: invoiceMeta.reqNumber,
+              reqDate: invoiceMeta.reqDate,
+              importedAt: new Date(),
+            })}${uploadExt || ".pdf"}`
+          : originalForDb;
+      const fileName = buildStoredFileName({ originalName: storageOriginalName, id });
       const destPath = path.join(destDir, fileName);
       await moveFile(tempPath, destPath);
+      movedPath = destPath;
 
       const created = await prisma.storedFile.create({
         data: {
           id,
           tenantId,
           kind: parsedKind.data,
-          originalName: originalForDb,
+          originalName: storageOriginalName,
           fileName,
           mimeType,
           sizeBytes,
           storagePath: path.relative(process.cwd(), destPath),
+          sha256,
           invoiceId: invoiceId ? String(invoiceId) : undefined,
           requestId: requestId ? String(requestId) : undefined,
         },
@@ -319,6 +368,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         updatedAt: created.updatedAt.toISOString(),
       });
     } catch (error: any) {
+      if (movedPath) {
+        try {
+          await fs.promises.unlink(movedPath);
+        } catch {
+          // best-effort cleanup: the DB error is the important response
+        }
+      }
       console.error("POST /api/storage error:", error);
       const message = typeof error?.message === "string" ? error.message : "Upload failed";
       return res.status(500).json({ error: message });

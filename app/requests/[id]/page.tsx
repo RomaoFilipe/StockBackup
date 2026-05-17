@@ -91,6 +91,7 @@ type RequestDto = {
   signedAt?: string | null;
   signedByName?: string | null;
   signedByTitle?: string | null;
+  signedSignatureDataUrl?: string | null;
   signedBy?: { id: string; name: string; email: string } | null;
 
   signedVoidedAt?: string | null;
@@ -310,17 +311,30 @@ export default function RequestDetailsPage() {
   const [signSaving, setSignSaving] = useState(false);
   const [signName, setSignName] = useState("");
   const [signTitle, setSignTitle] = useState("");
+  const signPadRef = useRef<SignaturePadHandle | null>(null);
 
   const openSign = () => {
     if (!isAdmin) return;
     setSignName((request?.signedByName || user?.name || "").trim());
     setSignTitle((request?.signedByTitle || "").trim());
     setSignOpen(true);
+    setTimeout(() => signPadRef.current?.clear(), 0);
   };
 
   const submitSign = async () => {
     if (!requestId) return;
     if (!signName.trim()) return;
+
+    const sigPad = signPadRef.current;
+    const signatureDataUrl = sigPad?.toDataURL?.() || "";
+    if (!signatureDataUrl || sigPad?.isEmpty?.()) {
+      toast({
+        title: "Rubrica em falta",
+        description: "O técnico deve desenhar a rubrica/assinatura antes de confirmar.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     setSignSaving(true);
     try {
@@ -328,6 +342,7 @@ export default function RequestDetailsPage() {
         sign: {
           name: signName.trim(),
           title: signTitle.trim() ? signTitle.trim() : undefined,
+          signatureDataUrl,
         },
       });
       setRequest(res.data);
@@ -508,6 +523,11 @@ export default function RequestDetailsPage() {
     window.open(`/requests/${requestId}/print` + (isAdmin ? `?asUserId=${request.userId}` : ""), "_blank");
   };
 
+  const printLabels = () => {
+    if (!requestId || !request) return;
+    window.open(`/requests/${requestId}/labels` + (isAdmin ? `?asUserId=${request.userId}` : ""), "_blank");
+  };
+
   return (
     <AuthenticatedLayout>
       <div className="p-4">
@@ -543,6 +563,16 @@ export default function RequestDetailsPage() {
             <Button variant="outline" onClick={printRequest} disabled={!requestId || !request}>
               <Printer className="h-4 w-4 mr-2" />
               Imprimir
+            </Button>
+
+            <Button
+              variant="outline"
+              onClick={printLabels}
+              disabled={!requestId || !request || !request.items.some((it) => Boolean(it.destination?.trim()))}
+              title="Imprimir etiquetas QR dos itens deste pedido"
+            >
+              <Printer className="h-4 w-4 mr-2" />
+              Etiquetas
             </Button>
 
             {isAdmin ? (
@@ -696,6 +726,21 @@ export default function RequestDetailsPage() {
                   <span>Ainda não assinada.</span>
                 )}
               </div>
+
+              {request.signedSignatureDataUrl ? (
+                <div className="mt-2">
+                  <div className="text-xs text-muted-foreground mb-1">Rubrica técnico (preview)</div>
+                  <div className="rounded-md border border-border/60 bg-background p-2">
+                    <Image
+                      src={request.signedSignatureDataUrl}
+                      alt="Rubrica do técnico GTMI"
+                      width={900}
+                      height={240}
+                      className="h-16 w-full object-contain mix-blend-multiply"
+                    />
+                  </div>
+                </div>
+              ) : null}
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -1156,22 +1201,40 @@ export default function RequestDetailsPage() {
         </Dialog>
 
         <Dialog open={signOpen} onOpenChange={setSignOpen}>
-          <DialogContent className="sm:max-w-[520px]">
+          <DialogContent className="w-[calc(100vw-2rem)] max-h-[85vh] overflow-y-auto sm:max-w-[640px]">
             <DialogHeader>
               <DialogTitle>Assinar requisição</DialogTitle>
               <DialogDescription>
-                Confirma a assinatura desta requisição. Fica registado o nome/cargo e a data.
+                O técnico deve assinar/rubricar no ecrã. A assinatura fica registada e aparece no PDF/print.
               </DialogDescription>
             </DialogHeader>
 
-            <div className="space-y-3">
-              <div className="space-y-1">
-                <div className="text-sm font-medium">Nome</div>
-                <Input value={signName} onChange={(e) => setSignName(e.target.value)} placeholder="Nome de quem assina" />
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <div className="text-sm font-medium">Nome</div>
+                  <Input value={signName} onChange={(e) => setSignName(e.target.value)} placeholder="Nome do técnico" />
+                </div>
+                <div className="space-y-1">
+                  <div className="text-sm font-medium">Cargo (opcional)</div>
+                  <Input value={signTitle} onChange={(e) => setSignTitle(e.target.value)} placeholder="Ex: Técnico GTMI" />
+                </div>
               </div>
-              <div className="space-y-1">
-                <div className="text-sm font-medium">Cargo (opcional)</div>
-                <Input value={signTitle} onChange={(e) => setSignTitle(e.target.value)} placeholder="Ex: Responsável / Chefia" />
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-sm font-medium">Rubrica / Assinatura do técnico</div>
+                  <Button type="button" variant="outline" size="sm" onClick={() => signPadRef.current?.clear()} disabled={signSaving}>
+                    Limpar
+                  </Button>
+                </div>
+                <SignaturePad
+                  ref={signPadRef}
+                  height={190}
+                  backgroundColor="transparent"
+                  disabled={signSaving}
+                />
+                <div className="text-xs text-muted-foreground">Use o dedo (mobile/tablet) ou o rato. Esta rubrica fica no documento final.</div>
               </div>
             </div>
 
@@ -1180,7 +1243,7 @@ export default function RequestDetailsPage() {
                 Cancelar
               </Button>
               <Button onClick={submitSign} disabled={signSaving || !signName.trim()}>
-                {signSaving ? "A assinar..." : "Assinar"}
+                {signSaving ? "A assinar..." : "Confirmar assinatura"}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -1214,7 +1277,7 @@ export default function RequestDetailsPage() {
                     Limpar
                   </Button>
                 </div>
-                <SignaturePad ref={pickupPadRef} height={180} disabled={pickupSaving} />
+                <SignaturePad ref={pickupPadRef} height={190} backgroundColor="transparent" disabled={pickupSaving} />
                 <div className="text-xs text-muted-foreground">Dica: use o dedo (mobile/tablet) ou o rato.</div>
               </div>
             </div>

@@ -2,6 +2,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { z } from "zod";
 import { prisma } from "@/prisma/client";
 import { getSessionServer } from "@/utils/auth";
+import { getReservedUnitCodes, mergeExcludedUnitCodes } from "@/utils/unitReservations";
 
 const querySchema = z.object({
   productId: z.string().uuid(),
@@ -36,6 +37,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   try {
     const prismaAny = prisma as any;
+    const reservedCodes = await getReservedUnitCodes(prismaAny, { tenantId, productId });
+    const excludedCodes = mergeExcludedUnitCodes(exclude, reservedCodes);
 
     const [availableCount, units] = await prisma.$transaction([
       prismaAny.productUnit.count({
@@ -43,7 +46,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           tenantId,
           productId,
           status: "IN_STOCK",
-          ...(exclude.length ? { code: { notIn: exclude } } : {}),
+          ...(excludedCodes.length ? { code: { notIn: excludedCodes } } : {}),
         },
       }),
       prismaAny.productUnit.findMany({
@@ -51,7 +54,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           tenantId,
           productId,
           status: "IN_STOCK",
-          ...(exclude.length ? { code: { notIn: exclude } } : {}),
+          ...(excludedCodes.length ? { code: { notIn: excludedCodes } } : {}),
         },
         orderBy: { createdAt: "asc" },
         take,

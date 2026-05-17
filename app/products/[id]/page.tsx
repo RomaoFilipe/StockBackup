@@ -759,6 +759,7 @@ export default function ProductDetailsPage() {
       if (createdInvoice?.id && invoiceAttachment) {
         const fd = new FormData();
         fd.append("kind", "INVOICE");
+        fd.append("documentRole", "FATURA");
         fd.append("invoiceId", createdInvoice.id);
         fd.append("file", invoiceAttachment);
 
@@ -777,6 +778,7 @@ export default function ProductDetailsPage() {
       if (createdInvoice?.id && requestAttachment) {
         const fd = new FormData();
         fd.append("kind", "INVOICE");
+        fd.append("documentRole", "REQ");
         fd.append("invoiceId", createdInvoice.id);
         fd.append("file", requestAttachment);
 
@@ -1194,6 +1196,13 @@ export default function ProductDetailsPage() {
                                       onClick={() => toggleUnitHistory(u)}
                                     >
                                       Histórico
+                                    </Button>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => router.push(`/units/${u.id}`)}
+                                    >
+                                      Detalhe
                                     </Button>
                                     <Button
                                       variant="outline"

@@ -7,6 +7,7 @@ import { publishRealtimeEvent } from "@/utils/realtime";
 import { createTicketAudit } from "@/utils/ticketAudit";
 import { getUserPermissionGrants, hasPermission } from "@/utils/rbac";
 import { ensureRequestWorkflowDefinition, ensureRequestWorkflowInstance, transitionRequestWorkflowByActionTx } from "@/utils/workflow";
+import { normalizeRequestItemsForUnitReservations } from "@/utils/unitReservations";
 
 const goodsTypeSchema = z.enum(["MATERIALS_SERVICES", "WAREHOUSE_MATERIALS", "OTHER_PRODUCTS"]);
 const requestTypeSchema = z.enum(["STANDARD", "RETURN"]);
@@ -83,10 +84,11 @@ async function createRequestWithGtmiSeq(args: {
   items: Array<{
     productId: string;
     quantity: number;
-    notes?: string;
-    unit?: string;
-    reference?: string;
-    destination?: string;
+    notes?: string | null;
+    unit?: string | null;
+    reference?: string | null;
+    destination?: string | null;
+    reservedUnitId?: string | null;
     role?: z.infer<typeof requestItemRoleSchema>;
   }>;
 }) {
@@ -143,6 +145,7 @@ async function createRequestWithGtmiSeq(args: {
                 unit: i.unit,
                 reference: i.reference,
                 destination: i.destination,
+                reservedUnitId: i.reservedUnitId ?? null,
                 role: i.role ?? "NORMAL",
               })),
             },
@@ -442,56 +445,50 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const uniqueProductIds = Array.from(new Set(items.map((i) => i.productId)));
       const products = await prisma.product.findMany({
         where: { tenantId, id: { in: uniqueProductIds } },
-        select: { id: true },
+        select: { id: true, quantity: true },
       });
       const allowed = new Set(products.map((p) => p.id));
+      const productQuantityById = new Map(products.map((p) => [p.id, Number(p.quantity)] as const));
 
       const firstInvalid = items.find((i) => !allowed.has(i.productId));
       if (firstInvalid) {
         return res.status(404).json({ error: "One or more products were not found" });
       }
 
-      // Stock validation only (no reservation). Real allocation occurs at warehouse execution.
-      for (const item of items) {
+      const unitCounts = await Promise.all(
+        uniqueProductIds.map(async (productId) => {
+          const count = await (prisma as any).productUnit.count({ where: { tenantId, productId } });
+          return [productId, Number(count)] as const;
+        })
+      );
+      const unitCountByProductId = new Map(unitCounts);
+
+      const normalizedItems = await normalizeRequestItemsForUnitReservations(prisma as any, {
+        tenantId,
+        items: items.map((it) => ({ ...it, role: it.role ?? "NORMAL" })),
+        unitCountByProductId,
+      });
+
+      const requestedNonUnitQtyByProductId = new Map<string, number>();
+      for (const item of normalizedItems) {
         const qty = Number(item.quantity);
         if (!Number.isFinite(qty) || qty <= 0) {
           return res.status(400).json({ error: "Invalid quantity" });
         }
 
-        const unitCount = Number(
-          await (prisma as any).productUnit.count({
-            where: { tenantId, productId: item.productId },
-          })
+        const isUnitTracked = (unitCountByProductId.get(item.productId) ?? 0) > 0;
+        if (isUnitTracked) continue;
+
+        requestedNonUnitQtyByProductId.set(
+          item.productId,
+          (requestedNonUnitQtyByProductId.get(item.productId) ?? 0) + qty
         );
-        const isUnitTracked = unitCount > 0;
+      }
 
-        if (isUnitTracked) {
-          if (qty !== 1) {
-            return res.status(400).json({
-              error: "Para produtos com QR (unidades), use linhas separadas (Qtd=1 por unidade).",
-            });
-          }
-
-          const destinationCode = typeof item.destination === "string" ? item.destination.trim() : "";
-          const unitWhere = destinationCode
-            ? { tenantId, productId: item.productId, status: "IN_STOCK", code: destinationCode }
-            : { tenantId, productId: item.productId, status: "IN_STOCK" };
-          const unit = await (prisma as any).productUnit.findFirst({
-            where: unitWhere,
-            select: { id: true },
-          });
-          if (!unit) {
-            return res.status(400).json({ error: "Sem unidades em stock para um dos produtos selecionados." });
-          }
-        } else {
-          const product = await prisma.product.findUnique({
-            where: { id: item.productId },
-            select: { quantity: true },
-          });
-          const available = Number(product?.quantity ?? BigInt(0));
-          if (available < qty) {
-            return res.status(400).json({ error: "Stock insuficiente para um dos produtos selecionados." });
-          }
+      for (const [productId, requestedQty] of requestedNonUnitQtyByProductId) {
+        const available = productQuantityById.get(productId) ?? 0;
+        if (available < requestedQty) {
+          return res.status(400).json({ error: "Stock insuficiente para um dos produtos selecionados." });
         }
       }
 
@@ -518,7 +515,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         supplierOption1,
         supplierOption2,
         supplierOption3,
-        items: items.map((it) => ({
+        items: normalizedItems.map((it) => ({
           ...it,
           role: it.role ?? "NORMAL",
         })),
@@ -661,7 +658,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           updatedAt: it.updatedAt.toISOString(),
         })),
       });
-    } catch (error) {
+    } catch (error: any) {
+      if (typeof error?.message === "string") {
+        if (
+          error.message === "Invalid quantity" ||
+          error.message === "Para produtos com QR e código já escolhido, use Qtd=1 por linha." ||
+          error.message === "A mesma unidade QR não pode ser usada em duas linhas do pedido." ||
+          error.message === "Esta unidade QR já está reservada noutro pedido aberto." ||
+          error.message === "Sem unidades em stock suficientes para um dos produtos selecionados."
+        ) {
+          return res.status(400).json({ error: error.message });
+        }
+      }
       console.error("POST /api/requests error:", error);
       return res.status(500).json({ error: "Failed to create request" });
     }

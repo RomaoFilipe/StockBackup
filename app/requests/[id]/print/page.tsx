@@ -61,6 +61,7 @@ type RequestDto = {
   signedAt?: string | null;
   signedByName?: string | null;
   signedByTitle?: string | null;
+  signedSignatureDataUrl?: string | null;
   signedByUserId?: string | null;
   signedBy?: { id: string; name: string; email: string } | null;
 
@@ -98,7 +99,10 @@ function safeDateTimeLabel(iso?: string | null) {
   if (!iso) return "";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString();
+  return d.toLocaleString("pt-PT", {
+    dateStyle: "short",
+    timeStyle: "short",
+  });
 }
 
 function safeDateLabel(iso?: string | null) {
@@ -260,6 +264,28 @@ export default function PrintRequestPage() {
     return envLogo || "/logo.png";
   }, []);
 
+  const renderItemQr = (destination?: string | null) => {
+    const code = destination?.trim();
+    if (!code) return null;
+    const qr = itemQrByCode[code];
+    const shortCode = code.length > 14 ? `${code.slice(0, 8)}...${code.slice(-4)}` : code;
+    return (
+      <div className="item-qr">
+        {qr ? (
+          <Image
+            src={qr}
+            alt={`QR ${code}`}
+            width={50}
+            height={50}
+            unoptimized
+            style={{ width: 50, height: 50, imageRendering: "pixelated" }}
+          />
+        ) : null}
+        <span title={code}>{shortCode}</span>
+      </div>
+    );
+  };
+
   useEffect(() => {
     let cancelled = false;
     const run = async () => {
@@ -307,106 +333,229 @@ export default function PrintRequestPage() {
       <style jsx global>{`
         @page {
           size: A4;
-          margin: 12mm;
+          margin: 9mm;
+        }
+
+        body {
+          background: #edf2f7;
         }
 
         .print-page {
-          padding: 16px;
+          min-height: 100vh;
+          padding: 18px;
+          color: #0b1220;
+          font-family:
+            Inter,
+            ui-sans-serif,
+            system-ui,
+            -apple-system,
+            BlinkMacSystemFont,
+            "Segoe UI",
+            sans-serif;
         }
 
         .print-toolbar {
           display: flex;
-          gap: 8px;
+          gap: 12px;
           align-items: center;
           justify-content: space-between;
-          margin-bottom: 12px;
+          max-width: 210mm;
+          margin: 0 auto 14px;
+          border: 1px solid rgba(37, 99, 235, 0.12);
+          border-radius: 16px;
+          background: linear-gradient(135deg, #eef6ff 0%, #ffffff 58%, #f8fafc 100%);
+          padding: 12px 14px;
+          box-shadow: 0 12px 34px rgba(15, 23, 42, 0.08);
         }
 
         .sheet {
           background: white;
-          border: 1px solid rgba(0, 0, 0, 0.12);
+          width: 210mm;
+          min-height: 297mm;
+          margin: 0 auto;
+          border: 2px solid rgba(15, 23, 42, 0.28);
+          border-radius: 14px;
+          padding: 10mm;
+          box-shadow: 0 18px 55px rgba(15, 23, 42, 0.14);
+        }
+
+        .document-header {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) 128px;
+          gap: 14px;
+          align-items: start;
+          margin-bottom: 13px;
+          border: 2px solid #172033;
           border-radius: 10px;
-          padding: 14px;
+          background: linear-gradient(180deg, #f8fbff 0%, #ffffff 100%);
+          padding: 10px 10px 9px;
+          box-shadow: inset 0 -4px 0 #dbeafe;
+        }
+
+        .brand-block {
+          display: flex;
+          flex-direction: column;
+          gap: 9px;
+        }
+
+        .doc-kicker {
+          color: #174ea6;
+          font-size: 10.5px;
+          font-weight: 800;
+          letter-spacing: 0.12em;
+          text-transform: uppercase;
+        }
+
+        .doc-number {
+          display: inline-flex;
+          width: fit-content;
+          align-items: center;
+          gap: 5px;
+          margin-top: 4px;
+          border: 1.5px solid #64748b;
+          border-radius: 999px;
+          background: #eaf2ff;
+          padding: 4px 10px;
+          font-size: 10.5px;
+          font-weight: 850;
+          color: #0f172a;
+        }
+
+        .section-title {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          margin: 13px 0 7px;
+          color: #0f172a;
+          font-size: 11.5px;
+          font-weight: 900;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+        }
+
+        .section-title::before {
+          content: "";
+          width: 6px;
+          height: 17px;
+          border-radius: 2px;
+          background: #174ea6;
+          box-shadow: 6px 0 0 #93c5fd;
+        }
+
+        .section-title::after {
+          content: "";
+          height: 2px;
+          flex: 1;
+          background: linear-gradient(90deg, #334155 0%, #cbd5e1 100%);
         }
 
         .row {
           display: grid;
           grid-template-columns: 1fr 1fr;
-          gap: 10px;
+          gap: 7px;
         }
 
         .field {
-          border: 1px solid rgba(0, 0, 0, 0.12);
-          border-radius: 8px;
-          padding: 8px;
-          min-height: 44px;
+          border: 1.6px solid #94a3b8;
+          border-radius: 6px;
+          padding: 8px 9px;
+          min-height: 46px;
+          background: #fbfdff;
+          break-inside: avoid;
         }
 
         .label {
-          font-size: 11px;
-          color: rgba(0, 0, 0, 0.65);
-          margin-bottom: 2px;
+          font-size: 9.5px;
+          color: #334155;
+          font-weight: 850;
+          letter-spacing: 0.02em;
+          margin-bottom: 4px;
         }
 
         .value {
           font-size: 12px;
-          font-weight: 600;
-          color: rgba(0, 0, 0, 0.88);
+          font-weight: 800;
+          color: #020617;
           word-break: break-word;
           white-space: pre-wrap;
+          line-height: 1.35;
         }
 
         .title {
-          font-size: 16px;
-          font-weight: 800;
+          color: #020617;
+          font-size: 21px;
+          font-weight: 900;
+          line-height: 1.12;
         }
 
         .subtitle {
-          font-size: 12px;
-          color: rgba(0, 0, 0, 0.65);
+          font-size: 10.5px;
+          color: #334155;
+          font-weight: 700;
+          line-height: 1.35;
         }
 
         table {
           width: 100%;
           border-collapse: collapse;
+          break-inside: auto;
+          page-break-inside: auto;
         }
 
         th,
         td {
-          border: 1px solid rgba(0, 0, 0, 0.18);
-          padding: 6px;
+          border: 1.35px solid #64748b;
+          padding: 6px 7px;
           vertical-align: top;
-          font-size: 11px;
+          font-size: 10.8px;
+          line-height: 1.38;
         }
 
         th {
-          background: rgba(0, 0, 0, 0.04);
-          font-weight: 700;
+          background: #dbeafe;
+          color: #07111f;
+          font-size: 9.5px;
+          font-weight: 900;
+          letter-spacing: 0.02em;
           text-align: left;
+          text-transform: uppercase;
+        }
+
+        tbody tr:nth-child(even) td {
+          background: #f8fbff;
+        }
+
+        tbody td:first-child,
+        tbody td:nth-child(4) {
+          color: #020617;
+          font-weight: 850;
+          text-align: center;
+        }
+
+        tr {
+          break-inside: avoid;
+          page-break-inside: avoid;
         }
 
         .muted {
-          color: rgba(0, 0, 0, 0.6);
-          font-weight: 500;
-        }
-
-        .sign {
-          height: 86px;
+          color: #334155;
+          font-weight: 650;
         }
 
         .signature-img {
           display: block;
-          width: 100%;
-          height: 44px;
+          width: 92%;
+          height: 58px;
           object-fit: contain;
-          margin-top: 6px;
+          margin: 0 auto -3px;
+          mix-blend-mode: multiply;
         }
 
         .print-logo {
           display: block;
-          height: 68px;
+          height: 62px;
           width: auto;
-          max-width: 360px;
+          max-width: 290px;
           object-fit: contain;
         }
 
@@ -414,34 +563,144 @@ export default function PrintRequestPage() {
           display: flex;
           flex-direction: column;
           align-items: flex-end;
-          gap: 6px;
+          gap: 5px;
+          text-align: right;
         }
 
         .qr-img {
-          width: 92px;
-          height: 92px;
-          border: 1px solid rgba(0, 0, 0, 0.18);
-          border-radius: 8px;
+          width: 82px;
+          height: 82px;
+          border: 1.6px solid #172033;
+          border-radius: 6px;
+          padding: 4px;
+          background: #fff;
         }
 
         .checksum {
+          font-size: 8.5px;
+          color: #334155;
+          font-weight: 700;
+        }
+
+        .item-qr {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 2px;
+          color: #475569;
+          font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+          font-size: 7px;
+          line-height: 1.2;
+          max-width: 58px;
+        }
+
+        .item-qr span {
+          display: block;
+          max-width: 58px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .summary-band {
+          display: grid;
+          grid-template-columns: 1.2fr 1fr 1fr;
+          gap: 7px;
+          margin-bottom: 8px;
+        }
+
+        .signature-grid {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 10px;
+          margin-top: 10px;
+          break-inside: avoid;
+        }
+
+        .signature-card {
+          display: flex;
+          min-height: 128px;
+          flex-direction: column;
+          justify-content: space-between;
+          align-items: stretch;
+          border: 1.8px solid #334155;
+          border-radius: 8px;
+          background: linear-gradient(180deg, #ffffff 0%, #eef6ff 100%);
+          padding: 9px 11px 10px;
+          break-inside: avoid;
+        }
+
+        .signature-slot {
+          display: flex;
+          min-height: 70px;
+          align-items: center;
+          justify-content: center;
+          padding-top: 2px;
+        }
+
+        .signature-line {
+          width: 88%;
+          margin: 0 auto;
+          border-top: 2px solid #111827;
+          padding-top: 5px;
+          color: #0f172a;
           font-size: 10px;
-          color: rgba(0, 0, 0, 0.65);
+          font-weight: 850;
+          text-align: center;
+        }
+
+        .signature-meta {
+          color: #334155;
+          font-size: 8.5px;
+          font-weight: 650;
+          line-height: 1.25;
+          text-align: center;
+        }
+
+        .footer-line {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          margin-top: 10px;
+          border-top: 1.5px solid #64748b;
+          padding-top: 8px;
+          color: #334155;
+          font-size: 9.5px;
+          font-weight: 650;
         }
 
         .warn {
-          border: 1px solid rgba(185, 28, 28, 0.25);
-          background: rgba(185, 28, 28, 0.06);
-          border-radius: 10px;
-          padding: 8px 10px;
-          margin-bottom: 10px;
+          border: 1px solid #fecaca;
+          background: #fff1f2;
+          border-radius: 8px;
+          padding: 7px 9px;
+          margin-bottom: 9px;
+          font-size: 10px;
+          color: #991b1b;
+        }
+
+        .screen-only-hint {
+          margin-top: 4px;
           font-size: 11px;
-          color: rgba(185, 28, 28, 0.95);
+          color: #64748b;
         }
 
         @media print {
+          * {
+            print-color-adjust: exact;
+            -webkit-print-color-adjust: exact;
+          }
+
+          html,
+          body {
+            width: 210mm;
+            background: white !important;
+          }
+
           .print-page {
             padding: 0;
+            min-height: auto;
           }
 
           .print-toolbar {
@@ -452,21 +711,28 @@ export default function PrintRequestPage() {
             border: none;
             border-radius: 0;
             padding: 0;
+            width: auto;
+            min-height: auto;
+            box-shadow: none;
+          }
+
+          a[href]::after {
+            content: "";
           }
         }
       `}</style>
 
       <div className="print-toolbar">
         <div>
-          <div className="title">Imprimir • Pedido de requisição</div>
-          <div className="subtitle">Formato A4 (use imprimir do navegador)</div>
+          <div className="title">Pedido de material</div>
+          <div className="screen-only-hint">Pré-visualização A4. Use “Imprimir / Guardar PDF” para exportar.</div>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <Button variant="outline" onClick={() => history.back()}>
             Voltar
           </Button>
           <Button onClick={handlePrint} disabled={loading || !request || printing}>
-            {printing ? "A abrir impressão..." : "Imprimir"}
+            {printing ? "A abrir impressão..." : "Imprimir / Guardar PDF"}
           </Button>
         </div>
       </div>
@@ -477,18 +743,25 @@ export default function PrintRequestPage() {
         <p className="text-sm text-muted-foreground">Requisição não encontrada.</p>
       ) : (
         <div className="sheet">
-          {!request.pickupSignedAt || !request.signedAt || request.pickupVoidedAt || request.signedVoidedAt ? (
+          {!request.pickupSignedAt ||
+          !request.signedAt ||
+          !request.pickupSignatureDataUrl ||
+          !request.signedSignatureDataUrl ||
+          request.pickupVoidedAt ||
+          request.signedVoidedAt ? (
             <div className="warn">
               Atenção: documento sem assinaturas completas.
               {!request.pickupSignedAt ? " • Falta assinatura (Responsável do pedido)." : ""}
+              {request.pickupSignedAt && !request.pickupSignatureDataUrl ? " • Falta desenho da assinatura (Responsável)." : ""}
               {!request.signedAt ? " • Falta assinatura (Técnico GTMI)." : ""}
+              {request.signedAt && !request.signedSignatureDataUrl ? " • Falta rubrica desenhada (Técnico GTMI)." : ""}
               {request.pickupVoidedAt ? " • Assinatura do responsável foi anulada." : ""}
               {request.signedVoidedAt ? " • Assinatura do técnico foi anulada." : ""}
             </div>
           ) : null}
 
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginBottom: 10 }}>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <div className="document-header">
+            <div className="brand-block">
               {logoOk ? (
                 <Image
                   src={printLogoUrl}
@@ -501,8 +774,9 @@ export default function PrintRequestPage() {
                 />
               ) : null}
               <div>
+                <div className="doc-kicker">Gabinete Técnico Municipal de Informática</div>
                 <div className="title">Pedido de material de consumo / serviço</div>
-                <div className="subtitle">Nº: {request.gtmiNumber}</div>
+                <div className="doc-number">Nº {request.gtmiNumber}</div>
               </div>
             </div>
             <div className="qr-box">
@@ -517,14 +791,16 @@ export default function PrintRequestPage() {
                 />
               ) : null}
               {checksum ? <div className="checksum">Código: {checksum}</div> : null}
-              <div style={{ textAlign: "right" }}>
+              <div>
                 <div className="subtitle">Data/Hora do pedido</div>
                 <div className="value">{safeDateTimeLabel(request.requestedAt)}</div>
               </div>
             </div>
           </div>
 
-          <div className="row" style={{ marginBottom: 10 }}>
+          <div className="section-title">Identificação do pedido</div>
+
+          <div className="row" style={{ marginBottom: 7 }}>
             <div className="field">
               <div className="label">Serviço requisitante</div>
               <div className="value">{request.requestingService || ""}</div>
@@ -538,7 +814,7 @@ export default function PrintRequestPage() {
             </div>
           </div>
 
-          <div className="row" style={{ marginBottom: 10 }}>
+          <div className="row" style={{ marginBottom: 7 }}>
             <div className="field">
               <div className="label">Local de entrega</div>
               <div className="value">{request.deliveryLocation || ""}</div>
@@ -551,25 +827,28 @@ export default function PrintRequestPage() {
             </div>
           </div>
 
-          <div className="field" style={{ marginBottom: 10 }}>
+          <div className="field" style={{ marginBottom: 7 }}>
             <div className="label">Fundamento do Pedido</div>
             <div className="value" style={{ whiteSpace: "pre-wrap" }}>{request.notes?.trim() ? request.notes : "—"}</div>
           </div>
 
-          <div className="field" style={{ marginBottom: 10 }}>
-            <div className="label">Modalidade</div>
-            <div className="value">{request.requestType === "RETURN" ? "Devolução / Substituição" : "Normal"}</div>
-          </div>
-
-          <div className="field" style={{ marginBottom: 10 }}>
-            <div className="label">Tipo de bem/serviço</div>
-            <div className="value">{goodsTypesText}</div>
-            <div className="muted" style={{ fontSize: 10, marginTop: 4 }}>
-              [ {request.goodsTypes.includes("MATERIALS_SERVICES") ? "X" : " "} ] {goodsTypeLabels.MATERIALS_SERVICES} &nbsp;&nbsp;
-              [ {request.goodsTypes.includes("WAREHOUSE_MATERIALS") ? "X" : " "} ] {goodsTypeLabels.WAREHOUSE_MATERIALS} &nbsp;&nbsp;
-              [ {request.goodsTypes.includes("OTHER_PRODUCTS") ? "X" : " "} ] {goodsTypeLabels.OTHER_PRODUCTS}
+          <div className="summary-band">
+            <div className="field">
+              <div className="label">Modalidade</div>
+              <div className="value">{request.requestType === "RETURN" ? "Devolução / Substituição" : "Normal"}</div>
+            </div>
+            <div className="field" style={{ gridColumn: "span 2" }}>
+              <div className="label">Tipo de bem/serviço</div>
+              <div className="value">{goodsTypesText}</div>
+              <div className="muted" style={{ fontSize: 9, marginTop: 4 }}>
+                [ {request.goodsTypes.includes("MATERIALS_SERVICES") ? "X" : " "} ] {goodsTypeLabels.MATERIALS_SERVICES} &nbsp;&nbsp;
+                [ {request.goodsTypes.includes("WAREHOUSE_MATERIALS") ? "X" : " "} ] {goodsTypeLabels.WAREHOUSE_MATERIALS} &nbsp;&nbsp;
+                [ {request.goodsTypes.includes("OTHER_PRODUCTS") ? "X" : " "} ] {goodsTypeLabels.OTHER_PRODUCTS}
+              </div>
             </div>
           </div>
+
+          <div className="section-title">Material solicitado</div>
 
           <div style={{ marginBottom: 10 }}>
             {request.requestType === "RETURN" ? (
@@ -598,7 +877,7 @@ export default function PrintRequestPage() {
                         <td>{it.unit || ""}</td>
                         <td>{it.quantity}</td>
                         <td>{it.reference || ""}</td>
-                        <td>{it.destination || ""}</td>
+                        <td>{renderItemQr(it.destination)}</td>
                         <td>{it.notes || ""}</td>
                       </tr>
                     ))}
@@ -629,24 +908,7 @@ export default function PrintRequestPage() {
                         <td>{it.unit || ""}</td>
                         <td>{it.quantity}</td>
                         <td>{it.reference || ""}</td>
-                        <td>
-                          {it.destination?.trim() ? (
-                            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                          {itemQrByCode[it.destination.trim()] ? (
-                                <Image
-                                  src={itemQrByCode[it.destination.trim()]}
-                                  alt={`QR ${it.destination.trim()}`}
-                                  width={44}
-                                  height={44}
-                                  unoptimized
-                                  style={{ width: 44, height: 44, imageRendering: "pixelated" }}
-                                />
-                              ) : null}
-                            </div>
-                          ) : (
-                            ""
-                          )}
-                        </td>
+                        <td>{renderItemQr(it.destination)}</td>
                         <td>{it.notes || ""}</td>
                       </tr>
                     ))}
@@ -677,24 +939,7 @@ export default function PrintRequestPage() {
                     <td>{it.unit || ""}</td>
                     <td>{it.quantity}</td>
                     <td>{it.reference || ""}</td>
-                    <td>
-                      {it.destination?.trim() ? (
-                        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                          {itemQrByCode[it.destination.trim()] ? (
-                            <Image
-                              src={itemQrByCode[it.destination.trim()]}
-                              alt={`QR ${it.destination.trim()}`}
-                              width={44}
-                              height={44}
-                              unoptimized
-                              style={{ width: 44, height: 44, imageRendering: "pixelated" }}
-                            />
-                          ) : null}
-                        </div>
-                      ) : (
-                        ""
-                      )}
-                    </td>
+                    <td>{renderItemQr(it.destination)}</td>
                     <td>{it.notes || ""}</td>
                   </tr>
                 ))}
@@ -704,9 +949,7 @@ export default function PrintRequestPage() {
           </div>
 
           <div style={{ marginBottom: 10 }}>
-            <div className="subtitle" style={{ marginBottom: 6 }}>
-              Fornecedores / Faturas
-            </div>
+            <div className="section-title">Fornecedores / Faturas</div>
             <table>
               <thead>
                 <tr>
@@ -745,52 +988,75 @@ export default function PrintRequestPage() {
             </table>
           </div>
 
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 2fr 1fr",
-              gap: 10,
-            }}
-          >
-            <div />
-            <div className="field sign" style={{ textAlign: "center" }}>
+          <div className="section-title">Assinaturas</div>
+
+          <div className="signature-grid">
+            <div className="signature-card">
               <div className="label" style={{ textAlign: "center" }}>
                 Assinatura do Responsável Pedido
               </div>
-              {request.pickupVoidedAt && !request.pickupSignatureDataUrl ? (
-                <div className="value" style={{ textAlign: "center" }}>
-                  {`ANULADA${request.pickupVoidedReason ? ` • ${request.pickupVoidedReason}` : ""}`}
-                </div>
-              ) : null}
-              {request.pickupSignatureDataUrl ? (
-                <Image
-                  src={request.pickupSignatureDataUrl}
-                  alt="Assinatura do responsável do pedido"
-                  className="signature-img"
-                  width={420}
-                  height={120}
-                  unoptimized
-                />
+              <div className="signature-slot">
+                {request.pickupVoidedAt && !request.pickupSignatureDataUrl ? (
+                  <div className="value" style={{ textAlign: "center" }}>
+                    {`ANULADA${request.pickupVoidedReason ? ` • ${request.pickupVoidedReason}` : ""}`}
+                  </div>
+                ) : null}
+                {request.pickupSignatureDataUrl ? (
+                  <Image
+                    src={request.pickupSignatureDataUrl}
+                    alt="Assinatura do responsável do pedido"
+                    className="signature-img"
+                    width={420}
+                    height={120}
+                    unoptimized
+                  />
+                ) : null}
+              </div>
+              <div className="signature-line">
+                {request.pickupSignedByName || request.requesterName || "Responsável do pedido"}
+              </div>
+              {request.pickupSignedByTitle ? (
+                <div className="signature-meta">{request.pickupSignedByTitle}</div>
               ) : null}
             </div>
 
-            <div className="field sign" style={{ textAlign: "right", padding: 6 }}>
-              <div className="label" style={{ fontSize: 10, textAlign: "right" }}>
+            <div className="signature-card">
+              <div className="label" style={{ textAlign: "center" }}>
                 Assinatura (Técnico GTMI)
               </div>
-              <div className="value" style={{ fontSize: 10, textAlign: "right", minHeight: 44 }}>
-                {request.signedAt
-                  ? signedText
-                  : request.signedVoidedAt
-                    ? `ANULADA${request.signedVoidedReason ? ` • ${request.signedVoidedReason}` : ""}`
-                    : ""}
+              <div className="signature-slot">
+                {request.signedAt && request.signedSignatureDataUrl ? (
+                  <Image
+                    src={request.signedSignatureDataUrl}
+                    alt="Rubrica do técnico GTMI"
+                    className="signature-img"
+                    width={420}
+                    height={120}
+                    unoptimized
+                  />
+                ) : request.signedVoidedAt
+                    ? (
+                        <div className="value" style={{ textAlign: "center" }}>
+                          {`ANULADA${request.signedVoidedReason ? ` • ${request.signedVoidedReason}` : ""}`}
+                        </div>
+                      )
+                    : null}
+              </div>
+              <div className="signature-line">
+                {request.signedAt ? request.signedByName || request.signedBy?.name || "Técnico GTMI" : "Técnico GTMI"}
+              </div>
+              <div className="signature-meta">
+                {request.signedAt ? request.signedByTitle || signedText || "Assinatura digital validada" : "Assinatura digital"}
               </div>
             </div>
           </div>
 
-          <div className="subtitle" style={{ marginTop: 10 }}>
-            Criado por: {request.createdBy?.name || ""}{request.createdBy?.email ? ` (${request.createdBy.email})` : ""}
-            {request.user && request.user.id !== request.createdBy?.id ? ` • Para: ${request.user.name}` : ""}
+          <div className="footer-line">
+            <span>
+              Criado por: {request.createdBy?.name || ""}{request.createdBy?.email ? ` (${request.createdBy.email})` : ""}
+              {request.user && request.user.id !== request.createdBy?.id ? ` • Para: ${request.user.name}` : ""}
+            </span>
+            <span>{checksum ? `Validação: ${checksum}` : request.gtmiNumber}</span>
           </div>
         </div>
       )}
