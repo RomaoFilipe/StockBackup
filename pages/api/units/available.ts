@@ -12,7 +12,11 @@ const querySchema = z.object({
     .optional()
     .transform((v) => {
       if (!v) return [] as string[];
-      return Array.isArray(v) ? v : [v];
+      const values = Array.isArray(v) ? v : [v];
+      return values
+        .flatMap((value) => value.split(","))
+        .map((value) => value.trim())
+        .filter(Boolean);
     }),
 });
 
@@ -27,7 +31,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(405).json({ error: "Method Not Allowed" });
   }
 
-  const parsed = querySchema.safeParse(req.query);
+  const normalizedQuery = {
+    ...req.query,
+    exclude: req.query.exclude ?? req.query["exclude[]"],
+  };
+
+  const parsed = querySchema.safeParse(normalizedQuery);
   if (!parsed.success) {
     return res.status(400).json({ error: "Invalid query" });
   }

@@ -86,7 +86,7 @@ function Sparkline({ values }: { values: number[] }) {
       {values.map((value, idx) => (
         <span
           key={idx}
-          className="w-1.5 rounded-full bg-gradient-to-b from-blue-500 to-indigo-500/70"
+          className="w-1.5 rounded-lg bg-gradient-to-b from-blue-500 to-indigo-500/70"
           style={{ height: `${Math.max(20, Math.min(100, value))}%` }}
         />
       ))}
@@ -308,10 +308,10 @@ export default function FiltersAndActions({
 
   return (
     <div className="space-y-5">
-      <div className="sticky top-3 z-20 flex items-center justify-between gap-3 rounded-2xl border border-border/60 bg-[hsl(var(--surface-1)/0.72)] p-3 backdrop-blur-xl">
+      <div className="sticky top-3 z-20 flex items-center justify-between gap-3 rounded-lg border border-border/60 bg-[hsl(var(--surface-1)/0.72)] p-3 backdrop-blur-xl">
         <button
           type="button"
-          className={`inline-flex items-center gap-2 rounded-full border border-border/70 px-2 py-1 text-sm ${
+          className={`inline-flex items-center gap-2 rounded-lg border border-border/70 px-2 py-1 text-sm ${
             viewMode === "table" ? "bg-primary/10 text-primary" : "text-muted-foreground"
           }`}
           onClick={() => setViewMode(viewMode === "table" ? "grid" : "table")}
@@ -321,7 +321,7 @@ export default function FiltersAndActions({
           {viewMode === "table" ? "Tabela" : "Grelha"}
         </button>
 
-        <div className="flex w-full max-w-2xl items-center gap-2 rounded-xl border border-border/70 bg-[hsl(var(--surface-1)/0.84)] px-3">
+        <div className="flex w-full max-w-2xl items-center gap-2 rounded-lg border border-border/70 bg-[hsl(var(--surface-1)/0.84)] px-3">
           <Search className="h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="Pesquisa global de produtos..."
@@ -332,13 +332,13 @@ export default function FiltersAndActions({
         </div>
 
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="icon" className="rounded-full">
+          <Button variant="ghost" size="icon" className="rounded-lg">
             <Bell className="h-4 w-4" />
           </Button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline" className="rounded-full px-2.5">
-                <div className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/15 text-primary">
+              <Button variant="outline" className="rounded-lg px-2.5">
+                <div className="flex h-6 w-6 items-center justify-center rounded-lg bg-primary/15 text-primary">
                   <UserRound className="h-4 w-4" />
                 </div>
                 <span className="hidden sm:inline">{userName}</span>
@@ -364,7 +364,7 @@ export default function FiltersAndActions({
         <div className="flex items-center gap-2">
           <AddCategoryDialog
             trigger={
-              <Button variant="outline" className="h-11 rounded-2xl border-border/70 px-4">
+              <Button variant="outline" className="h-11 rounded-lg border-border/70 px-4">
                 <Plus className="h-4 w-4" />
                 Categoria
               </Button>
@@ -374,7 +374,7 @@ export default function FiltersAndActions({
             allProducts={allProducts}
             userId={userId}
             trigger={
-              <Button className="h-11 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 px-5 text-white hover:from-blue-500 hover:to-indigo-500">
+              <Button className="h-11 rounded-lg px-5">
                 <Plus className="h-4 w-4" />
                 Criar Produto
               </Button>
@@ -382,7 +382,7 @@ export default function FiltersAndActions({
           />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline" className="h-11 rounded-2xl border-border/70 px-4">
+              <Button variant="outline" className="h-11 rounded-lg border-border/70 px-4">
                 <Download className="h-4 w-4" />
                 Exportar
               </Button>
@@ -396,7 +396,7 @@ export default function FiltersAndActions({
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-        <article className="rounded-2xl border border-border/60 bg-[hsl(var(--surface-1)/0.8)] p-4 shadow-sm transition-transform hover:-translate-y-0.5">
+        <article className="rounded-lg border border-border/60 bg-[hsl(var(--surface-1)/0.8)] p-4 shadow-sm transition-transform hover:-translate-y-0.5">
           <div className="flex items-center justify-between text-xs uppercase tracking-[0.16em] text-muted-foreground">
             <span>Total Produtos</span>
             <Boxes className="h-4 w-4 text-primary" />
@@ -407,10 +407,10 @@ export default function FiltersAndActions({
           </div>
           <Sparkline values={[20, 32, 48, 56, 68, 72, Math.max(24, stockCoverage)]} />
         </article>
-        <article className="rounded-2xl border border-border/60 bg-[hsl(var(--surface-1)/0.8)] p-4 shadow-sm transition-transform hover:-translate-y-0.5">
+        <article className="rounded-lg border border-border/60 bg-[hsl(var(--surface-1)/0.8)] p-4 shadow-sm transition-transform hover:-translate-y-0.5">
           <div className="flex items-center justify-between text-xs uppercase tracking-[0.16em] text-muted-foreground">
             <span>Produtos em Stock</span>
-            <Badge variant="secondary" className="rounded-full">
+            <Badge variant="secondary" className="rounded-lg">
               Disponível
             </Badge>
           </div>
@@ -418,7 +418,7 @@ export default function FiltersAndActions({
           <div className="mt-1 text-xs text-emerald-600">{stockCoverage}% do catálogo</div>
           <Sparkline values={[22, 38, 45, 57, 61, 64, Math.max(26, stockCoverage)]} />
         </article>
-        <article className="rounded-2xl border border-border/60 bg-[hsl(var(--surface-1)/0.8)] p-4 shadow-sm transition-transform hover:-translate-y-0.5">
+        <article className="rounded-lg border border-border/60 bg-[hsl(var(--surface-1)/0.8)] p-4 shadow-sm transition-transform hover:-translate-y-0.5">
           <div className="flex items-center justify-between text-xs uppercase tracking-[0.16em] text-muted-foreground">
             <span>Baixo Stock</span>
             <TriangleAlert className="h-4 w-4 text-amber-500" />
@@ -427,7 +427,7 @@ export default function FiltersAndActions({
           <div className="mt-1 text-xs text-amber-600">{lowStockRatio}% com reposição recomendada</div>
           <Sparkline values={[55, 48, 42, 38, 32, 28, Math.max(20, lowStockRatio)]} />
         </article>
-        <article className="rounded-2xl border border-border/60 bg-[hsl(var(--surface-1)/0.8)] p-4 shadow-sm transition-transform hover:-translate-y-0.5">
+        <article className="rounded-lg border border-border/60 bg-[hsl(var(--surface-1)/0.8)] p-4 shadow-sm transition-transform hover:-translate-y-0.5">
           <div className="flex items-center justify-between text-xs uppercase tracking-[0.16em] text-muted-foreground">
             <span>Sem Stock</span>
             <CircleOff className="h-4 w-4 text-rose-500" />
@@ -436,7 +436,7 @@ export default function FiltersAndActions({
           <div className="mt-1 text-xs text-rose-600">{outStockRatio}% sem disponibilidade</div>
           <Sparkline values={[16, 24, 20, 28, 26, 32, Math.max(18, outStockRatio)]} />
         </article>
-        <article className="rounded-2xl border border-border/60 bg-[hsl(var(--surface-1)/0.8)] p-4 shadow-sm transition-transform hover:-translate-y-0.5">
+        <article className="rounded-lg border border-border/60 bg-[hsl(var(--surface-1)/0.8)] p-4 shadow-sm transition-transform hover:-translate-y-0.5">
           <div className="flex items-center justify-between text-xs uppercase tracking-[0.16em] text-muted-foreground">
             <span>Valor de Inventário</span>
             <CircleDollarSign className="h-4 w-4 text-primary" />
@@ -455,16 +455,16 @@ export default function FiltersAndActions({
         </article>
       </div>
 
-      <div className="rounded-2xl border border-border/60 bg-[hsl(var(--surface-1)/0.8)] p-4">
+      <div className="rounded-lg border border-border/60 bg-[hsl(var(--surface-1)/0.8)] p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <Button
             variant="outline"
-            className="h-10 rounded-xl border-border/70"
+            className="h-10 rounded-lg border-border/70"
             onClick={() => setShowFilters((prev) => !prev)}
           >
             <Filter className="h-4 w-4" />
             Filtros avançados
-            <Badge variant="secondary" className="ml-1 rounded-full">
+            <Badge variant="secondary" className="ml-1 rounded-lg">
               {activeFilterCount}
             </Badge>
             <ChevronDown
@@ -477,10 +477,10 @@ export default function FiltersAndActions({
               pagination={pagination}
               setPagination={setPagination}
               className="gap-2"
-              triggerClassName="h-10 w-[88px] rounded-xl"
+              triggerClassName="h-10 w-[88px] rounded-lg"
             />
             {activeFilterCount > 0 ? (
-              <Button variant="ghost" className="h-10 rounded-xl" onClick={clearFilters}>
+              <Button variant="ghost" className="h-10 rounded-lg" onClick={clearFilters}>
                 Limpar filtros
               </Button>
             ) : null}
@@ -497,7 +497,7 @@ export default function FiltersAndActions({
                   setSelectedCategory(value === "ALL" ? [] : [value])
                 }
               >
-                <SelectTrigger className="h-11 rounded-xl">
+                <SelectTrigger className="h-11 rounded-lg">
                   <SelectValue placeholder="Todas as categorias" />
                 </SelectTrigger>
                 <SelectContent className="glass-panel">
@@ -513,7 +513,7 @@ export default function FiltersAndActions({
 
             <div className="space-y-2">
               <div className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Estado</div>
-              <div className="flex h-11 items-center gap-1 rounded-xl border border-border/60 bg-[hsl(var(--surface-2)/0.6)] p-1">
+              <div className="flex h-11 items-center gap-1 rounded-lg border border-border/60 bg-[hsl(var(--surface-2)/0.6)] p-1">
                 {[
                   { value: "ALL", label: "Todos" },
                   { value: "Available", label: "Stock" },
@@ -552,7 +552,7 @@ export default function FiltersAndActions({
                   setSelectedSuppliers(value === "ALL" ? [] : [value])
                 }
               >
-                <SelectTrigger className="h-11 rounded-xl">
+                <SelectTrigger className="h-11 rounded-lg">
                   <SelectValue placeholder="Todos os fornecedores" />
                 </SelectTrigger>
                 <SelectContent className="glass-panel">
@@ -573,7 +573,7 @@ export default function FiltersAndActions({
                   {priceRange[0]}€ - {priceRange[1]}€
                 </span>
               </div>
-              <div className="rounded-xl border border-border/60 bg-[hsl(var(--surface-2)/0.6)] px-3 py-2">
+              <div className="rounded-lg border border-border/60 bg-[hsl(var(--surface-2)/0.6)] px-3 py-2">
                 <input
                   type="range"
                   min={0}
@@ -603,12 +603,12 @@ export default function FiltersAndActions({
 
         {activeFilterCount > 0 ? (
           <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-            <Badge variant="secondary" className="rounded-full">Filtros ativos: {activeFilterCount}</Badge>
-            {selectedCategoryName ? <Badge variant="outline" className="rounded-full">Categoria: {selectedCategoryName}</Badge> : null}
-            {selectedStatusName ? <Badge variant="outline" className="rounded-full">Estado: {selectedStatusName}</Badge> : null}
-            {selectedSupplierName ? <Badge variant="outline" className="rounded-full">Fornecedor: {selectedSupplierName}</Badge> : null}
+            <Badge variant="secondary" className="rounded-lg">Filtros ativos: {activeFilterCount}</Badge>
+            {selectedCategoryName ? <Badge variant="outline" className="rounded-lg">Categoria: {selectedCategoryName}</Badge> : null}
+            {selectedStatusName ? <Badge variant="outline" className="rounded-lg">Estado: {selectedStatusName}</Badge> : null}
+            {selectedSupplierName ? <Badge variant="outline" className="rounded-lg">Fornecedor: {selectedSupplierName}</Badge> : null}
             {(priceRange[0] > 0 || priceRange[1] < maxPrice) ? (
-              <Badge variant="outline" className="rounded-full">Preço: {priceRange[0]}-{priceRange[1]}€</Badge>
+              <Badge variant="outline" className="rounded-lg">Preço: {priceRange[0]}-{priceRange[1]}€</Badge>
             ) : null}
           </div>
         ) : null}

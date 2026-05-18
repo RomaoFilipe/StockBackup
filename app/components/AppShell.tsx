@@ -413,13 +413,18 @@ export default function AppShell({ children }: AppShellProps) {
 
   return (
     <div className="min-h-screen overflow-x-hidden bg-background text-foreground">
+      <a
+        href="#main-content"
+        className="fixed left-4 top-4 z-[200] -translate-y-20 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-lg transition-transform focus:translate-y-0"
+      >
+        Saltar para o conteúdo
+      </a>
       <div className="app-mesh-bg" />
-      <div className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(1200px_circle_at_20%_-10%,hsl(var(--primary)/0.18),transparent_45%),radial-gradient(900px_circle_at_85%_0%,hsl(var(--ring)/0.14),transparent_40%)]" />
 
       <div className="flex min-h-screen min-w-0">
-        <aside className="hidden lg:flex lg:w-72 lg:flex-col lg:border-r lg:border-border/50 lg:bg-[hsl(var(--surface-1)/0.82)] lg:backdrop-blur-xl">
-          <div className="flex items-center gap-3 px-6 py-6">
-            <div className="flex size-11 items-center justify-center overflow-hidden rounded-2xl bg-primary/16 text-primary electric-ring">
+        <aside className="hidden lg:flex lg:w-72 lg:flex-col lg:border-r lg:border-border/80 lg:bg-[hsl(var(--surface-1)/0.96)]">
+          <div className="flex items-center gap-3 border-b border-border/70 px-6 py-5">
+            <div className="flex size-10 items-center justify-center overflow-hidden rounded-lg bg-primary/12 text-primary electric-ring">
               <Image
                 src="/branding/favicon.ico"
                 alt="CMCHUB Logo"
@@ -465,7 +470,7 @@ export default function AppShell({ children }: AppShellProps) {
                               type="button"
                               onClick={() => handleItemSelect(item)}
                               disabled={item.disabled}
-                              className={`flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm transition-all ${
+                              className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-all ${
                                 active
                                   ? "bg-primary/15 text-primary shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.28)]"
                                   : "text-muted-foreground hover:bg-muted/65 hover:text-foreground"
@@ -498,7 +503,7 @@ export default function AppShell({ children }: AppShellProps) {
                       type="button"
                       onClick={() => handleItemSelect(item)}
                       disabled={item.disabled}
-                      className={`flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm transition-all ${
+                      className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-all ${
                         active
                           ? "bg-primary/15 text-primary shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.28)]"
                           : "text-muted-foreground hover:bg-muted/65 hover:text-foreground"
@@ -517,7 +522,7 @@ export default function AppShell({ children }: AppShellProps) {
         </aside>
 
         <div className="flex min-h-screen min-w-0 flex-1 flex-col overflow-x-hidden">
-          <header className="sticky top-0 z-40 border-b border-border/50 bg-[hsl(var(--surface-1)/0.72)] backdrop-blur-xl">
+          <header className="sticky top-0 z-40 border-b border-border/80 bg-[hsl(var(--surface-1)/0.94)] backdrop-blur">
             <div className="flex items-center justify-between px-4 py-3 sm:px-6 lg:px-10">
               <div className="text-sm text-muted-foreground">
                 Bem-vindo,{" "}
@@ -527,7 +532,7 @@ export default function AppShell({ children }: AppShellProps) {
               </div>
 
               <div className="flex items-center gap-2">
-                <div className="hidden md:flex items-center rounded-full border border-border/60 bg-[hsl(var(--surface-2)/0.72)] p-1">
+                <div className="hidden md:flex items-center rounded-lg border border-border/80 bg-[hsl(var(--surface-2)/0.72)] p-1">
                   <Button
                     variant={density === "comfortable" ? "secondary" : "ghost"}
                     size="sm"
@@ -551,7 +556,7 @@ export default function AppShell({ children }: AppShellProps) {
                 </div>
                 <ModeToggle />
                 <RequestsNotificationsBell />
-                <div className="flex size-9 items-center justify-center rounded-full bg-primary/15 text-xs font-semibold text-primary electric-ring">
+                <div className="flex size-9 items-center justify-center rounded-lg bg-primary/12 text-xs font-semibold text-primary electric-ring">
                   {user?.name?.slice(0, 2).toUpperCase() || "ST"}
                 </div>
                 <Button
@@ -633,7 +638,7 @@ export default function AppShell({ children }: AppShellProps) {
             </div>
           </header>
 
-          <main className="content-density flex flex-1 flex-col px-4 pb-24 pt-8 sm:px-6 sm:pt-8 lg:px-10 lg:pb-10 lg:pt-10 animate-fade-up">
+          <main id="main-content" className="content-density flex flex-1 flex-col px-4 pb-24 pt-6 sm:px-6 sm:pt-7 lg:px-8 lg:pb-10 lg:pt-8 animate-fade-up">
             {isCurrentPathAllowed ? children : null}
           </main>
         </div>

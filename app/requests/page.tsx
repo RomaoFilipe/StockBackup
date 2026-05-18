@@ -469,7 +469,7 @@ export default function RequestsPage() {
       params: {
         productId: args.productId,
         take: args.take ?? 1,
-        ...(args.exclude?.length ? { exclude: args.exclude } : {}),
+        ...(args.exclude?.length ? { exclude: args.exclude.join(",") } : {}),
       },
     });
 
@@ -477,6 +477,24 @@ export default function RequestsPage() {
     const units = (Array.isArray(res.data?.items) ? res.data.items : []) as AvailableUnitDto[];
     return { availableCount, units };
   }
+
+  const getSelectedUnitCodesForProduct = useCallback(
+    (productId: string, rowIndex?: number, extraCodes: string[] = []) => {
+      const codes = new Set<string>();
+      items.forEach((item, idx) => {
+        if (idx === rowIndex) return;
+        if (item.productId !== productId) return;
+        const code = (item.destination || "").trim();
+        if (code) codes.add(code);
+      });
+      extraCodes.forEach((code) => {
+        const clean = code.trim();
+        if (clean) codes.add(clean);
+      });
+      return Array.from(codes);
+    },
+    [items]
+  );
 
   async function autoPickUnitForRow(
     rowIndex: number,
@@ -491,10 +509,15 @@ export default function RequestsPage() {
 
     setUnitLoadingByRow((prev) => ({ ...prev, [rowIndex]: true }));
     try {
+      const excludedCodes = getSelectedUnitCodesForProduct(
+        productId,
+        rowIndex,
+        currentCode ? [currentCode] : []
+      );
       const { availableCount, units } = await fetchAvailableUnits({
         productId,
         take: 1,
-        exclude: currentCode ? [currentCode] : [],
+        exclude: excludedCodes,
       });
       setUnitHintByProductId((prev) => ({ ...prev, [productId]: { availableCount } }));
 
@@ -516,6 +539,20 @@ export default function RequestsPage() {
       setUnitLoadingByRow((prev) => ({ ...prev, [rowIndex]: false }));
     }
   }
+
+  const findDuplicateUnitCode = (
+    requestItems: Array<NewRequestItem & { role?: "NORMAL" | "OLD" | "NEW" }>
+  ) => {
+    const seen = new Set<string>();
+    for (const item of requestItems) {
+      if (item.role === "OLD") continue;
+      const code = (item.destination || "").trim();
+      if (!code) continue;
+      if (seen.has(code)) return code;
+      seen.add(code);
+    }
+    return null;
+  };
 
   const productById = useMemo(() => {
     const map = new Map<string, Product>();
@@ -935,6 +972,15 @@ export default function RequestsPage() {
 
       const effectiveGoodsTypes = (Object.keys(goodsTypes) as GoodsType[]).filter((k) => goodsTypes[k]);
       const submitItems = buildItemsForSubmit();
+      const duplicateUnitCode = findDuplicateUnitCode(submitItems);
+      if (duplicateUnitCode) {
+        toast({
+          title: "Unidade repetida",
+          description: `O código ${duplicateUnitCode} já está usado noutra linha deste pedido. Atualiza uma das linhas para reservar outro QR.`,
+          variant: "destructive",
+        });
+        return;
+      }
 
       const supplierNamesOrdered = Array.from(
         new Set(
@@ -1074,6 +1120,15 @@ export default function RequestsPage() {
 
       const effectiveGoodsTypes = (Object.keys(goodsTypes) as GoodsType[]).filter((k) => goodsTypes[k]);
       const submitItems = buildItemsForSubmit();
+      const duplicateUnitCode = findDuplicateUnitCode(submitItems);
+      if (duplicateUnitCode) {
+        toast({
+          title: "Unidade repetida",
+          description: `O código ${duplicateUnitCode} já está usado noutra linha deste pedido. Atualiza uma das linhas para reservar outro QR.`,
+          variant: "destructive",
+        });
+        return;
+      }
 
       const supplierNamesOrdered = Array.from(
         new Set(

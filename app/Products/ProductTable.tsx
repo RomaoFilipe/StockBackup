@@ -200,24 +200,24 @@ export const ProductTable = React.memo(function ProductTable({
     <div className="space-y-4">
       {isLoading ? (
         <div className="space-y-3">
-          <div className="hidden grid-cols-12 gap-2 rounded-2xl border border-border/60 bg-[hsl(var(--surface-1)/0.68)] p-3 lg:grid">
+          <div className="hidden grid-cols-12 gap-2 rounded-lg border border-border/80 bg-[hsl(var(--surface-1)/0.88)] p-3 lg:grid">
             {Array.from({ length: 12 }).map((_, i) => (
-              <div key={i} className="h-8 animate-pulse rounded-xl bg-muted/60" />
+              <div key={i} className="h-8 animate-pulse rounded-md bg-muted/60" />
             ))}
           </div>
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {Array.from({ length: 6 }).map((_, i) => (
-              <div key={i} className="rounded-2xl border border-border/60 bg-[hsl(var(--surface-1)/0.7)] p-4">
+              <div key={i} className="rounded-lg border border-border/80 bg-[hsl(var(--surface-1)/0.88)] p-4">
                 <div className="h-4 w-1/2 animate-pulse rounded bg-muted/70" />
                 <div className="mt-2 h-3 w-1/3 animate-pulse rounded bg-muted/60" />
-                <div className="mt-4 h-10 animate-pulse rounded-xl bg-muted/60" />
+                <div className="mt-4 h-10 animate-pulse rounded-md bg-muted/60" />
               </div>
             ))}
           </div>
         </div>
       ) : filteredData.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-border/80 bg-[hsl(var(--surface-1)/0.65)] p-10 text-center">
-          <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl border border-primary/30 bg-primary/10">
+        <div className="rounded-lg border border-dashed border-border/80 bg-[hsl(var(--surface-1)/0.88)] p-10 text-center">
+          <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-lg border border-primary/30 bg-primary/10">
             <PackageSearch className="h-6 w-6 text-primary" />
           </div>
           <div className="text-lg font-semibold">Sem produtos nesta vista</div>
@@ -232,7 +232,7 @@ export const ProductTable = React.memo(function ProductTable({
             return (
               <article
                 key={product.id}
-                className="rounded-2xl border border-border/60 bg-[hsl(var(--surface-1)/0.74)] p-4 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-lg"
+                className="rounded-lg border border-border/80 bg-[hsl(var(--surface-1)/0.94)] p-4 shadow-sm transition-colors hover:border-primary/35 hover:bg-[hsl(var(--surface-2)/0.38)]"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
@@ -242,10 +242,10 @@ export const ProductTable = React.memo(function ProductTable({
                   <ProductDropDown row={{ original: product }} />
                 </div>
                 <div className="mt-3 flex items-center gap-2">
-                  <Badge variant="outline" className={`rounded-full border ${status.className}`}>
+                  <Badge variant="outline" className={`rounded-md border ${status.className}`}>
                     {status.label}
                   </Badge>
-                  <Badge variant="secondary" className="rounded-full">
+                  <Badge variant="secondary" className="rounded-md">
                     {product.quantity} unid.
                   </Badge>
                 </div>
@@ -279,7 +279,7 @@ export const ProductTable = React.memo(function ProductTable({
           })}
         </div>
       ) : (
-        <div className="overflow-auto rounded-2xl border border-border/70 bg-[hsl(var(--surface-1)/0.78)]">
+        <div className="overflow-auto rounded-lg border border-border/80 bg-[hsl(var(--surface-1)/0.94)]">
           <table className="w-full min-w-[960px] text-sm">
             <thead className="sticky top-0 z-10 bg-[hsl(var(--surface-2)/0.95)] backdrop-blur">
               <tr>
@@ -333,7 +333,7 @@ export const ProductTable = React.memo(function ProductTable({
                     <td className="px-[var(--table-cell-px)] py-[var(--table-cell-py)] font-mono text-xs">{product.sku}</td>
                     <td className="px-[var(--table-cell-px)] py-[var(--table-cell-py)]">
                       <span
-                        className={`inline-flex min-w-10 justify-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                        className={`inline-flex min-w-10 justify-center rounded-md px-2 py-0.5 text-xs font-medium ${
                           product.quantity > 20
                             ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
                             : product.quantity > 0
@@ -351,14 +351,14 @@ export const ProductTable = React.memo(function ProductTable({
                       })}
                     </td>
                     <td className="px-[var(--table-cell-px)] py-[var(--table-cell-py)]">
-                      <Badge variant="outline" className={`rounded-full border ${status.className}`}>
+                      <Badge variant="outline" className={`rounded-md border ${status.className}`}>
                         {status.label}
                       </Badge>
                     </td>
                     <td className="px-[var(--table-cell-px)] py-[var(--table-cell-py)]">{product.category || "—"}</td>
                     <td className="px-[var(--table-cell-px)] py-[var(--table-cell-py)]">{product.supplier || "—"}</td>
                     <td className="px-[var(--table-cell-px)] py-[var(--table-cell-py)] text-center">
-                      <div className="inline-flex rounded-full border border-border/65 bg-[hsl(var(--surface-2)/0.75)] p-0.5">
+                      <div className="inline-flex rounded-md border border-border/65 bg-[hsl(var(--surface-2)/0.75)] p-0.5">
                         <QRCodeHover data={qrData} title={`${product.name} QR`} size={180} />
                       </div>
                     </td>
@@ -373,7 +373,7 @@ export const ProductTable = React.memo(function ProductTable({
         </div>
       )}
 
-      <div className="flex flex-col items-center justify-between gap-3 rounded-2xl border border-border/60 bg-[hsl(var(--surface-1)/0.74)] px-4 py-3 md:flex-row">
+      <div className="flex flex-col items-center justify-between gap-3 rounded-lg border border-border/80 bg-[hsl(var(--surface-1)/0.94)] px-4 py-3 md:flex-row">
         <div className="text-sm text-muted-foreground">
           A mostrar {startRow}-{endRow} de {filteredData.length}
         </div>
@@ -381,7 +381,7 @@ export const ProductTable = React.memo(function ProductTable({
           <Button
             variant="ghost"
             size="icon"
-            className="rounded-full"
+            className="rounded-lg"
             disabled={safePageIndex === 0}
             onClick={() =>
               setPagination((prev) => ({
@@ -402,7 +402,7 @@ export const ProductTable = React.memo(function ProductTable({
                   pageIndex: page - 1,
                 }))
               }
-              className={`h-8 min-w-8 rounded-full px-2 text-sm transition ${
+              className={`h-8 min-w-8 rounded-lg px-2 text-sm transition ${
                 page === safePageIndex + 1
                   ? "bg-primary/14 text-primary"
                   : "text-muted-foreground hover:bg-muted/70"
@@ -414,7 +414,7 @@ export const ProductTable = React.memo(function ProductTable({
           <Button
             variant="ghost"
             size="icon"
-            className="rounded-full"
+            className="rounded-lg"
             disabled={safePageIndex >= pageCount - 1}
             onClick={() =>
               setPagination((prev) => ({
@@ -430,19 +430,19 @@ export const ProductTable = React.memo(function ProductTable({
           pagination={pagination}
           setPagination={setPagination}
           className="gap-2"
-          triggerClassName="h-9 w-[86px] rounded-xl"
+          triggerClassName="h-9 w-[86px] rounded-lg"
         />
       </div>
 
       {selectedIds.length > 0 ? (
-        <div className="fixed bottom-6 left-1/2 z-40 flex w-[min(95vw,680px)] -translate-x-1/2 items-center justify-between gap-2 rounded-2xl border border-primary/30 bg-[hsl(var(--surface-1)/0.88)] px-4 py-3 shadow-2xl backdrop-blur-xl">
+        <div className="fixed bottom-6 left-1/2 z-40 flex w-[min(95vw,680px)] -translate-x-1/2 items-center justify-between gap-2 rounded-lg border border-primary/30 bg-[hsl(var(--surface-1)/0.96)] px-4 py-3 shadow-2xl backdrop-blur">
           <div className="text-sm">
             <span className="font-semibold">{selectedIds.length}</span> produto(s) selecionado(s)
           </div>
           <div className="flex items-center gap-2">
             <Button
               variant="outline"
-              className="h-9 rounded-xl border-border/70"
+              className="h-9 rounded-lg border-border/70"
               onClick={exportSelection}
             >
               <Download className="h-4 w-4" />
@@ -450,7 +450,7 @@ export const ProductTable = React.memo(function ProductTable({
             </Button>
             <Button
               variant="ghost"
-              className="h-9 rounded-xl"
+              className="h-9 rounded-lg"
               onClick={() => setSelectedIds([])}
             >
               Limpar

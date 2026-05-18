@@ -87,7 +87,7 @@ const AppTable = React.memo(() => {
 
   return (
     <div className="flex flex-col gap-5 poppins">
-      <div className="glass-panel rounded-2xl p-4 sm:p-5 lg:p-6">
+      <div className="glass-panel rounded-lg p-4 sm:p-5">
         {/* Filters and Actions */}
         <FiltersAndActions
           userId={user.id}
