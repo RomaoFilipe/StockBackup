@@ -6,6 +6,7 @@ import Image from "next/image";
 import axiosInstance from "@/utils/axiosInstance";
 import { Button } from "@/components/ui/button";
 import QRCode from "qrcode";
+import { buildUnitLookupUrl } from "@/utils/unitQrLink";
 
 type GoodsType = "MATERIALS_SERVICES" | "WAREHOUSE_MATERIALS" | "OTHER_PRODUCTS";
 
@@ -178,7 +179,7 @@ export default function PrintRequestPage() {
       const entries = await Promise.all(
         codes.map(async (code) => {
           try {
-            const dataUrl = await QRCode.toDataURL(code, {
+            const dataUrl = await QRCode.toDataURL(buildUnitLookupUrl({ origin, code }), {
               width: 128,
               margin: 1,
               color: { dark: "#000000", light: "#FFFFFF" },
@@ -202,7 +203,7 @@ export default function PrintRequestPage() {
     return () => {
       cancelled = true;
     };
-  }, [request?.items]);
+  }, [origin, request?.items]);
 
   useEffect(() => {
     let cancelled = false;

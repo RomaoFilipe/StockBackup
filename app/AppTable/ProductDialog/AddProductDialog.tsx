@@ -28,6 +28,7 @@ import Price from "./_components/Price";
 import { Product } from "@/app/types";
 import { useAuth } from "@/app/authContext";
 import axiosInstance from "@/utils/axiosInstance";
+import { buildUnitLookupUrl } from "@/utils/unitQrLink";
 
 type RequestingServiceDto = {
   id: number;
@@ -114,6 +115,7 @@ export default function AddProductDialog({
   const [requestAttachment, setRequestAttachment] = useState<File | null>(null);
   const [createdInvoiceId, setCreatedInvoiceId] = useState<string | null>(null);
   const [createdUnitPreviewCodes, setCreatedUnitPreviewCodes] = useState<string[]>([]);
+  const [origin, setOrigin] = useState("");
   const [requestingServices, setRequestingServices] = useState<RequestingServiceDto[]>([]);
   const [requestingServiceId, setRequestingServiceId] = useState<string>("");
 
@@ -133,6 +135,13 @@ export default function AddProductDialog({
   } = useProductStore();
   const { isLoggedIn } = useAuth();
   const { toast } = useToast();
+
+  useEffect(() => {
+    const envBase = String(process.env.NEXT_PUBLIC_APP_URL ?? "")
+      .trim()
+      .replace(/\/+$/, "");
+    setOrigin(envBase || window.location.origin);
+  }, []);
 
   useEffect(() => {
     if (isLoggedIn && openProductDialog) {
@@ -579,7 +588,7 @@ export default function AddProductDialog({
                           {createdUnitPreviewCodes.map((code) => (
                             <QRCodeComponent
                               key={code}
-                              data={code}
+                              data={buildUnitLookupUrl({ origin, code })}
                               title="QR • Unidade"
                               size={180}
                               showDownload

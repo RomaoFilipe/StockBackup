@@ -6,6 +6,7 @@ import Image from "next/image";
 import QRCode from "qrcode";
 import axiosInstance from "@/utils/axiosInstance";
 import { Button } from "@/components/ui/button";
+import { buildUnitLookupUrl } from "@/utils/unitQrLink";
 
 type RequestItemDto = {
   id: string;
@@ -110,6 +111,14 @@ export default function RequestLabelsPrintPage() {
   const [printing, setPrinting] = useState(false);
   const [qrByCode, setQrByCode] = useState<Record<string, string>>({});
   const [unitByCode, setUnitByCode] = useState<Record<string, UnitLookupDto>>({});
+  const [origin, setOrigin] = useState("");
+
+  useEffect(() => {
+    const envBase = String(process.env.NEXT_PUBLIC_APP_URL ?? "")
+      .trim()
+      .replace(/\/+$/, "");
+    setOrigin(envBase || window.location.origin);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -157,7 +166,7 @@ export default function RequestLabelsPrintPage() {
 
       const entries = await Promise.all(
         codes.map(async (code) => {
-          const dataUrl = await QRCode.toDataURL(code, {
+          const dataUrl = await QRCode.toDataURL(buildUnitLookupUrl({ origin, code }), {
             width: 190,
             margin: 1,
             errorCorrectionLevel: "M",
@@ -174,7 +183,7 @@ export default function RequestLabelsPrintPage() {
     return () => {
       cancelled = true;
     };
-  }, [labelItems]);
+  }, [labelItems, origin]);
 
   useEffect(() => {
     let cancelled = false;

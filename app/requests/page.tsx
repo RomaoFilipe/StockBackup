@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/app/authContext";
 import { useProductStore } from "@/app/useProductStore";
 import axiosInstance from "@/utils/axiosInstance";
+import { buildUnitLookupUrl } from "@/utils/unitQrLink";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -2640,7 +2641,7 @@ export default function RequestsPage() {
             {itemQrCode ? (
               <div className="flex justify-center">
                 <QRCodeComponent
-                  data={itemQrCode}
+                  data={buildUnitLookupUrl({ origin, code: itemQrCode })}
                   title={`QR • ${itemQrCode}`}
                   size={260}
                   showDownload

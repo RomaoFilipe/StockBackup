@@ -35,6 +35,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import AttachmentsDialog from "@/app/components/AttachmentsDialog";
 import { QRCodeComponent } from "@/components/ui/qr-code";
+import { buildUnitLookupUrl } from "@/utils/unitQrLink";
 import PageHeader from "@/app/components/PageHeader";
 import SectionCard from "@/app/components/SectionCard";
 import EmptyState from "@/app/components/EmptyState";
@@ -1175,7 +1176,7 @@ export default function ProductDetailsPage() {
                               <div className="flex items-start gap-3">
                                 {origin ? (
                                   <QRCodeComponent
-                                    data={u.code}
+                                    data={buildUnitLookupUrl({ origin, code: u.code })}
                                     title="QR"
                                     size={110}
                                     showDownload={false}

@@ -6,6 +6,7 @@ import Image from "next/image";
 import QRCode from "qrcode";
 import axiosInstance from "@/utils/axiosInstance";
 import { Button } from "@/components/ui/button";
+import { buildUnitLookupUrl } from "@/utils/unitQrLink";
 
 type ProductDetails = {
   id: string;
@@ -114,7 +115,7 @@ export default function PrintProductUnitsQrPage() {
       const next: Record<string, string> = {};
       for (const u of units) {
         // Moderate size: good for printing, still crisp.
-        const dataUrl = await QRCode.toDataURL(u.code, {
+        const dataUrl = await QRCode.toDataURL(buildUnitLookupUrl({ origin, code: u.code }), {
           margin: 1,
           width: 220,
           errorCorrectionLevel: "M",

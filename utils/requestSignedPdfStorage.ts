@@ -156,6 +156,7 @@ export async function createFinalSignedRequestPdf(args: {
     pickupSignedByName: request.pickupSignedByName,
     pickupSignedByTitle: request.pickupSignedByTitle,
     pickupSignatureDataUrl: request.pickupSignatureDataUrl,
+    appOrigin: process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || "",
     items: request.items,
   });
 

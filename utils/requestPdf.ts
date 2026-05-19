@@ -1,5 +1,6 @@
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import QRCode from "qrcode";
+import { buildUnitLookupUrl } from "@/utils/unitQrLink";
 
 export type RequestForPdf = {
   gtmiNumber: string;
@@ -21,6 +22,7 @@ export type RequestForPdf = {
   pickupSignedByName?: string | null;
   pickupSignedByTitle?: string | null;
   pickupSignatureDataUrl?: string | null;
+  appOrigin?: string | null;
 
   items: Array<{
     quantity: bigint | number;
@@ -166,7 +168,7 @@ export async function buildSignedRequestPdfBuffer(req: RequestForPdf): Promise<B
   await Promise.all(
     qrCodes.map(async (code) => {
       try {
-        const dataUrl = await QRCode.toDataURL(code, {
+        const dataUrl = await QRCode.toDataURL(buildUnitLookupUrl({ origin: req.appOrigin || undefined, code }), {
           width: 132,
           margin: 1,
           color: { dark: "#000000", light: "#FFFFFF" },

@@ -9,6 +9,7 @@ import PageHeader from "@/app/components/PageHeader";
 import SectionCard from "@/app/components/SectionCard";
 import EmptyState from "@/app/components/EmptyState";
 import axiosInstance from "@/utils/axiosInstance";
+import { buildUnitLookupUrl } from "@/utils/unitQrLink";
 import { QRCodeComponent } from "@/components/ui/qr-code";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -130,6 +131,14 @@ export default function UnitDetailPage() {
   const [unit, setUnit] = useState<UnitDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [origin, setOrigin] = useState("");
+
+  useEffect(() => {
+    const envBase = String(process.env.NEXT_PUBLIC_APP_URL ?? "")
+      .trim()
+      .replace(/\/+$/, "");
+    setOrigin(envBase || window.location.origin);
+  }, []);
 
   const fetchUnit = async () => {
     if (!unitId) return;
@@ -181,7 +190,7 @@ export default function UnitDetailPage() {
             <div className="grid gap-4 lg:grid-cols-[360px_1fr]">
               <SectionCard title="Identificação" description="Dados principais da unidade física.">
                 <div className="flex flex-col items-center gap-4 text-center">
-                  <QRCodeComponent data={unit.code} title="QR" size={180} showDownload={false} />
+                  <QRCodeComponent data={buildUnitLookupUrl({ origin, code: unit.code })} title="QR" size={180} showDownload={false} />
                   <div className="space-y-2">
                     <div className="font-mono text-sm break-all">{unit.code}</div>
                     <Badge variant="outline" className={status.className}>
