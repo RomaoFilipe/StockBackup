@@ -1,4 +1,5 @@
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import QRCode from "qrcode";
 
 export type RequestForPdf = {
   gtmiNumber: string;
@@ -25,6 +26,8 @@ export type RequestForPdf = {
     quantity: bigint | number;
     unit?: string | null;
     notes?: string | null;
+    reference?: string | null;
+    destination?: string | null;
     product: { name: string; sku?: string | null };
   }>;
 };
@@ -41,6 +44,10 @@ function decodePngDataUrl(dataUrl: string): Uint8Array {
 function safeLine(value: unknown): string {
   const v = typeof value === "string" ? value.trim() : "";
   return v || "-";
+}
+
+function shortQrCode(value: string): string {
+  return value.length > 18 ? `${value.slice(0, 8)}...${value.slice(-6)}` : value;
 }
 
 function formatDatePt(date?: Date | null, withTime = false): string {
@@ -152,6 +159,25 @@ export async function buildSignedRequestPdfBuffer(req: RequestForPdf): Promise<B
   field("Fundamento do pedido", safeLine(req.notes || req.title), marginX, y, contentW, 58);
   y -= 74;
 
+  const qrImageByCode = new Map<string, Uint8Array>();
+  const qrCodes = Array.from(
+    new Set(req.items.map((it) => it.destination?.trim()).filter((code): code is string => Boolean(code)))
+  );
+  await Promise.all(
+    qrCodes.map(async (code) => {
+      try {
+        const dataUrl = await QRCode.toDataURL(code, {
+          width: 132,
+          margin: 1,
+          color: { dark: "#000000", light: "#FFFFFF" },
+        });
+        qrImageByCode.set(code, decodePngDataUrl(dataUrl));
+      } catch {
+        // The QR is helpful but should not block the legal PDF.
+      }
+    })
+  );
+
   text("Material requisitado", marginX, y, { size: 11, bold: true });
   y -= 18;
   const tableX = marginX;
@@ -160,20 +186,22 @@ export async function buildSignedRequestPdfBuffer(req: RequestForPdf): Promise<B
   box(tableX, y - headH, tableW, headH, tableHeader);
   text("N.º", tableX + 8, y - 16, { size: 8, bold: true });
   text("Designacao", tableX + 38, y - 16, { size: 8, bold: true });
-  text("Unid.", tableX + tableW - 118, y - 16, { size: 8, bold: true });
-  text("Qtd", tableX + tableW - 66, y - 16, { size: 8, bold: true });
+  text("Unid.", tableX + tableW - 176, y - 16, { size: 8, bold: true });
+  text("Qtd", tableX + tableW - 132, y - 16, { size: 8, bold: true });
+  text("QR unidade", tableX + tableW - 82, y - 16, { size: 8, bold: true });
   y -= headH;
 
   const maxItems = 12;
   for (const [idx, it] of req.items.slice(0, maxItems).entries()) {
     const qty = typeof it.quantity === "bigint" ? Number(it.quantity) : Number(it.quantity);
     const sku = it.product.sku ? `SKU: ${it.product.sku}` : "";
-    const notes = it.notes?.trim() ? `Obs.: ${it.notes.trim()}` : "";
+    const reference = it.reference?.trim() ? `Ref.: ${it.reference.trim()}` : "";
+    const code = it.destination?.trim() || "";
     const lines = [
-      ...wrap(it.product.name, tableW - 176, 9, true).slice(0, 2),
-      ...wrap([sku, notes].filter(Boolean).join(" · "), tableW - 176, 7.5).slice(0, 1),
+      ...wrap(it.product.name, tableW - 230, 9, true).slice(0, 2),
+      ...wrap([sku, reference].filter(Boolean).join(" · "), tableW - 230, 7.5).slice(0, 1),
     ].filter(Boolean);
-    const rowH = Math.max(38, 16 + lines.length * 10);
+    const rowH = Math.max(code ? 72 : 38, 16 + lines.length * 10);
     if (y - rowH < 190) break;
     box(tableX, y - rowH, tableW, rowH);
     text(String(idx + 1), tableX + 9, y - 16, { size: 8.5 });
@@ -182,11 +210,29 @@ export async function buildSignedRequestPdfBuffer(req: RequestForPdf): Promise<B
         size: lineIdx === 0 ? 9 : 7.5,
         bold: lineIdx === 0,
         color: lineIdx === 0 ? ink : muted,
-        maxWidth: tableW - 176,
+        maxWidth: tableW - 230,
       })
     );
-    text(safeLine(it.unit || "UN"), tableX + tableW - 118, y - 16, { size: 8.5, maxWidth: 40 });
-    text(String(Number.isFinite(qty) ? qty : "-"), tableX + tableW - 66, y - 16, { size: 8.5, bold: true });
+    text(safeLine(it.unit || "UN"), tableX + tableW - 176, y - 16, { size: 8.5, maxWidth: 34 });
+    text(String(Number.isFinite(qty) ? qty : "-"), tableX + tableW - 132, y - 16, { size: 8.5, bold: true });
+    if (code) {
+      const qrBytes = qrImageByCode.get(code);
+      if (qrBytes) {
+        try {
+          const qrImg = await doc.embedPng(qrBytes);
+          page.drawImage(qrImg, {
+            x: tableX + tableW - 78,
+            y: y - rowH + 14,
+            width: 50,
+            height: 50,
+          });
+        } catch {
+          text(shortQrCode(code), tableX + tableW - 86, y - 18, { size: 6.5, maxWidth: 74 });
+        }
+      } else {
+        text(shortQrCode(code), tableX + tableW - 86, y - 18, { size: 6.5, maxWidth: 74 });
+      }
+    }
     y -= rowH;
   }
 

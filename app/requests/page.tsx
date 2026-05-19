@@ -72,6 +72,7 @@ import {
   CommandList,
 } from "@/components/ui/command";
 type AvailableUnitDto = { id: string; code: string };
+type UnitAvailabilityHint = { availableCount: number; totalCount: number };
 
 type RequestItemDto = {
   id: string;
@@ -331,7 +332,7 @@ export default function RequestsPage() {
   const [invoiceByProductId, setInvoiceByProductId] = useState<Record<string, InvoiceMeta>>({});
   const [invoiceLoadingByProductId, setInvoiceLoadingByProductId] = useState<Record<string, boolean>>({});
   const [unitLoadingByRow, setUnitLoadingByRow] = useState<Record<number, boolean>>({});
-  const [unitHintByProductId, setUnitHintByProductId] = useState<Record<string, { availableCount: number }>>({});
+  const [unitHintByProductId, setUnitHintByProductId] = useState<Record<string, UnitAvailabilityHint>>({});
   const [itemQrOpen, setItemQrOpen] = useState(false);
   const [itemQrCode, setItemQrCode] = useState<string>("");
 
@@ -474,8 +475,9 @@ export default function RequestsPage() {
     });
 
     const availableCount = Number(res.data?.availableCount ?? 0);
+    const totalCount = Number(res.data?.totalCount ?? 0);
     const units = (Array.isArray(res.data?.items) ? res.data.items : []) as AvailableUnitDto[];
-    return { availableCount, units };
+    return { availableCount, totalCount, units };
   }
 
   const getSelectedUnitCodesForProduct = useCallback(
@@ -514,12 +516,12 @@ export default function RequestsPage() {
         rowIndex,
         currentCode ? [currentCode] : []
       );
-      const { availableCount, units } = await fetchAvailableUnits({
+      const { availableCount, totalCount, units } = await fetchAvailableUnits({
         productId,
         take: 1,
         exclude: excludedCodes,
       });
-      setUnitHintByProductId((prev) => ({ ...prev, [productId]: { availableCount } }));
+      setUnitHintByProductId((prev) => ({ ...prev, [productId]: { availableCount, totalCount } }));
 
       const nextCode = units[0]?.code ? String(units[0].code) : "";
       if (!nextCode) {
@@ -554,6 +556,83 @@ export default function RequestsPage() {
     return null;
   };
 
+  const getSelectedUnitCountForProduct = useCallback(
+    (productId: string) => getSelectedUnitCodesForProduct(productId).length,
+    [getSelectedUnitCodesForProduct]
+  );
+
+  const reserveUnitsForQuantity = async (rowIndex: number) => {
+    const row = items[rowIndex];
+    if (!row?.productId) return;
+    const quantity = Math.max(1, Number(row.quantity || 1));
+    if (quantity <= 1) {
+      await autoPickUnitForRow(rowIndex, { force: true, productId: row.productId, excludeCode: row.destination || "" });
+      return;
+    }
+    if (quantity > 20) {
+      toast({
+        title: "Quantidade demasiado alta",
+        description: "A reserva automática permite até 20 unidades por linha. Divide a quantidade em mais linhas.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setUnitLoadingByRow((prev) => ({ ...prev, [rowIndex]: true }));
+    try {
+      const selectedOutsideRow = getSelectedUnitCodesForProduct(row.productId, rowIndex);
+      const currentCode = (row.destination || "").trim();
+      const keepCurrent = Boolean(currentCode);
+      const needed = keepCurrent ? quantity - 1 : quantity;
+      const excluded = keepCurrent ? [...selectedOutsideRow, currentCode] : selectedOutsideRow;
+      const { availableCount, totalCount, units } = await fetchAvailableUnits({
+        productId: row.productId,
+        take: needed,
+        exclude: excluded,
+      });
+
+      const selectedCodes = [
+        ...(keepCurrent ? [currentCode] : []),
+        ...units.map((unit) => unit.code),
+      ].filter(Boolean);
+
+      if (selectedCodes.length < quantity) {
+        toast({
+          title: "Sem unidades suficientes",
+          description: `Só existem ${selectedCodes.length} unidade(s) disponíveis para reservar nesta quantidade.`,
+          variant: "destructive",
+        });
+        setUnitHintByProductId((prev) => ({ ...prev, [row.productId]: { availableCount, totalCount } }));
+        return;
+      }
+
+      const expandedRows = selectedCodes.slice(0, quantity).map((code) => ({
+        ...row,
+        quantity: 1,
+        destination: code,
+      }));
+
+      setItems((prev) => [
+        ...prev.slice(0, rowIndex),
+        ...expandedRows,
+        ...prev.slice(rowIndex + 1),
+      ]);
+      setUnitHintByProductId((prev) => ({ ...prev, [row.productId]: { availableCount, totalCount } }));
+      toast({
+        title: "Unidades reservadas",
+        description: `${quantity} QR/unidades foram preenchidos em linhas separadas.`,
+      });
+    } catch (error: any) {
+      toast({
+        title: "Falha ao reservar",
+        description: error?.response?.data?.error || "Não foi possível reservar unidades automaticamente.",
+        variant: "destructive",
+      });
+    } finally {
+      setUnitLoadingByRow((prev) => ({ ...prev, [rowIndex]: false }));
+    }
+  };
+
   const productById = useMemo(() => {
     const map = new Map<string, Product>();
     for (const p of allProducts as any[]) {
@@ -581,10 +660,10 @@ export default function RequestsPage() {
         const results = await Promise.all(
           missing.map(async (productId) => {
             try {
-              const { availableCount } = await fetchAvailableUnits({ productId, take: 1 });
-              return [productId, { availableCount }] as const;
+              const { availableCount, totalCount } = await fetchAvailableUnits({ productId, take: 1 });
+              return [productId, { availableCount, totalCount }] as const;
             } catch {
-              return [productId, { availableCount: 0 }] as const;
+              return [productId, { availableCount: 0, totalCount: 0 }] as const;
             }
           })
         );
@@ -2254,6 +2333,12 @@ export default function RequestsPage() {
                               if (!q) return true;
                               return `${p.name} ${p.sku}`.toLowerCase().includes(q);
                             });
+                            const unitHint = it.productId ? unitHintByProductId[it.productId] : undefined;
+                            const selectedUnitCount = it.productId ? getSelectedUnitCountForProduct(it.productId) : 0;
+                            const isUnitTracked = Boolean(unitHint && unitHint.totalCount > 0);
+                            const hasReservedCode = Boolean((it.destination || "").trim());
+                            const quantityValue = Math.max(1, Number(it.quantity || 1));
+                            const availableAfterDraft = Math.max(0, (unitHint?.availableCount ?? 0) - selectedUnitCount);
                             return (
                               <article key={`item-wizard-${idx}`} className={`rounded-2xl border p-4 shadow-sm ${wizardSubmitted && (!it.productId || it.quantity <= 0) ? "border-rose-400" : "border-border/60"} bg-[hsl(var(--surface-1)/0.8)]`}>
                                 <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
@@ -2285,10 +2370,33 @@ export default function RequestsPage() {
                                         ))}
                                       </SelectContent>
                                     </Select>
+                                    {it.productId && isUnitTracked ? (
+                                      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-muted-foreground">
+                                        <Badge variant="outline" className="border-primary/30 text-primary">
+                                          QR
+                                        </Badge>
+                                        <span>
+                                          {availableAfterDraft} unidade(s) disponíveis, {selectedUnitCount} já escolhida(s) neste pedido
+                                        </span>
+                                      </div>
+                                    ) : null}
                                   </div>
                                   <div className="space-y-1">
                                     <div className="text-xs text-muted-foreground">Quantidade</div>
                                     <Input type="number" min={1} value={it.quantity} onChange={(e) => setItems((prev) => prev.map((p, pIdx) => (pIdx === idx ? { ...p, quantity: Number(e.target.value) } : p)))} className="h-10 rounded-xl" />
+                                    {isUnitTracked && quantityValue > 1 ? (
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        className="mt-2 w-full justify-center"
+                                        disabled={Boolean(unitLoadingByRow[idx])}
+                                        onClick={() => void reserveUnitsForQuantity(idx)}
+                                      >
+                                        <QrCode className="h-4 w-4" />
+                                        Reservar automaticamente {quantityValue} unidades
+                                      </Button>
+                                    ) : null}
                                   </div>
                                   <div className="space-y-1">
                                     <div className="text-xs text-muted-foreground">Unidade</div>
@@ -2314,6 +2422,15 @@ export default function RequestsPage() {
                                         <QrCode className="h-4 w-4" />
                                       </Button>
                                     </div>
+                                    {hasReservedCode ? (
+                                      <div className="mt-2 rounded-lg border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-300">
+                                        QR reservado nesta linha: <span className="font-mono font-semibold">{it.destination}</span>
+                                      </div>
+                                    ) : isUnitTracked ? (
+                                      <div className="mt-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+                                        Ainda sem QR reservado nesta linha.
+                                      </div>
+                                    ) : null}
                                   </div>
                                   <div className="space-y-1 md:col-span-2">
                                     <div className="text-xs text-muted-foreground">Notas</div>

@@ -48,14 +48,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const prismaAny = prisma as any;
     const reservedCodes = await getReservedUnitCodes(prismaAny, { tenantId, productId });
     const excludedCodes = mergeExcludedUnitCodes(exclude, reservedCodes);
+    const reservedOnlyCodes = mergeExcludedUnitCodes([], reservedCodes);
 
-    const [availableCount, units] = await prisma.$transaction([
+    const [totalCount, availableCount, units] = await prisma.$transaction([
+      prismaAny.productUnit.count({
+        where: {
+          tenantId,
+          productId,
+        },
+      }),
       prismaAny.productUnit.count({
         where: {
           tenantId,
           productId,
           status: "IN_STOCK",
-          ...(excludedCodes.length ? { code: { notIn: excludedCodes } } : {}),
+          ...(reservedOnlyCodes.length ? { code: { notIn: reservedOnlyCodes } } : {}),
         },
       }),
       prismaAny.productUnit.findMany({
@@ -72,6 +79,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     ]);
 
     return res.status(200).json({
+      totalCount,
       availableCount,
       items: units.map((u: any) => ({ id: u.id, code: u.code })),
     });

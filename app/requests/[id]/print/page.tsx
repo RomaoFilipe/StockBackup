@@ -179,7 +179,7 @@ export default function PrintRequestPage() {
         codes.map(async (code) => {
           try {
             const dataUrl = await QRCode.toDataURL(code, {
-              width: 80,
+              width: 128,
               margin: 1,
               color: { dark: "#000000", light: "#FFFFFF" },
             });
@@ -275,10 +275,10 @@ export default function PrintRequestPage() {
           <Image
             src={qr}
             alt={`QR ${code}`}
-            width={50}
-            height={50}
+            width={74}
+            height={74}
             unoptimized
-            style={{ width: 50, height: 50, imageRendering: "pixelated" }}
+            style={{ width: 74, height: 74, imageRendering: "pixelated" }}
           />
         ) : null}
         <span title={code}>{shortCode}</span>
@@ -586,17 +586,19 @@ export default function PrintRequestPage() {
           display: flex;
           flex-direction: column;
           align-items: center;
-          gap: 2px;
-          color: #475569;
+          gap: 3px;
+          color: #0f172a;
           font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-          font-size: 7px;
+          font-size: 7.5px;
+          font-weight: 850;
           line-height: 1.2;
-          max-width: 58px;
+          max-width: 92px;
+          margin: 0 auto;
         }
 
         .item-qr span {
           display: block;
-          max-width: 58px;
+          max-width: 92px;
           overflow: hidden;
           text-overflow: ellipsis;
           white-space: nowrap;
@@ -862,8 +864,7 @@ export default function PrintRequestPage() {
                       <th style={{ width: 70 }}>Unid.</th>
                       <th style={{ width: 60 }}>Qtd</th>
                       <th style={{ width: 92 }}>Referência</th>
-                      <th style={{ width: 70 }}>QR</th>
-                      <th>Observações</th>
+                      <th style={{ width: 112, textAlign: "center" }}>QR unidade</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -878,7 +879,6 @@ export default function PrintRequestPage() {
                         <td>{it.quantity}</td>
                         <td>{it.reference || ""}</td>
                         <td>{renderItemQr(it.destination)}</td>
-                        <td>{it.notes || ""}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -893,8 +893,7 @@ export default function PrintRequestPage() {
                       <th style={{ width: 70 }}>Unid.</th>
                       <th style={{ width: 60 }}>Qtd</th>
                       <th style={{ width: 92 }}>Referência</th>
-                      <th style={{ width: 70 }}>QR</th>
-                      <th>Observações</th>
+                      <th style={{ width: 112, textAlign: "center" }}>QR unidade</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -909,7 +908,6 @@ export default function PrintRequestPage() {
                         <td>{it.quantity}</td>
                         <td>{it.reference || ""}</td>
                         <td>{renderItemQr(it.destination)}</td>
-                        <td>{it.notes || ""}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -924,8 +922,7 @@ export default function PrintRequestPage() {
                   <th style={{ width: 70 }}>Unid.</th>
                   <th style={{ width: 60 }}>Qtd</th>
                   <th style={{ width: 92 }}>Referência</th>
-                  <th style={{ width: 70 }}>QR</th>
-                  <th>Observações</th>
+                  <th style={{ width: 112, textAlign: "center" }}>QR unidade</th>
                 </tr>
               </thead>
               <tbody>
@@ -940,7 +937,6 @@ export default function PrintRequestPage() {
                     <td>{it.quantity}</td>
                     <td>{it.reference || ""}</td>
                     <td>{renderItemQr(it.destination)}</td>
-                    <td>{it.notes || ""}</td>
                   </tr>
                 ))}
               </tbody>
