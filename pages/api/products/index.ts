@@ -64,6 +64,7 @@ export default async function handler(
           id: product.id,
           name: product.name,
           description: product.description,
+          imageUrl: (product as any).imageUrl ?? null,
           sku: product.sku,
           price: product.price,
           quantity: Number(product.quantity),
@@ -97,6 +98,7 @@ export default async function handler(
           createdAt: product.createdAt.toISOString(),
           updatedAt: product.updatedAt.toISOString(),
           description: product.description ?? null,
+          imageUrl: (product as any).imageUrl ?? null,
           category: product.category?.name || "Unknown",
           supplier: product.supplier?.name || "Unknown",
         }));
@@ -113,6 +115,7 @@ export default async function handler(
           id,
           name,
           description,
+          imageUrl,
           sku,
           price,
           quantity,
@@ -149,6 +152,7 @@ export default async function handler(
           data: {
             name,
             description: description ?? null,
+            imageUrl: typeof imageUrl === "string" ? imageUrl : undefined,
             sku,
             price,
             quantity: BigInt(quantity) as any, // Convert to BigInt for database
@@ -164,6 +168,7 @@ export default async function handler(
           id: updatedProduct.id,
           name: updatedProduct.name,
           description: updatedProduct.description,
+          imageUrl: (updatedProduct as any).imageUrl ?? null,
           sku: updatedProduct.sku,
           price: updatedProduct.price,
           quantity: Number(updatedProduct.quantity), // Convert BigInt to Number

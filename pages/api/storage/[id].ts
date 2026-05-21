@@ -36,9 +36,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       res.setHeader("Content-Length", String(file.sizeBytes));
 
       const downloadName = String(file.originalName).replace(/[\r\n\0]/g, " ");
+      const disposition = file.mimeType.startsWith("image/") ? "inline" : "attachment";
       res.setHeader(
         "Content-Disposition",
-        `attachment; filename="${encodeURIComponent(downloadName)}"`
+        `${disposition}; filename="${encodeURIComponent(downloadName)}"`
       );
 
       const stream = fs.createReadStream(absPath);

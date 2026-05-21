@@ -2,6 +2,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
@@ -113,6 +114,7 @@ export default function AddProductDialog({
   const dialogCloseRef = useRef<HTMLButtonElement | null>(null);
   const [attachment, setAttachment] = useState<File | null>(null);
   const [requestAttachment, setRequestAttachment] = useState<File | null>(null);
+  const [productImage, setProductImage] = useState<File | null>(null);
   const [createdInvoiceId, setCreatedInvoiceId] = useState<string | null>(null);
   const [createdUnitPreviewCodes, setCreatedUnitPreviewCodes] = useState<string[]>([]);
   const [origin, setOrigin] = useState("");
@@ -177,6 +179,7 @@ export default function AddProductDialog({
       setSelectedCategory(selectedProduct.categoryId || "");
       setSelectedSupplier(selectedProduct.supplierId || "");
       setIsPatrimonializable(Boolean((selectedProduct as any).isPatrimonializable));
+      setProductImage(null);
     } else {
       // Reset form to default values for adding a new product
       reset({
@@ -195,6 +198,7 @@ export default function AddProductDialog({
       setSelectedSupplier("");
       setAttachment(null);
       setRequestAttachment(null);
+      setProductImage(null);
       setCreatedInvoiceId(null);
       setCreatedUnitPreviewCodes([]);
       setRequestingServiceId("");
@@ -206,6 +210,16 @@ export default function AddProductDialog({
     if (quantity > 20) return "Available";
     if (quantity > 0 && quantity <= 20) return "Stock Low";
     return "Stock Out";
+  };
+
+  const uploadProductImage = async (productId: string, image: File | null) => {
+    if (!image) return;
+    const form = new FormData();
+    form.append("file", image);
+    await fetch(`/api/products/${productId}/image`, {
+      method: "POST",
+      body: form,
+    });
   };
 
   const onSubmit = async (data: ProductFormData) => {
@@ -253,6 +267,8 @@ export default function AddProductDialog({
         setCreatedInvoiceId(created.invoice.id);
         setCreatedUnitPreviewCodes(created.units.previewCodes || []);
 
+        await uploadProductImage(created.product.id, productImage);
+
         // Upload invoice attachment (optional) linked to invoiceId
         if (attachment) {
           const form = new FormData();
@@ -299,11 +315,13 @@ export default function AddProductDialog({
           status,
           categoryId: selectedCategory,
           userId: selectedProduct.userId,
+          imageUrl: selectedProduct.imageUrl ?? null,
           isPatrimonializable,
         };
 
         const result = await updateProduct(productToUpdate);
         if (result.success) {
+          await uploadProductImage(selectedProduct.id, productImage);
           toast({
             title: "Product Updated Successfully!",
             description: `"${data.productName}" has been updated in your inventory.`,
@@ -501,6 +519,18 @@ export default function AddProductDialog({
                       </select>
                     </div>
                     <div className="space-y-1 sm:col-span-2">
+                      <label className="text-sm font-medium">Imagem do produto</label>
+                      <input
+                        type="file"
+                        accept="image/png,image/jpeg,image/webp"
+                        className="block w-full text-sm"
+                        onChange={(e) => setProductImage(e.target.files?.[0] ?? null)}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Foto principal para identificar rapidamente o material em stock.
+                      </p>
+                    </div>
+                    <div className="space-y-1 sm:col-span-2">
                       <label className="text-sm font-medium">Tipo de bem</label>
                       <div className="flex items-center gap-2 rounded-md border border-input px-3 py-2">
                         <input
@@ -641,6 +671,28 @@ export default function AddProductDialog({
                       </option>
                     ))}
                   </select>
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-sm font-medium">Imagem do produto</label>
+                  {selectedProduct.imageUrl ? (
+                    <Image
+                      src={selectedProduct.imageUrl}
+                      alt={selectedProduct.name}
+                      width={96}
+                      height={96}
+                      className="mt-2 h-24 w-24 rounded-lg border object-cover"
+                      unoptimized
+                    />
+                  ) : null}
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    className="mt-2 block w-full text-sm"
+                    onChange={(e) => setProductImage(e.target.files?.[0] ?? null)}
+                  />
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Atualiza a foto principal usada na lista e no detalhe.
+                  </p>
                 </div>
                 <div className="sm:col-span-2">
                   <label className="block text-sm font-medium">Tipo de bem</label>

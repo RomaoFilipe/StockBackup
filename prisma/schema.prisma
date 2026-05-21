@@ -267,6 +267,7 @@ model Product {
   id                  String   @id @default(uuid()) @db.Uuid
   name                String
   description         String?
+  imageUrl            String?
   sku                 String   @unique
   price               Float
   quantity            BigInt

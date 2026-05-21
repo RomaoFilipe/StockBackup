@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import Image from "next/image";
 import { Product } from "@/app/types";
 import { useAuth } from "../authContext";
 import { useRouter } from "next/navigation";
@@ -51,6 +52,32 @@ function statusMeta(quantity: number) {
     label: "Sem stock",
     className: "border-rose-500/25 bg-rose-500/10 text-rose-700 dark:text-rose-300",
   };
+}
+
+function ProductThumb({ product, size = "sm" }: { product: Product; size?: "sm" | "lg" }) {
+  const cls =
+    size === "lg"
+      ? "h-16 w-16 rounded-lg"
+      : "h-10 w-10 rounded-md";
+
+  if (product.imageUrl) {
+    return (
+      <Image
+        src={product.imageUrl}
+        alt={product.name}
+        width={size === "lg" ? 64 : 40}
+        height={size === "lg" ? 64 : 40}
+        className={`${cls} shrink-0 border border-border/70 object-cover bg-muted`}
+        unoptimized
+      />
+    );
+  }
+
+  return (
+    <div className={`${cls} flex shrink-0 items-center justify-center border border-dashed border-border/80 bg-muted/40`}>
+      <PackageSearch className={size === "lg" ? "h-6 w-6 text-muted-foreground" : "h-4 w-4 text-muted-foreground"} />
+    </div>
+  );
 }
 
 export const ProductTable = React.memo(function ProductTable({
@@ -235,9 +262,12 @@ export const ProductTable = React.memo(function ProductTable({
                 className="rounded-lg border border-border/80 bg-[hsl(var(--surface-1)/0.94)] p-4 shadow-sm transition-colors hover:border-primary/35 hover:bg-[hsl(var(--surface-2)/0.38)]"
               >
                 <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <h3 className="truncate text-base font-semibold">{product.name}</h3>
-                    <p className="text-xs text-muted-foreground">SKU {product.sku}</p>
+                  <div className="flex min-w-0 items-start gap-3">
+                    <ProductThumb product={product} size="lg" />
+                    <div className="min-w-0">
+                      <h3 className="truncate text-base font-semibold">{product.name}</h3>
+                      <p className="text-xs text-muted-foreground">SKU {product.sku}</p>
+                    </div>
                   </div>
                   <ProductDropDown row={{ original: product }} />
                 </div>
@@ -286,7 +316,7 @@ export const ProductTable = React.memo(function ProductTable({
                 <th className="h-[var(--table-head-h)] px-[var(--table-cell-px)] text-left">
                   <Checkbox checked={allPageSelected} onCheckedChange={(v) => togglePage(Boolean(v))} />
                 </th>
-                <th className="h-[var(--table-head-h)] px-[var(--table-cell-px)] text-left">Nome</th>
+                <th className="h-[var(--table-head-h)] px-[var(--table-cell-px)] text-left">Produto</th>
                 <th className="h-[var(--table-head-h)] px-[var(--table-cell-px)] text-left">SKU</th>
                 <th className="h-[var(--table-head-h)] px-[var(--table-cell-px)] text-left">Qtd.</th>
                 <th className="h-[var(--table-head-h)] px-[var(--table-cell-px)] text-left">Preço</th>
@@ -322,13 +352,16 @@ export const ProductTable = React.memo(function ProductTable({
                       />
                     </td>
                     <td className="px-[var(--table-cell-px)] py-[var(--table-cell-py)]">
-                      <button
-                        type="button"
-                        className="font-medium text-left hover:underline"
-                        onClick={() => router.push(`/products/${product.id}`)}
-                      >
-                        {product.name}
-                      </button>
+                      <div className="flex items-center gap-3">
+                        <ProductThumb product={product} />
+                        <button
+                          type="button"
+                          className="font-medium text-left hover:underline"
+                          onClick={() => router.push(`/products/${product.id}`)}
+                        >
+                          {product.name}
+                        </button>
+                      </div>
                     </td>
                     <td className="px-[var(--table-cell-px)] py-[var(--table-cell-py)] font-mono text-xs">{product.sku}</td>
                     <td className="px-[var(--table-cell-px)] py-[var(--table-cell-py)]">

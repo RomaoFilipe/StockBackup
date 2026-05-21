@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
+import Image from "next/image";
 import AuthenticatedLayout from "@/app/components/AuthenticatedLayout";
 import axiosInstance from "@/utils/axiosInstance";
 import { Badge } from "@/components/ui/badge";
@@ -44,6 +45,7 @@ type ProductDetails = {
   id: string;
   name: string;
   description?: string | null;
+  imageUrl?: string | null;
   sku: string;
   price: number;
   quantity: number;
@@ -956,16 +958,34 @@ export default function ProductDetailsPage() {
 
             <TabsContent value="details" className="space-y-4">
               <SectionCard title="Detalhes do produto" description="Informação base e metadados.">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-                  <div><span className="font-medium">SKU:</span> {product.sku}</div>
-                  <div><span className="font-medium">Preço:</span> {formatEur(product.price)}</div>
-                  <div><span className="font-medium">Quantidade:</span> {product.quantity}</div>
-                  <div><span className="font-medium">Estado:</span> {productStatusLabel(product.status)}</div>
-                  <div><span className="font-medium">Categoria:</span> {product.category || "—"}</div>
-                  <div><span className="font-medium">Fornecedor:</span> {product.supplier || "—"}</div>
-                  <div><span className="font-medium">Criado em:</span> {new Date(product.createdAt).toLocaleString("pt-PT")}</div>
-                  <div><span className="font-medium">Última atualização:</span> {new Date(product.updatedAt).toLocaleString("pt-PT")}</div>
-                  <div className="md:col-span-2"><span className="font-medium">Descrição:</span> {product.description?.trim() ? product.description : "—"}</div>
+                <div className="grid gap-4 lg:grid-cols-[220px_1fr]">
+                  <div className="overflow-hidden rounded-xl border border-border/70 bg-muted/30">
+                    {product.imageUrl ? (
+                      <Image
+                        src={product.imageUrl}
+                        alt={product.name}
+                        width={220}
+                        height={220}
+                        className="aspect-square w-full object-cover"
+                        unoptimized
+                      />
+                    ) : (
+                      <div className="flex aspect-square w-full items-center justify-center text-sm text-muted-foreground">
+                        Sem imagem
+                      </div>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-1 gap-3 text-sm md:grid-cols-2">
+                    <div><span className="font-medium">SKU:</span> {product.sku}</div>
+                    <div><span className="font-medium">Preço:</span> {formatEur(product.price)}</div>
+                    <div><span className="font-medium">Quantidade:</span> {product.quantity}</div>
+                    <div><span className="font-medium">Estado:</span> {productStatusLabel(product.status)}</div>
+                    <div><span className="font-medium">Categoria:</span> {product.category || "—"}</div>
+                    <div><span className="font-medium">Fornecedor:</span> {product.supplier || "—"}</div>
+                    <div><span className="font-medium">Criado em:</span> {new Date(product.createdAt).toLocaleString("pt-PT")}</div>
+                    <div><span className="font-medium">Última atualização:</span> {new Date(product.updatedAt).toLocaleString("pt-PT")}</div>
+                    <div className="md:col-span-2"><span className="font-medium">Descrição:</span> {product.description?.trim() ? product.description : "—"}</div>
+                  </div>
                 </div>
               </SectionCard>
 
