@@ -158,6 +158,13 @@ const navSections: NavSection[] = [
         requiredAnyPermissions: ["assets.manage", "assets.view"],
       },
       {
+        id: "unit-scanner",
+        label: "Scanner QR",
+        href: "/units/scan",
+        icon: QrCode,
+        requiredAnyPermissions: ["assets.manage", "assets.view"],
+      },
+      {
         id: "reservations",
         label: "Reservas QR",
         href: "/units/reservations",
